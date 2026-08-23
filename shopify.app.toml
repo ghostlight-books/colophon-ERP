@@ -1,7 +1,7 @@
 # Shopify app configuration for the existing Colophon ERP backend.
 # Set application_url and redirect_urls when the ERP has a public HTTPS URL.
 client_id = "71873a83f3e3525349a17c3b941cf0cf"
-application_url = "https://example.com"
+application_url = "https://colophon-api.onrender.com"
 embedded = true
 name = "Colophon ERP"
 
@@ -24,7 +24,7 @@ api_version = "2026-01"
   topics = [ "app/uninstalled" ]
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth/shopify/callback" ]
+redirect_urls = [ "https://colophon-api.onrender.com/api/auth/shopify/callback" ]
 
 [build]
 include_config_on_deploy = true
