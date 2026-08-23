@@ -28,7 +28,6 @@ type ShopifyProductRow = {
 
 function ShopifyPage(): JSX.Element {
   const [storeUrl, setStoreUrl] = useState("https://example-store.myshopify.com");
-  const [accessToken, setAccessToken] = useState("");
   const [syncInventory, setSyncInventory] = useState(true);
   const [syncOrders, setSyncOrders] = useState(true);
   const [message, setMessage] = useState("Loading Shopify connection...");
@@ -75,7 +74,7 @@ function ShopifyPage(): JSX.Element {
         headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" },
         body: JSON.stringify({
           storeUrl,
-          config: { accessToken },
+          config: {},
           syncInventory,
           syncOrders,
         }),
@@ -100,6 +99,14 @@ function ShopifyPage(): JSX.Element {
     } finally {
       setLoading(false);
     }
+  };
+
+  const connectShopify = (): void => {
+    if (!storeUrl.trim()) {
+      setMessage("Enter your Shopify store domain first.");
+      return;
+    }
+    window.location.href = `${API_BASE}/auth/shopify/install?storeId=ghostlight-demo&shop=${encodeURIComponent(storeUrl)}`;
   };
 
   const syncProducts = async (): Promise<void> => {
@@ -170,16 +177,13 @@ function ShopifyPage(): JSX.Element {
               Shopify store URL
               <input value={storeUrl} onChange={(event) => setStoreUrl(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm focus:border-sky-500" placeholder="https://your-store.myshopify.com" />
             </label>
-            <label className="grid gap-1 text-sm text-slate-600">
-              Admin access token
-              <input type="password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm focus:border-sky-500" placeholder="Shopify admin token" />
-            </label>
+            <div className="flex items-end"><button type="button" onClick={connectShopify} className="h-11 rounded-xl bg-sky-600 px-4 text-sm font-semibold text-white">Connect Shopify</button></div>
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={syncInventory} onChange={(event) => setSyncInventory(event.target.checked)} /> Inventory sync</label>
             <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={syncOrders} onChange={(event) => setSyncOrders(event.target.checked)} /> Order sync</label>
-            <button type="button" onClick={() => void saveConnection()} disabled={loading} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{loading ? "Saving..." : "Save connector"}</button>
+            <button type="button" onClick={connectShopify} disabled={loading} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">Connect Shopify</button>
           </div>
         </div>
 

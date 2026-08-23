@@ -13,6 +13,7 @@ import { createSquareCheckoutLink, isSquareConfigured } from "./services/squareP
 import { executeDropshipSettlement } from "./services/networkSettlement.service.js";
 import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service.js";
 import { fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncStoreInventory, type EcommercePlatform } from "./services/ecommerce.service.js";
+import { completeShopifyInstall, createShopifyInstallUrl } from "./services/shopifyOAuth.service.js";
 
 type OpsConnector = {
   key: string;
@@ -429,6 +430,28 @@ export function createApp(): express.Express {
       res.json(await signIn(email, password));
     } catch (error) {
       next(error);
+    }
+  });
+
+  app.get("/api/auth/shopify/install", (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "";
+      const shop = typeof req.query.shop === "string" ? req.query.shop : "";
+      if (!storeId || !shop) { res.status(400).json({ error: "storeId and shop are required." }); return; }
+      res.redirect(createShopifyInstallUrl(storeId, shop));
+    } catch (error) { next(error); }
+  });
+
+  app.get("/api/auth/shopify/callback", async (req, res) => {
+    const code = typeof req.query.code === "string" ? req.query.code : "";
+    const state = typeof req.query.state === "string" ? req.query.state : "";
+    const shop = typeof req.query.shop === "string" ? req.query.shop : "";
+    try {
+      await completeShopifyInstall(code, state, shop);
+      res.redirect(`${env.CLIENT_APP_URL.replace(/\/$/, "")}/shopify?connected=1`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "Shopify authorization failed.";
+      res.redirect(`${env.CLIENT_APP_URL.replace(/\/$/, "")}/shopify?error=${encodeURIComponent(reason)}`);
     }
   });
 

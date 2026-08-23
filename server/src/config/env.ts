@@ -12,6 +12,9 @@ const envSchema = z.object({
   CREDENTIAL_ENCRYPTION_KEY: z.string().min(16).optional(),
   TENANT_BASE_DOMAIN: z.string().default("localhost"),
   ADMIN_MASTER_KEY: z.string().min(16).optional(),
+  SHOPIFY_API_KEY: z.string().optional(),
+  SHOPIFY_API_SECRET: z.string().optional(),
+  SHOPIFY_APP_URL: z.string().url().default("https://colophon-api.onrender.com"),
 });
 
 export const env = envSchema.parse(process.env);
