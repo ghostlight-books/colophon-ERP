@@ -58,9 +58,11 @@ async function fetchAbeBooksPrice(isbn: string): Promise<number | null> {
       lastRequestAt = Date.now();
       if (response.status === 403 || response.status === 429) {
         blockedUntil = Date.now() + BACKOFF_MS;
+        console.warn(`AbeBooks request blocked with status ${response.status}`);
         return;
       }
       if (!response.ok) {
+        console.warn(`AbeBooks request failed with status ${response.status}`);
         return;
       }
 
@@ -68,8 +70,9 @@ async function fetchAbeBooksPrice(isbn: string): Promise<number | null> {
       if (result !== null) {
         priceCache.set(isbn, { price: result, expiresAt: Date.now() + PRICE_CACHE_TTL_MS });
       }
-    } catch {
+    } catch (error) {
       lastRequestAt = Date.now();
+      console.warn("AbeBooks request error", error instanceof Error ? error.message : error);
     }
   });
   requestQueue = run.then(() => undefined, () => undefined);

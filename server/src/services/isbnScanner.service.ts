@@ -418,7 +418,8 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
     };
     await saveToCache(result);
     return result;
-  } catch {
+  } catch (error) {
+    console.error("ISBN lookup failed", { isbn: normalized, error: error instanceof Error ? error.message : error });
     return null;
   }
 }

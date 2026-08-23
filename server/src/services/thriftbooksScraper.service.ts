@@ -101,9 +101,11 @@ async function fetchThriftbooksDetails(isbn: string): Promise<ThriftbooksDetails
       lastRequestAt = Date.now();
       if (response.status === 403 || response.status === 429) {
         blockedUntil = Date.now() + BACKOFF_MS;
+        console.warn(`ThriftBooks request blocked with status ${response.status}`);
         return;
       }
       if (!response.ok) {
+        console.warn(`ThriftBooks request failed with status ${response.status}`);
         return;
       }
 
@@ -114,8 +116,9 @@ async function fetchThriftbooksDetails(isbn: string): Promise<ThriftbooksDetails
       if (result.price !== null) {
         priceCache.set(isbn, { price: result.price, expiresAt: Date.now() + PRICE_CACHE_TTL_MS });
       }
-    } catch {
+    } catch (error) {
       lastRequestAt = Date.now();
+      console.warn("ThriftBooks request error", error instanceof Error ? error.message : error);
     }
   });
   requestQueue = run.then(() => undefined, () => undefined);
