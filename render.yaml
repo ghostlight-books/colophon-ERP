@@ -26,7 +26,7 @@ services:
       mountPath: /var/data
       sizeGB: 1
 
-  - type: static
+  - type: static_site
     name: colophon-client
     buildCommand: npm ci && npm run --workspace @colophon/client build
     staticPublishPath: client/dist
