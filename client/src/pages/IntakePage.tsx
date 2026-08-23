@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import SurfaceCard from "../components/ui/SurfaceCard";
-import { getIntakeContainer, lookupBookByIsbn, receiveInventory, type BookCondition, type BookLookup, type IntakeContainer } from "../services/intake.service";
+import { getIntakeContainer, lookupBookByIsbn, receiveInventory, searchBooks, type BookCondition, type BookLookup, type BookSearchResult, type IntakeContainer } from "../services/intake.service";
 
 type ScanHistoryItem = {
   id: string;
@@ -73,6 +73,10 @@ function IntakePage(): JSX.Element {
   const [sessionActive] = useState(true);
   const [message, setMessage] = useState("Ready to scan or enter an ISBN.");
   const [barcode, setBarcode] = useState("");
+  const [searchTitle, setSearchTitle] = useState("");
+  const [searchAuthor, setSearchAuthor] = useState("");
+  const [searchResults, setSearchResults] = useState<BookSearchResult[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const scannerBufferRef = useRef("");
   const scannerTimerRef = useRef<number | null>(null);
@@ -180,34 +184,38 @@ function IntakePage(): JSX.Element {
     }
   };
 
-  const handleBarcodeLookup = async (): Promise<void> => {
+  const handleBarcodeLookup = async (value = barcode): Promise<void> => {
     if (lookupBusy) {
       return;
     }
 
     setLookupBusy(true);
     try {
-      const book = await lookupBookByIsbn(barcode);
+      const book = await lookupBookByIsbn(value);
       setPendingBook(book);
     } catch (error) {
-      addSessionItem({ isbn: barcode.replace(/[^0-9X]/gi, "").toUpperCase(), title: null, status: "Not added", condition: null, container: null, reason: error instanceof Error ? error.message : "Lookup failed", value: null });
+      addSessionItem({ isbn: value.replace(/[^0-9X]/gi, "").toUpperCase(), title: null, status: "Not added", condition: null, container: null, reason: error instanceof Error ? error.message : "Lookup failed", value: null });
       setMessage(error instanceof Error ? error.message : "Unable to look up this ISBN.");
     } finally {
       setLookupBusy(false);
     }
   };
 
-  useEffect(() => {
-    const normalized = barcode.replace(/[^0-9X]/gi, "").toUpperCase();
-    if (lookupBusy || (normalized.length !== 10 && normalized.length !== 13)) {
-      return undefined;
-    }
+  const handleTitleAuthorSearch = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    if (!searchTitle.trim() && !searchAuthor.trim()) return;
+    setSearchBusy(true);
+    try { setSearchResults(await searchBooks(searchTitle, searchAuthor)); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Book search failed."); }
+    finally { setSearchBusy(false); }
+  };
 
-    const timer = window.setTimeout(() => {
-      void handleBarcodeLookup();
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [barcode, lookupBusy]);
+  const handleSearchResultSelected = async (result: BookSearchResult): Promise<void> => {
+    setLookupBusy(true);
+    try { setPendingBook(await lookupBookByIsbn(result.isbn)); setSearchResults([]); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Unable to load that title."); }
+    finally { setLookupBusy(false); }
+  };
 
   useEffect(() => {
     const handleScannerKey = (event: KeyboardEvent): void => {
@@ -221,6 +229,7 @@ function IntakePage(): JSX.Element {
         scannerBufferRef.current = "";
         if (value.length === 10 || value.length === 13) {
           setBarcode(value);
+          void handleBarcodeLookup(value);
         }
         return;
       }
@@ -435,6 +444,16 @@ function IntakePage(): JSX.Element {
             >
               {cameraActive ? "Stop Camera" : "Use Camera"}
             </button>
+          </form>
+
+          <form className="mt-4 border-t border-slate-200/70 pt-4" onSubmit={(event) => void handleTitleAuthorSearch(event)}>
+            <p className="text-sm font-semibold text-slate-700">Find by title or author</p>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <input value={searchTitle} onChange={(event) => setSearchTitle(event.target.value)} placeholder="Title" aria-label="Search by title" className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400" />
+              <input value={searchAuthor} onChange={(event) => setSearchAuthor(event.target.value)} placeholder="Author" aria-label="Search by author" className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400" />
+              <button type="submit" disabled={searchBusy || (!searchTitle.trim() && !searchAuthor.trim())} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 disabled:opacity-50">{searchBusy ? "Searching..." : "Search"}</button>
+            </div>
+            {searchResults.length > 0 ? <div className="mt-3 grid gap-2">{searchResults.map((result) => <button key={result.isbn} type="button" onClick={() => void handleSearchResultSelected(result)} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2 text-left hover:border-sky-400 hover:bg-sky-50">{result.coverUrl ? <img src={result.coverUrl} alt="" className="h-12 w-9 rounded object-cover" /> : <span className="h-12 w-9 rounded bg-slate-100" />}<span className="min-w-0"><span className="block truncate text-sm font-semibold text-slate-800">{result.title}</span><span className="block text-xs text-slate-500">{result.author ?? "Author unavailable"}{result.year ? ` · ${result.year}` : ""} · {result.isbn}</span></span></button>)}</div> : null}
           </form>
 
           {cameraActive ? (

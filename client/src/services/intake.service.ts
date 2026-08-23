@@ -29,6 +29,14 @@ export type BookLookup = {
   source: "Open Library" | "ISBNdb";
 };
 
+export type BookSearchResult = {
+  isbn: string;
+  title: string;
+  author: string | null;
+  year: number | null;
+  coverUrl: string | null;
+};
+
 const rawApiBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 const API_BASE = rawApiBase.replace(/\/$/, "").replace(/\/api$/, "");
 const PROVIDER_TIMEOUT_MS = 8000;
@@ -78,6 +86,22 @@ async function request<T>(path: string): Promise<T> {
     throw new Error(`Request failed: ${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+export async function searchBooks(title: string, author: string): Promise<BookSearchResult[]> {
+  const params = new URLSearchParams({ limit: "10" });
+  if (title.trim()) params.set("title", title.trim());
+  if (author.trim()) params.set("author", author.trim());
+  const response = await fetchWithTimeout(`https://openlibrary.org/search.json?${params.toString()}`);
+  if (!response.ok) throw new Error("Book search is unavailable right now.");
+  const data = (await response.json()) as { docs?: Array<{ title?: string; author_name?: string[]; first_publish_year?: number; isbn?: string[]; cover_i?: number }> };
+  const seen = new Set<string>();
+  return (data.docs ?? []).flatMap((doc) => {
+    const isbn = doc.isbn?.find((value) => value.length === 13) ?? doc.isbn?.find((value) => value.length === 10);
+    if (!isbn || !doc.title || seen.has(isbn)) return [];
+    seen.add(isbn);
+    return [{ isbn, title: doc.title, author: doc.author_name?.[0] ?? null, year: doc.first_publish_year ?? null, coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null }];
+  });
 }
 
 async function lookupOpenLibrary(isbn: string): Promise<BookLookup> {
