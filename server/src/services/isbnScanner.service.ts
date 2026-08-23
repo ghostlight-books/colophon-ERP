@@ -325,7 +325,21 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
     const cached = await prisma.isbnLookupCache.findUnique({ where: { isbn: normalized } });
     if (cached) {
       const cachedBook = fromCache(cached);
+      const thriftbooksDetails = cachedBook.thriftbooksPrice === null
+        ? await lookupThriftbooksDetails(normalized)
+        : null;
       if (cached.publisher || cached.description || cached.seoTitle || cached.seoKeywords || cached.catalogTags) {
+        if (thriftbooksDetails?.price !== null && thriftbooksDetails?.price !== undefined) {
+          const refreshed: BookLookup = {
+            ...cachedBook,
+            thriftbooksPrice: thriftbooksDetails.price,
+            category: cachedBook.category ?? normalizeCategories([], thriftbooksDetails.category).category,
+            subcategory: cachedBook.subcategory ?? thriftbooksDetails.subcategory,
+            label: { ...cachedBook.label, price: thriftbooksDetails.price },
+          };
+          await saveToCache(refreshed);
+          return refreshed;
+        }
         return cachedBook;
       }
       const enriched = await lookupOpenLibrary(normalized).catch(() => null);
@@ -345,7 +359,12 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
         category: cachedBook.category ?? enriched.category,
         subcategory: cachedBook.subcategory ?? enriched.subcategory,
         mediaType: cachedBook.mediaType || enriched.mediaType,
-        label: { ...cachedBook.label, title: cachedBook.title ?? enriched.title },
+        thriftbooksPrice: thriftbooksDetails?.price ?? cachedBook.thriftbooksPrice,
+        label: {
+          ...cachedBook.label,
+          title: cachedBook.title ?? enriched.title,
+          price: thriftbooksDetails?.price ?? cachedBook.thriftbooksPrice,
+        },
       };
       await saveToCache(result);
       return result;

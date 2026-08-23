@@ -108,7 +108,9 @@ async function fetchThriftbooksDetails(isbn: string): Promise<ThriftbooksDetails
       }
 
       result = extractDetails(await response.text());
-      detailsCache.set(isbn, { details: result, expiresAt: Date.now() + PRICE_CACHE_TTL_MS });
+      if (result.price !== null || result.title !== null) {
+        detailsCache.set(isbn, { details: result, expiresAt: Date.now() + PRICE_CACHE_TTL_MS });
+      }
       if (result.price !== null) {
         priceCache.set(isbn, { price: result.price, expiresAt: Date.now() + PRICE_CACHE_TTL_MS });
       }
