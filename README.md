@@ -49,7 +49,7 @@ To deploy:
 6. After the first deploy, confirm the API health check at `https://<api-host>/api/health` and open the client URL.
 7. Add `SQUARE_ACCESS_TOKEN` and `SQUARE_LOCATION_ID` to the `colophon-api` service if Square payments are enabled.
 
-The API service uses `prisma migrate deploy` during Render's pre-deploy phase. The persistent disk is required because Render's default filesystem is ephemeral. The included SQLite setup is suitable for an initial single-instance deployment; move to a managed PostgreSQL database before adding multiple API instances or requiring higher availability.
+The API service runs `prisma migrate deploy` immediately before starting the server, so migrations use the same mounted disk as the running API. The persistent disk is required because Render's default filesystem is ephemeral. The included SQLite setup is suitable for an initial single-instance deployment; move to a managed PostgreSQL database before adding multiple API instances or requiring higher availability.
 
 ## Shopify app configuration
 
