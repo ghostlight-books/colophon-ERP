@@ -12,10 +12,9 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "baseUrl": ".",
     "paths": {
-      "@colophon/shared": ["packages/shared/src/index.ts"],
-      "@colophon/shared/*": ["packages/shared/src/*"]
+      "@colophon/shared": ["./packages/shared/src/index.ts"],
+      "@colophon/shared/*": ["./packages/shared/src/*"]
     }
   }
 }
