@@ -1,7 +1,7 @@
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 
-import { prisma } from "../config/database";
+import { prisma } from "../config/database.js";
 
 const scrypt = promisify(scryptCallback);
 const SESSION_DAYS = 30;

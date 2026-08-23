@@ -1,5 +1,5 @@
-import { prisma } from "../config/database";
-import { decryptSecret, encryptSecret } from "./storeShipping.service";
+import { prisma } from "../config/database.js";
+import { decryptSecret, encryptSecret } from "./storeShipping.service.js";
 
 export type EcommercePlatform = "shopify" | "woocommerce";
 type IntegrationConfig = { accessToken?: string; consumerKey?: string; consumerSecret?: string };

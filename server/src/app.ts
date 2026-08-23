@@ -2,17 +2,17 @@ import cors from "cors";
 import express from "express";
 import type { Prisma } from "@prisma/client";
 
-import { errorMiddleware } from "./middleware/error.middleware";
-import { env } from "./config/env";
-import { requestLogger } from "./middleware/requestLogger";
-import { requireSuperAdmin, tenantContext } from "./middleware/tenantContext";
-import { createStoreImpersonationSession, createUser, signIn } from "./services/auth.service";
-import { prisma } from "./config/database";
-import { lookupBookByIsbn, pullOpenLibraryMetadata } from "./services/isbnScanner.service";
-import { createSquareCheckoutLink, isSquareConfigured } from "./services/squarePayment.service";
-import { executeDropshipSettlement } from "./services/networkSettlement.service";
-import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service";
-import { fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncStoreInventory, type EcommercePlatform } from "./services/ecommerce.service";
+import { errorMiddleware } from "./middleware/error.middleware.js";
+import { env } from "./config/env.js";
+import { requestLogger } from "./middleware/requestLogger.js";
+import { requireSuperAdmin, tenantContext } from "./middleware/tenantContext.js";
+import { createStoreImpersonationSession, createUser, signIn } from "./services/auth.service.js";
+import { prisma } from "./config/database.js";
+import { lookupBookByIsbn, pullOpenLibraryMetadata } from "./services/isbnScanner.service.js";
+import { createSquareCheckoutLink, isSquareConfigured } from "./services/squarePayment.service.js";
+import { executeDropshipSettlement } from "./services/networkSettlement.service.js";
+import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service.js";
+import { fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncStoreInventory, type EcommercePlatform } from "./services/ecommerce.service.js";
 
 type OpsConnector = {
   key: string;

@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 
-import { env } from "../config/env";
+import { env } from "../config/env.js";
 
 type CreateCheckoutInput = {
   amountCents: number;

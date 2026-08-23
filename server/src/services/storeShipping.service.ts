@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
-import { env } from "../config/env";
-import { prisma } from "../config/database";
+import { env } from "../config/env.js";
+import { prisma } from "../config/database.js";
 
 function encryptionKey(): Buffer {
   if (!env.CREDENTIAL_ENCRYPTION_KEY) {

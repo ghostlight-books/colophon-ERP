@@ -1,5 +1,5 @@
-import { prisma } from "../config/database";
-import { lookupThriftbooksDetails } from "./thriftbooksScraper.service";
+import { prisma } from "../config/database.js";
+import { lookupThriftbooksDetails } from "./thriftbooksScraper.service.js";
 
 const PROVIDER_TIMEOUT_MS = 8000;
 const skuSequences = new Map<string, number>();

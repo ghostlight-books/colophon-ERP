@@ -1,3 +1,3 @@
-import { prisma } from "@colophon/database/src/client";
+import { prisma } from "@colophon/database";
 
 export { prisma };

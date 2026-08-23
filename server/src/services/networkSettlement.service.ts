@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { prisma } from "../config/database";
+import { prisma } from "../config/database.js";
 
 export type DropshipOrderInput = {
   isbn: string;

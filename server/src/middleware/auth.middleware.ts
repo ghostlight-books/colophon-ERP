@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 
-import { resolveSession } from "../services/auth.service";
+import { resolveSession } from "../services/auth.service.js";
 
 export async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
   const header = req.headers.authorization;
