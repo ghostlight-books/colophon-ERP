@@ -1,0 +1,426 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Book {
+  id             String          @id @default(uuid())
+  isbn13         String          @unique
+  title          String
+  author         String
+  publisher      String?
+  publishedYear  Int?
+  listPriceCents Int
+  genre          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  inventoryItems InventoryItem[]
+}
+
+model IsbnLookupCache {
+  id               String   @id @default(uuid())
+  isbn             String   @unique
+  title            String?
+  author           String?
+  publisher        String?
+  description      String?
+  seoKeywords      String?
+  seoTitle         String?
+  seoDescription   String?
+  catalogTags      String?
+  coverUrl         String?
+  quantityOnHand   Int      @default(0)
+  thriftbooksPrice Float?
+  listPrice        Float?
+  condition        String?
+  container        String?
+  category         String?
+  subcategory      String?
+  sku              String
+  labelTitle       String?
+  source           String
+  mediaType        String   @default("Book")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  scanEvents       ScanEvent[]
+  storeId          String?
+  store            Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([sku])
+}
+
+model ScanEvent {
+  id               String           @id @default(uuid())
+  isbn             String
+  inventoryId      String
+  inventory        IsbnLookupCache  @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  deviceId         String
+  stationName      String?
+  condition        String
+  listPrice        Float
+  container        String
+  scannedAt        DateTime         @default(now())
+  storeId          String?
+  store            Store?           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([isbn])
+  @@index([deviceId])
+  @@index([scannedAt])
+}
+
+model InventoryItem {
+  id               String             @id @default(uuid())
+  bookId            String
+  book              Book               @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  sku               String             @unique
+  condition         String
+  quantityOnHand    Int                @default(0)
+  quantityReserved  Int                @default(0)
+  locationCode      String?
+  acquiredAt        DateTime           @default(now())
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  transactionLines  PosTransactionLine[]
+
+  @@index([bookId])
+  @@index([condition])
+}
+
+model PosTransaction {
+  id                String               @id @default(uuid())
+  transactionNumber String               @unique
+  cashierUserId     String
+  subtotalCents     Int
+  taxCents          Int                  @default(0)
+  totalCents        Int
+  paymentMethod     String
+  soldAt            DateTime             @default(now())
+  createdAt         DateTime             @default(now())
+  lineItems         PosTransactionLine[]
+
+  @@index([cashierUserId])
+  @@index([soldAt])
+}
+
+model PosTransactionLine {
+  id               String         @id @default(uuid())
+  transactionId    String
+  transaction      PosTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  inventoryItemId  String
+  inventoryItem    InventoryItem  @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  quantity         Int
+  unitPriceCents   Int
+  lineTotalCents   Int
+
+  @@index([transactionId])
+  @@index([inventoryItemId])
+}
+
+model NetworkPeer {
+  id         String     @id @default(uuid())
+  name       String
+  endpoint   String     @unique
+  status     String     @default("OFFLINE")
+  lastSeenAt DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+model Store {
+  id                 String              @id @default(uuid())
+  slug               String              @unique
+  storeName          String
+  ownerEmail         String
+  ledgerBalance      Float               @default(0)
+  subscriptionStatus String              @default("trial")
+  processorType      String              @default("manual_terminal")
+  processorConfigJson String?
+  createdAt          DateTime            @default(now())
+  buyingOrders       NetworkOrder[]      @relation("BuyingStore")
+  sellingOrders      NetworkOrder[]      @relation("SellingStore")
+  ledgerTransactions LedgerTransaction[]
+  shippingAccount    StoreShippingAccount?
+  ecommerceIntegrations StoreEcommerceIntegration[]
+  inventoryCache     IsbnLookupCache[]
+  scanEvents         ScanEvent[]
+  memberships        StoreMembership[]
+  orderRequests      NetworkOrderRequest[]
+  financeTransactions FinanceTransaction[]
+  payables           AccountsPayable[]
+  receivables        AccountsReceivable[]
+  purchaseOrders     PurchaseOrder[]
+  drawerReconciliations DrawerReconciliation[]
+  payrollRuns        PayrollRun[]
+  bankConnections    BankConnection[]
+  disputesAsBuyer    NetworkDispute[]    @relation("DisputeBuyer")
+  disputesAsSeller   NetworkDispute[]    @relation("DisputeSeller")
+
+  @@index([ownerEmail])
+}
+
+model User {
+  id           String            @id @default(uuid())
+  email        String            @unique
+  displayName  String
+  passwordHash String
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  memberships  StoreMembership[]
+  sessions     AuthSession[]
+}
+
+model StoreMembership {
+  id        String   @id @default(uuid())
+  userId    String
+  storeId   String
+  role      String   @default("CASHIER")
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, storeId])
+  @@index([storeId, role])
+}
+
+model AuthSession {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model NetworkDispute {
+  id             String   @id @default(uuid())
+  buyingStoreId  String
+  sellingStoreId String
+  refundAmount   Float
+  reason         String
+  status         String   @default("open")
+  resolvedAt     DateTime?
+  createdAt      DateTime @default(now())
+  buyingStore    Store    @relation("DisputeBuyer", fields: [buyingStoreId], references: [id])
+  sellingStore   Store    @relation("DisputeSeller", fields: [sellingStoreId], references: [id])
+
+  @@index([status, createdAt])
+}
+
+model SystemBroadcast {
+  id          String   @id @default(uuid())
+  message     String
+  bannerType  String   @default("info")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime?
+
+  @@index([active, createdAt])
+}
+model GlobalIntegration {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String
+  category    String
+  enabled     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model StoreEcommerceIntegration {
+  id                 String   @id @default(uuid())
+  storeId            String
+  platform           String
+  storeUrl           String
+  encryptedCredentials String
+  syncInventory      Boolean  @default(true)
+  syncOrders         Boolean  @default(true)
+  lastSyncedAt       DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  store              Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, platform])
+  @@index([storeId])
+}
+
+model StoreShippingAccount {
+  id                  String   @id @default(uuid())
+  storeId             String   @unique
+  provider            String   @default("usps")
+  clientId            String
+  encryptedSecret     String
+  originAddress       String?
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  store               Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+}
+
+model NetworkOrder {
+  id              String   @id @default(uuid())
+  buyingStoreId   String
+  sellingStoreId  String
+  isbn            String
+  title           String
+  wholesalePrice  Float
+  shippingFee     Float
+  totalAmount     Float
+  status          String   @default("pending")
+  trackingNumber  String?
+  createdAt       DateTime @default(now())
+  buyingStore     Store    @relation("BuyingStore", fields: [buyingStoreId], references: [id])
+  sellingStore    Store    @relation("SellingStore", fields: [sellingStoreId], references: [id])
+  ledgerEntries   LedgerTransaction[]
+
+  @@index([buyingStoreId, status])
+  @@index([sellingStoreId, status])
+  @@index([isbn])
+}
+
+model NetworkOrderRequest {
+  id                 String   @id @default(uuid())
+  partnerStoreName   String
+  isbn               String
+  title              String
+  requestedPrice     Float
+  shippingFee        Float   @default(0)
+  fulfillmentTarget  String
+  customerName       String?
+  customerEmail      String?
+  customerAddress    String?
+  destinationAddress String?
+  status             String  @default("requested")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  storeId            String?
+  store              Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([isbn])
+}
+
+model LedgerTransaction {
+  id              String        @id @default(uuid())
+  storeId         String
+  amount          Float
+  balanceAfter    Float
+  referenceOrderId String?
+  description     String
+  createdAt       DateTime      @default(now())
+  store           Store         @relation(fields: [storeId], references: [id])
+  referenceOrder  NetworkOrder? @relation(fields: [referenceOrderId], references: [id])
+
+  @@index([storeId, createdAt])
+  @@index([referenceOrderId])
+}
+
+model FinanceTransaction {
+  id          String   @id @default(uuid())
+  storeId     String?
+  name        String
+  amount      Float
+  accountCode String
+  direction   String
+  memo        String?
+  reconciled  Boolean  @default(false)
+  occurredAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  store       Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, occurredAt])
+  @@index([accountCode])
+}
+
+model AccountsPayable {
+  id          String   @id @default(uuid())
+  storeId     String?
+  vendor      String
+  description String
+  amount      Float
+  dueDate     DateTime
+  paidAt      DateTime?
+  createdAt   DateTime @default(now())
+  store       Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, dueDate])
+}
+
+model AccountsReceivable {
+  id          String   @id @default(uuid())
+  storeId     String?
+  customer    String
+  description String
+  amount      Float
+  dueDate     DateTime
+  receivedAt  DateTime?
+  createdAt   DateTime @default(now())
+  store       Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, dueDate])
+}
+
+model PurchaseOrder {
+  id          String   @id @default(uuid())
+  storeId     String?
+  vendor      String
+  description String
+  amount      Float
+  status      String   @default("draft")
+  orderedAt   DateTime?
+  receivedAt  DateTime?
+  createdAt   DateTime @default(now())
+  store       Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, status])
+}
+
+model DrawerReconciliation {
+  id           String   @id @default(uuid())
+  storeId      String?
+  registerName String
+  businessDate DateTime
+  openingFloat Float
+  expectedCash Float
+  actualCash   Float
+  variance     Float
+  reconciled   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  store        Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, businessDate])
+}
+
+model PayrollRun {
+  id          String   @id @default(uuid())
+  storeId     String?
+  periodStart DateTime
+  periodEnd   DateTime
+  grossAmount Float
+  status      String   @default("draft")
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+  store       Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, periodEnd])
+}
+
+model BankConnection {
+  id              String   @id @default(uuid())
+  storeId         String?
+  provider        String
+  accountName     String
+  encryptedConfig String
+  active          Boolean  @default(true)
+  lastSyncedAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  store           Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, active])
+}

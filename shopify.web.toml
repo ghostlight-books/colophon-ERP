@@ -1,0 +1,5 @@
+name = "Colophon ERP API"
+roles = ["backend"]
+webhooks_path = "/api/webhooks/shopify"
+[commands]
+dev = "npm --workspace @colophon/server run dev"

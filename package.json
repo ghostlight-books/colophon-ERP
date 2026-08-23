@@ -1,0 +1,28 @@
+{
+  "name": "colophon-erp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Colophon ERP monorepo for bookstore operations",
+  "workspaces": [
+    "packages/*",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "build": "npm run --workspaces --if-present build",
+    "dev": "npm run --workspaces --if-present dev",
+    "lint": "npm run --workspaces --if-present lint",
+    "typecheck": "npm run --workspaces --if-present typecheck",
+    "db:generate": "npm --workspace @colophon/database run prisma:generate",
+    "db:migrate": "npm --workspace @colophon/database run prisma:migrate",
+    "db:migrate:deploy": "npm --workspace @colophon/database run prisma:migrate:deploy",
+    "db:seed": "npm --workspace @colophon/database run seed"
+    ,"shopify:dev": "shopify app dev"
+    ,"shopify:deploy": "shopify app deploy"
+    ,"shopify:config": "shopify app config link"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

@@ -1,0 +1,31 @@
+# Shopify app configuration for the existing Colophon ERP backend.
+# Set application_url and redirect_urls when the ERP has a public HTTPS URL.
+client_id = "71873a83f3e3525349a17c3b941cf0cf"
+application_url = "https://example.com"
+embedded = true
+name = "Colophon ERP"
+
+[access_scopes]
+scopes = "read_products,write_products,read_inventory,write_inventory,read_orders,write_fulfillments"
+
+[webhooks]
+api_version = "2026-01"
+
+  [[webhooks.subscriptions]]
+  uri = "/api/webhooks/shopify/orders-create"
+  topics = [ "orders/create" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/api/webhooks/shopify/orders-updated"
+  topics = [ "orders/updated" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/api/webhooks/shopify/app-uninstalled"
+  topics = [ "app/uninstalled" ]
+
+[auth]
+redirect_urls = [ "https://example.com/api/auth/shopify/callback" ]
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = true

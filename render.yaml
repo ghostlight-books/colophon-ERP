@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: colophon-api
+    runtime: node
+    buildCommand: npm ci && npm run db:generate && npm run build
+    startCommand: npm run --workspace @colophon/server start
+    preDeployCommand: npm run db:migrate:deploy
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: file:/var/data/colophon.db
+      - key: CLIENT_APP_URL
+        fromService:
+          type: web
+          name: colophon-client
+          property: host
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        generateValue: true
+      - key: ADMIN_MASTER_KEY
+        generateValue: true
+      - key: TENANT_BASE_DOMAIN
+        value: colophon-api.onrender.com
+      - key: SQUARE_ENVIRONMENT
+        value: production
+    disk:
+      name: colophon-data
+      mountPath: /var/data
+      sizeGB: 1
+
+  - type: static
+    name: colophon-client
+    buildCommand: npm ci && npm run --workspace @colophon/client build
+    staticPublishPath: client/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: colophon-api
+          property: host
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
