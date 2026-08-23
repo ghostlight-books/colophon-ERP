@@ -329,7 +329,9 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       const thriftbooksDetails = cachedBook.thriftbooksPrice === null
         ? await lookupThriftbooksDetails(normalized)
         : null;
-      const fallbackPrice = thriftbooksDetails?.price ?? await lookupAbeBooksPrice(normalized);
+      const fallbackPrice = thriftbooksDetails?.title
+        ? thriftbooksDetails.price
+        : await lookupAbeBooksPrice(normalized);
       if (cached.publisher || cached.description || cached.seoTitle || cached.seoKeywords || cached.catalogTags) {
         if (fallbackPrice !== null) {
           const refreshed: BookLookup = {
@@ -376,7 +378,9 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       lookupOpenLibrary(normalized).catch(() => null),
       lookupThriftbooksDetails(normalized),
     ]);
-    const fallbackPrice = thriftbooksDetails?.price ?? await lookupAbeBooksPrice(normalized);
+    const fallbackPrice = thriftbooksDetails?.title
+      ? thriftbooksDetails.price
+      : await lookupAbeBooksPrice(normalized);
     const book = bookResult;
     if (!book) {
       if (fallbackPrice === null) {
