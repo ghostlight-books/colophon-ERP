@@ -178,6 +178,7 @@ model StoreMembership {
   userId    String
   storeId   String
   role      String   @default("CASHIER")
+  permissionsJson String @default("{}")
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)

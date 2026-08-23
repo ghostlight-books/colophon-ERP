@@ -489,6 +489,35 @@ export function createApp(): express.Express {
     }
   });
 
+  app.get("/api/admin/stores/:storeId/members", async (req, res, next) => {
+    try {
+      const members = await prisma.storeMembership.findMany({ where: { storeId: req.params.storeId }, include: { user: { select: { id: true, email: true, displayName: true, isActive: true } } }, orderBy: { createdAt: "asc" } });
+      res.json({ members: members.map((member) => ({ id: member.id, userId: member.user.id, email: member.user.email, displayName: member.user.displayName, isActive: member.user.isActive, role: member.role, permissions: JSON.parse(member.permissionsJson) })) });
+    } catch (error) { next(error); }
+  });
+
+  app.post("/api/admin/stores/:storeId/members", async (req, res, next) => {
+    try {
+      const { email, displayName, password, role, permissions } = req.body as { email?: string; displayName?: string; password?: string; role?: string; permissions?: Record<string, boolean> };
+      if (!email || !displayName || !password || password.length < 12 || !["ADMIN", "MANAGER", "CASHIER", "VIEWER"].includes(role ?? "")) {
+        res.status(400).json({ error: "email, displayName, password (12+ characters), and a valid role are required." });
+        return;
+      }
+      const user = await createUser(email, displayName, password);
+      const membership = await prisma.storeMembership.create({ data: { userId: user.id, storeId: req.params.storeId, role, permissionsJson: JSON.stringify(permissions ?? {}) } });
+      res.status(201).json({ id: membership.id, userId: user.id, email: user.email, displayName: user.displayName, isActive: true, role: membership.role, permissions: permissions ?? {} });
+    } catch (error) { next(error); }
+  });
+
+  app.patch("/api/admin/store-members/:membershipId", async (req, res, next) => {
+    try {
+      const { role, permissions, isActive } = req.body as { role?: string; permissions?: Record<string, boolean>; isActive?: boolean };
+      if (role !== undefined && !["ADMIN", "MANAGER", "CASHIER", "VIEWER"].includes(role)) { res.status(400).json({ error: "Invalid role." }); return; }
+      const membership = await prisma.storeMembership.update({ where: { id: req.params.membershipId }, data: { ...(role ? { role } : {}), ...(permissions ? { permissionsJson: JSON.stringify(permissions) } : {}), ...(typeof isActive === "boolean" ? { user: { update: { isActive } } } : {}) }, include: { user: { select: { id: true, email: true, displayName: true, isActive: true } } } });
+      res.json({ id: membership.id, userId: membership.user.id, email: membership.user.email, displayName: membership.user.displayName, isActive: membership.user.isActive, role: membership.role, permissions: JSON.parse(membership.permissionsJson) });
+    } catch (error) { next(error); }
+  });
+
   app.post("/api/admin/stores/impersonate", async (req, res, next) => {
     try {
       const { storeId } = req.body as { storeId?: string };

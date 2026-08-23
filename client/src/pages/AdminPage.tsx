@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Building2, CreditCard, Database, LayoutDashboard, Network, Settings, Wallet, Activity } from "lucide-react";
+import { Building2, CreditCard, Database, LayoutDashboard, Network, Settings, Wallet, Activity, Users } from "lucide-react";
 
 import SurfaceCard from "../components/ui/SurfaceCard";
 
 type AdminStore = { id: string; slug: string; storeName: string; ownerEmail: string; ledgerBalance: number; subscriptionStatus: string; createdAt: string };
 type GlobalIntegration = { id: string; key: string; name: string; category: string; enabled: boolean };
 type StoreEcommerceConnection = { platform: "shopify" | "woocommerce"; storeUrl: string; syncInventory: boolean; syncOrders: boolean; lastSyncedAt: string | null };
+type StoreMember = { id: string; userId: string; email: string; displayName: string; isActive: boolean; role: string; permissions: Record<string, boolean> };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api";
 const adminSections = [
   ["overview", "Overview", LayoutDashboard],
   ["stores", "Bookstores", Building2],
+  ["members", "Access", Users],
   ["integrations", "Integrations", CreditCard],
   ["ledger", "Ledger", Wallet],
   ["network", "Network Orders", Network],
@@ -38,6 +40,8 @@ function AdminPage(): JSX.Element {
     syncOrders: true,
   });
   const [shopifyStatus, setShopifyStatus] = useState("No Shopify connection configured.");
+  const [members, setMembers] = useState<StoreMember[]>([]);
+  const [memberDraft, setMemberDraft] = useState({ email: "", displayName: "", password: "", role: "CASHIER" });
 
   async function adminPost(path: string, body: Record<string, unknown>): Promise<void> {
     const response = await fetch(`${API_BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" }, body: JSON.stringify(body) });
@@ -100,6 +104,35 @@ function AdminPage(): JSX.Element {
       })
       .catch(() => setShopifyStatus("Shopify connection status unavailable."));
   }, [selectedStoreId]);
+
+  useEffect(() => {
+    if (!selectedStoreId) return;
+    fetch(`${API_BASE}/admin/stores/${selectedStoreId}/members`, { headers: { "X-Dev-Subdomain": "admin" } })
+      .then(async (response) => response.ok ? (await response.json()) as { members: StoreMember[] } : { members: [] })
+      .then((payload) => setMembers(payload.members))
+      .catch(() => setMembers([]));
+  }, [selectedStoreId]);
+
+  async function inviteMember(): Promise<void> {
+    if (!selectedStoreId) return;
+    try {
+      const response = await fetch(`${API_BASE}/admin/stores/${selectedStoreId}/members`, { method: "POST", headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" }, body: JSON.stringify(memberDraft) });
+      const payload = (await response.json().catch(() => ({}))) as StoreMember & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Member could not be added.");
+      setMembers((current) => [...current, payload]);
+      setMemberDraft({ email: "", displayName: "", password: "", role: "CASHIER" });
+      setActionMessage("Account added to the selected bookstore.");
+    } catch (error) { setActionMessage(error instanceof Error ? error.message : "Member could not be added."); }
+  }
+
+  async function updateMember(member: StoreMember, role: string): Promise<void> {
+    try {
+      const response = await fetch(`${API_BASE}/admin/store-members/${member.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" }, body: JSON.stringify({ role }) });
+      if (!response.ok) throw new Error("Member role could not be changed.");
+      const updated = (await response.json()) as StoreMember;
+      setMembers((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (error) { setActionMessage(error instanceof Error ? error.message : "Member role could not be changed."); }
+  }
 
   async function addIntegration(): Promise<void> {
     try {
@@ -180,6 +213,7 @@ function AdminPage(): JSX.Element {
     return stores.filter((store) => !normalized || [store.storeName, store.slug, store.ownerEmail].some((value) => value.toLowerCase().includes(normalized)));
   }, [query, stores]);
   const totalBalance = stores.reduce((sum, store) => sum + store.ledgerBalance, 0);
+  const accessPanel = <SurfaceCard className="mt-5 p-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-xl font-semibold">Site Access</h2><p className="mt-1 text-sm text-slate-500">Add accounts to a bookstore and control their role.</p></div><select value={selectedStoreId} onChange={(event) => setSelectedStoreId(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Select a bookstore</option>{stores.map((store) => <option key={store.id} value={store.id}>{store.storeName}</option>)}</select></div><div className="mt-4 grid gap-2 lg:grid-cols-[1fr_1fr_1fr_140px_auto]"><input value={memberDraft.displayName} onChange={(event) => setMemberDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Name" aria-label="New member name" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><input value={memberDraft.email} onChange={(event) => setMemberDraft((current) => ({ ...current, email: event.target.value }))} placeholder="Email" aria-label="New member email" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><input type="password" value={memberDraft.password} onChange={(event) => setMemberDraft((current) => ({ ...current, password: event.target.value }))} placeholder="Temporary password" aria-label="New member password" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><select value={memberDraft.role} onChange={(event) => setMemberDraft((current) => ({ ...current, role: event.target.value }))} aria-label="New member role" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="CASHIER">Cashier</option><option value="VIEWER">Viewer</option><option value="MANAGER">Manager</option><option value="ADMIN">Admin</option></select><button type="button" onClick={() => void inviteMember()} className="h-10 rounded-xl bg-slate-800 px-4 text-sm font-semibold text-white">Add account</button></div><div className="mt-4 grid gap-2">{members.map((member) => <div key={member.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5"><div><p className="text-sm font-semibold text-slate-700">{member.displayName}</p><p className="text-xs text-slate-500">{member.email} · {member.isActive ? "Active" : "Inactive"}</p></div><select value={member.role} onChange={(event) => void updateMember(member, event.target.value)} aria-label={`Role for ${member.displayName}`} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs"><option value="CASHIER">Cashier</option><option value="VIEWER">Viewer</option><option value="MANAGER">Manager</option><option value="ADMIN">Admin</option></select></div>)}</div></SurfaceCard>;
 
   return (
     <main className="min-h-screen bg-[#f1f1f3] p-3 text-slate-800 md:p-5">
@@ -199,6 +233,7 @@ function AdminPage(): JSX.Element {
           <span className="rounded-full bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white">Super-admin surface</span>
         </header>
         <p className="mt-4 rounded-xl bg-white/60 px-4 py-3 text-sm text-slate-600">{message}</p>
+        {accessPanel}
         <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[["Bookstores", stores.length], ["Active tenants", stores.length], ["Network balance", `$${totalBalance.toFixed(2)}`], ["System status", "Operational"]].map(([label, value]) => <SurfaceCard key={String(label)} className="p-4"><p className="text-xs uppercase tracking-wide text-slate-500">{label}</p><p className="mt-2 text-2xl font-semibold text-slate-800">{value}</p></SurfaceCard>)}
         </section>
