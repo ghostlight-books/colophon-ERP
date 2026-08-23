@@ -29,7 +29,8 @@ export type BookLookup = {
   source: "Open Library" | "ISBNdb";
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+const rawApiBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+const API_BASE = rawApiBase.replace(/\/$/, "").replace(/\/api$/, "");
 const PROVIDER_TIMEOUT_MS = 8000;
 const skuSequences = new Map<string, number>();
 
