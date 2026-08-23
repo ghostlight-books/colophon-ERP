@@ -1,4 +1,5 @@
 import { prisma } from "../config/database.js";
+import { lookupAbeBooksPrice } from "./abebooksScraper.service.js";
 import { lookupThriftbooksDetails } from "./thriftbooksScraper.service.js";
 
 const PROVIDER_TIMEOUT_MS = 8000;
@@ -328,14 +329,15 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       const thriftbooksDetails = cachedBook.thriftbooksPrice === null
         ? await lookupThriftbooksDetails(normalized)
         : null;
+      const fallbackPrice = thriftbooksDetails?.price ?? await lookupAbeBooksPrice(normalized);
       if (cached.publisher || cached.description || cached.seoTitle || cached.seoKeywords || cached.catalogTags) {
-        if (thriftbooksDetails?.price !== null && thriftbooksDetails?.price !== undefined) {
+        if (fallbackPrice !== null) {
           const refreshed: BookLookup = {
             ...cachedBook,
-            thriftbooksPrice: thriftbooksDetails.price,
-            category: cachedBook.category ?? normalizeCategories([], thriftbooksDetails.category).category,
-            subcategory: cachedBook.subcategory ?? thriftbooksDetails.subcategory,
-            label: { ...cachedBook.label, price: thriftbooksDetails.price },
+            thriftbooksPrice: fallbackPrice,
+            category: cachedBook.category ?? normalizeCategories([], thriftbooksDetails?.category).category,
+            subcategory: cachedBook.subcategory ?? thriftbooksDetails?.subcategory ?? null,
+            label: { ...cachedBook.label, price: fallbackPrice },
           };
           await saveToCache(refreshed);
           return refreshed;
@@ -359,11 +361,11 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
         category: cachedBook.category ?? enriched.category,
         subcategory: cachedBook.subcategory ?? enriched.subcategory,
         mediaType: cachedBook.mediaType || enriched.mediaType,
-        thriftbooksPrice: thriftbooksDetails?.price ?? cachedBook.thriftbooksPrice,
+        thriftbooksPrice: fallbackPrice ?? cachedBook.thriftbooksPrice,
         label: {
           ...cachedBook.label,
           title: cachedBook.title ?? enriched.title,
-          price: thriftbooksDetails?.price ?? cachedBook.thriftbooksPrice,
+          price: fallbackPrice ?? cachedBook.thriftbooksPrice,
         },
       };
       await saveToCache(result);
@@ -374,9 +376,10 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       lookupOpenLibrary(normalized).catch(() => null),
       lookupThriftbooksDetails(normalized),
     ]);
+    const fallbackPrice = thriftbooksDetails?.price ?? await lookupAbeBooksPrice(normalized);
     const book = bookResult;
     if (!book) {
-      if (thriftbooksDetails?.price === null || !thriftbooksDetails) {
+      if (fallbackPrice === null) {
         return null;
       }
       const sku = createSku(null, null, null);
@@ -386,14 +389,14 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
         author: null,
         coverUrl: null,
         quantityOnHand: 0,
-        thriftbooksPrice: thriftbooksDetails.price,
+        thriftbooksPrice: fallbackPrice,
         publisher: null,
         description: null,
-        ...generateCatalogContent(thriftbooksDetails.title, null, null, null, []),
+        ...generateCatalogContent(thriftbooksDetails?.title ?? null, null, null, null, []),
         catalogTags: null,
-        ...normalizeCategories([], thriftbooksDetails.category),
+        ...normalizeCategories([], thriftbooksDetails?.category),
         sku,
-        label: { sku, barcode: normalized, title: thriftbooksDetails.title, category: null, subcategory: null, price: thriftbooksDetails.price },
+        label: { sku, barcode: normalized, title: thriftbooksDetails?.title ?? null, category: null, subcategory: null, price: fallbackPrice },
         source: "Open Library",
         mediaType: "Book",
       };
@@ -403,14 +406,14 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
 
     const result = {
       ...book,
-      thriftbooksPrice: thriftbooksDetails?.price ?? book.thriftbooksPrice,
+      thriftbooksPrice: fallbackPrice ?? book.thriftbooksPrice,
       category: book.category ?? normalizeCategories([], thriftbooksDetails?.category).category,
       subcategory: book.subcategory ?? thriftbooksDetails?.subcategory ?? null,
       label: {
         ...book.label,
         category: book.category ?? normalizeCategories([], thriftbooksDetails?.category).category,
         subcategory: book.subcategory ?? thriftbooksDetails?.subcategory ?? null,
-        price: thriftbooksDetails?.price ?? book.thriftbooksPrice,
+        price: fallbackPrice ?? book.thriftbooksPrice,
       },
     };
     await saveToCache(result);
