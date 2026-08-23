@@ -70,8 +70,8 @@ function readScanSessions(): ScanSession[] {
 function IntakePage(): JSX.Element {
   const [activeView, setActiveView] = useState<"scan" | "history">("scan");
   const [scannerConnected, setScannerConnected] = useState(false);
-  const [sessionActive, setSessionActive] = useState(false);
-  const [message, setMessage] = useState("Scanner disconnected. Connect a station to begin intake.");
+  const [sessionActive] = useState(true);
+  const [message, setMessage] = useState("Ready to scan or enter an ISBN.");
   const [barcode, setBarcode] = useState("");
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const scannerBufferRef = useRef("");
@@ -89,8 +89,9 @@ function IntakePage(): JSX.Element {
     { name: "Station C", state: "Calibrating" },
   ]);
   const [scanSessions, setScanSessions] = useState<ScanSession[]>(readScanSessions);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
+  const [currentSessionId] = useState(() => `INTAKE-${Date.now()}`);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historySort, setHistorySort] = useState<"newest" | "oldest" | "title">("newest");
 
   const scannedToday = scannedBooks.length;
   const flaggedCount = 0;
@@ -100,9 +101,29 @@ function IntakePage(): JSX.Element {
     return `${((matched / denominator) * 100).toFixed(1)}%`;
   }, [flaggedCount, scannedToday]);
 
+  const historyItems = useMemo(() => {
+    const query = historyQuery.trim().toLowerCase();
+    const items = scanSessions.flatMap((session) => session.items);
+    const filtered = query
+      ? items.filter((item) => [item.title, item.isbn, item.status, item.condition, item.container].some((value) => value?.toLowerCase().includes(query)))
+      : items;
+    return [...filtered].sort((left, right) => {
+      if (historySort === "title") return (left.title ?? "").localeCompare(right.title ?? "");
+      const leftStamp = `${left.day} ${left.time}`;
+      const rightStamp = `${right.day} ${right.time}`;
+      return historySort === "oldest" ? leftStamp.localeCompare(rightStamp) : rightStamp.localeCompare(leftStamp);
+    });
+  }, [historyQuery, historySort, scanSessions]);
+
   useEffect(() => {
     window.localStorage.setItem("colophon-scan-sessions", JSON.stringify(scanSessions));
   }, [scanSessions]);
+
+  useEffect(() => {
+    setScanSessions((current) => current.some((session) => session.id === currentSessionId)
+      ? current
+      : [{ id: currentSessionId, startedAt: `${nowDay()} ${nowTime()}`, endedAt: null, items: [] }, ...current]);
+  }, [currentSessionId]);
 
   const addSessionItem = (item: Omit<ScanHistoryItem, "id" | "day" | "time">): void => {
     if (!currentSessionId) return;
@@ -122,32 +143,7 @@ function IntakePage(): JSX.Element {
           return { ...station, state: "Calibrating" };
         }),
       );
-      setMessage(next ? "Scanner stations connected. Ready to start session." : "Scanner disconnected.");
-      if (!next) {
-        setSessionActive(false);
-      }
-      return next;
-    });
-  };
-
-  const handleStartSession = (): void => {
-    setSessionActive((current) => {
-      const next = !current;
-      if (next) {
-        setScannedBooks([]);
-        const sessionId = `SESSION-${Date.now()}`;
-        setCurrentSessionId(sessionId);
-        setScanSessions((sessions) => [{ id: sessionId, startedAt: `${nowDay()} ${nowTime()}`, endedAt: null, items: [] }, ...sessions]);
-      } else if (currentSessionId) {
-        setScanSessions((sessions) => sessions.map((session) => session.id === currentSessionId ? { ...session, endedAt: `${nowDay()} ${nowTime()}` } : session));
-      }
-      setMessage(
-        next
-          ? scannerConnected
-            ? "Scan session is active. Books can be scanned and routed."
-            : "Scan session is active. Manual ISBN entry and webcam scanning are ready."
-          : "Scan session paused.",
-      );
+      setMessage(next ? "Scanner station connected. Ready to scan." : "Scanner disconnected.");
       return next;
     });
   };
@@ -214,10 +210,6 @@ function IntakePage(): JSX.Element {
   }, [barcode, lookupBusy]);
 
   useEffect(() => {
-    if (!sessionActive) {
-      return undefined;
-    }
-
     const handleScannerKey = (event: KeyboardEvent): void => {
       const target = event.target as HTMLElement | null;
       if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT") {
@@ -253,7 +245,7 @@ function IntakePage(): JSX.Element {
         window.clearTimeout(scannerTimerRef.current);
       }
     };
-  }, [sessionActive]);
+  }, []);
 
   const stopCamera = (): void => {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -378,16 +370,6 @@ function IntakePage(): JSX.Element {
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={handleStartSession}
-              className={[
-                "rounded-full px-5 py-2 text-[1.02rem] font-semibold",
-                sessionActive ? "bg-emerald-200 text-emerald-800" : "bg-[#e9ff63] text-slate-700",
-              ].join(" ")}
-            >
-              {sessionActive ? "Pause Scan Session" : "Start Scan Session"}
-            </button>
-            <button
-              type="button"
               onClick={handleConnectScanner}
               className="rounded-full bg-white px-5 py-2 text-[1.02rem] font-semibold text-slate-600"
             >
@@ -400,7 +382,7 @@ function IntakePage(): JSX.Element {
               { label: "Scanned Today", value: String(scannedToday) },
               { label: "Match Rate", value: matchRate },
               { label: "Flagged", value: String(flaggedCount) },
-              { label: "Session Scans", value: String(scannedBooks.length) },
+              { label: "Scans This View", value: String(scannedBooks.length) },
             ].map((item) => (
               <div key={item.label} className="rounded-2xl bg-white/70 p-2.5">
                 <p className="text-xs text-slate-500">{item.label}</p>
@@ -412,15 +394,14 @@ function IntakePage(): JSX.Element {
 
       </div>
 
-      {sessionActive ? (
         <SurfaceCard className="order-1 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-slate-700">Active Scan Session</p>
+              <p className="text-sm font-semibold text-slate-700">Scan Intake</p>
               <p className="mt-1 text-xs text-slate-500">Scan a barcode or enter an ISBN to identify and route the book.</p>
             </div>
             <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-              {scannedBooks.length} scanned this session
+              {scannedBooks.length} scanned now
             </span>
           </div>
 
@@ -539,42 +520,22 @@ function IntakePage(): JSX.Element {
             </div>
           )}
         </SurfaceCard>
-      ) : null}
 
       </>
       ) : null}
 
       {activeView === "history" ? <SurfaceCard className="p-4">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <p className="text-sm font-semibold text-slate-700">Intake History</p>
-              <p className="mt-1 text-xs text-slate-500">Every received book, its scan time, condition, and adjusted value.</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setScanSessions([])}
-              className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-600"
-            >
-              Clear History
-            </button>
-          </div>
-          <div className="mt-3 overflow-x-auto">
-            {scanSessions.length === 0 ? (
-              <p className="rounded-xl bg-white/60 px-3 py-2 text-sm text-slate-500">No scan sessions yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {scanSessions.map((session, index) => (
-                  <div key={session.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white/70">
-                    <button type="button" onClick={() => setExpandedSessionId(expandedSessionId === session.id ? null : session.id)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-white">
-                      <span><span className="block text-sm font-semibold text-slate-800">Scan Session {scanSessions.length - index}</span><span className="mt-1 block text-xs text-slate-500">Started {session.startedAt}{session.endedAt ? ` · Ended ${session.endedAt}` : " · In progress"}</span></span>
-                      <span className="text-right text-xs text-slate-500"><span className="block font-semibold text-slate-700">{session.items.length} item(s)</span><span className="mt-1 block">{expandedSessionId === session.id ? "Hide" : "Open folder"}</span></span>
-                    </button>
-                    {expandedSessionId === session.id ? <div className="border-t border-slate-200/70 p-3"><div className="overflow-x-auto"><table className="w-full min-w-[760px] border-separate border-spacing-y-2 text-left text-sm"><thead className="text-xs uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-2">Item</th><th className="px-3 py-2">Day</th><th className="px-3 py-2">Time</th><th className="px-3 py-2">Condition</th><th className="px-3 py-2">Bin</th><th className="px-3 py-2">Value</th><th className="px-3 py-2">Status</th></tr></thead><tbody>{session.items.map((item) => <tr key={item.id} className="bg-white/80"><td className="rounded-l-xl px-3 py-3"><p className="font-semibold text-slate-800">{item.title ?? "Title unavailable"}</p><p className="mt-1 text-xs text-slate-500">{item.isbn}</p></td><td className="px-3 py-3 text-xs">{item.day}</td><td className="px-3 py-3 text-xs">{item.time}</td><td className="px-3 py-3 text-xs">{item.condition ?? "—"}</td><td className="px-3 py-3 text-xs">{item.container ?? "—"}</td><td className="px-3 py-3 font-semibold">{item.value === null ? "Manual lookup" : `$${item.value.toFixed(2)}`}</td><td className="rounded-r-xl px-3 py-3 text-xs font-semibold"><span className={item.status === "Received" ? "text-emerald-700" : "text-rose-700"}>{item.status}</span>{item.reason ? <span className="mt-1 block font-normal text-slate-500">{item.reason}</span> : null}</td></tr>)}</tbody></table>{session.items.length === 0 ? <p className="py-4 text-center text-sm text-slate-500">No items recorded in this session.</p> : null}</div></div> : null}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div><p className="text-sm font-semibold text-slate-700">Intake Report</p><p className="mt-1 text-xs text-slate-500">Every scanned title, timestamp, condition, bin, and value.</p></div>
+          <button type="button" onClick={() => setScanSessions([])} className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">Clear History</button>
+        </div>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <input value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="Search title, ISBN, condition, or bin" aria-label="Search intake report" className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400" />
+          <select value={historySort} onChange={(event) => setHistorySort(event.target.value as typeof historySort)} aria-label="Sort intake report" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="title">Title A-Z</option></select>
+        </div>
+        <div className="mt-3 overflow-x-auto">
+          {historyItems.length === 0 ? <p className="rounded-xl bg-white/60 px-3 py-2 text-sm text-slate-500">No scans match this report.</p> : <table className="w-full min-w-[760px] border-separate border-spacing-y-2 text-left text-sm"><thead className="text-xs uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-2">Title</th><th className="px-3 py-2">Day</th><th className="px-3 py-2">Time</th><th className="px-3 py-2">Condition</th><th className="px-3 py-2">Bin</th><th className="px-3 py-2">Value</th><th className="px-3 py-2">Status</th></tr></thead><tbody>{historyItems.map((item) => <tr key={item.id} className="bg-white/80"><td className="rounded-l-xl px-3 py-3"><p className="font-semibold text-slate-800">{item.title ?? "Title unavailable"}</p><p className="mt-1 text-xs text-slate-500">{item.isbn}</p></td><td className="px-3 py-3 text-xs">{item.day}</td><td className="px-3 py-3 text-xs">{item.time}</td><td className="px-3 py-3 text-xs">{item.condition ?? "—"}</td><td className="px-3 py-3 text-xs">{item.container ?? "—"}</td><td className="px-3 py-3 font-semibold">{item.value === null ? "Manual lookup" : `$${item.value.toFixed(2)}`}</td><td className="rounded-r-xl px-3 py-3 text-xs font-semibold"><span className={item.status === "Received" ? "text-emerald-700" : "text-rose-700"}>{item.status}</span>{item.reason ? <span className="mt-1 block font-normal text-slate-500">{item.reason}</span> : null}</td></tr>)}</tbody></table>}
+        </div>
       </SurfaceCard> : null}
     </section>
   );
