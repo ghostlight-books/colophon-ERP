@@ -356,7 +356,7 @@ function IntakePage(): JSX.Element {
               <button type="button" onClick={() => { setPendingBook(null); setBarcode(""); }} className="rounded-lg px-2 py-1 text-sm text-slate-500 hover:bg-white" aria-label="Cancel condition selection">Close</button>
             </div>
             <p className="mt-4 rounded-xl bg-white/70 px-3 py-2 text-sm text-slate-600">
-              Base price: {pendingBook.thriftbooksPrice === null ? "No value" : `$${pendingBook.thriftbooksPrice.toFixed(2)}`}. Select a condition to set the list price and bin.
+              Resale Value: {pendingBook.thriftbooksPrice === null ? "No value" : `$${pendingBook.thriftbooksPrice.toFixed(2)}`}. Select a condition to set the list price and bin.
             </p>
             <div className="mt-4 grid gap-2">
               {conditionOptions.map((option) => {
@@ -494,7 +494,7 @@ function IntakePage(): JSX.Element {
                       <dd className="text-right font-medium text-slate-700">{book.isbn}</dd>
                       <dt>Qty on hand</dt>
                       <dd className="text-right font-medium text-slate-700">{book.quantityOnHand}</dd>
-                      <dt>Thriftbooks</dt>
+                      <dt>Resale Value</dt>
                       <dd className="text-right font-medium text-slate-700">
                         {book.thriftbooksPrice === null ? "No value" : `$${book.thriftbooksPrice.toFixed(2)}`}
                       </dd>
