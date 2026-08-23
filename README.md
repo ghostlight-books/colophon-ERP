@@ -43,9 +43,11 @@ To deploy:
 
 1. Put this ERP root directory in the GitHub repository you want Render to deploy. The nested `colophon-erp/` directory is a separate Shopify template repository and should not be used as the Render root.
 2. In Render, choose **New > Blueprint**, connect the GitHub repository, and select `render.yaml`.
-3. Review the generated services and deploy. Render generates `CREDENTIAL_ENCRYPTION_KEY` and `ADMIN_MASTER_KEY`; do not replace them with values from source control.
-4. After the first deploy, confirm the API health check at `https://<api-host>/api/health` and open the client URL.
-5. Add `SQUARE_ACCESS_TOKEN` and `SQUARE_LOCATION_ID` to the `colophon-api` service if Square payments are enabled.
+3. When prompted for `CLIENT_APP_URL`, enter the full static-site URL, such as `https://colophon-client.onrender.com`.
+4. When prompted for `VITE_API_BASE_URL`, enter the full API URL plus `/api`, such as `https://colophon-api.onrender.com/api`.
+5. Review the generated services and deploy. Render generates `CREDENTIAL_ENCRYPTION_KEY` and `ADMIN_MASTER_KEY`; do not replace them with values from source control.
+6. After the first deploy, confirm the API health check at `https://<api-host>/api/health` and open the client URL.
+7. Add `SQUARE_ACCESS_TOKEN` and `SQUARE_LOCATION_ID` to the `colophon-api` service if Square payments are enabled.
 
 The API service uses `prisma migrate deploy` during Render's pre-deploy phase. The persistent disk is required because Render's default filesystem is ephemeral. The included SQLite setup is suitable for an initial single-instance deployment; move to a managed PostgreSQL database before adding multiple API instances or requiring higher availability.
 

@@ -12,10 +12,7 @@ services:
       - key: DATABASE_URL
         value: file:/var/data/colophon.db
       - key: CLIENT_APP_URL
-        fromService:
-          type: web
-          name: colophon-client
-          property: host
+        sync: false
       - key: CREDENTIAL_ENCRYPTION_KEY
         generateValue: true
       - key: ADMIN_MASTER_KEY
@@ -35,10 +32,7 @@ services:
     staticPublishPath: client/dist
     envVars:
       - key: VITE_API_BASE_URL
-        fromService:
-          type: web
-          name: colophon-api
-          property: host
+        sync: false
     routes:
       - type: rewrite
         source: /*
