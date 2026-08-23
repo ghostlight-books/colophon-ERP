@@ -499,7 +499,7 @@ export function createApp(): express.Express {
   app.post("/api/admin/stores/:storeId/members", async (req, res, next) => {
     try {
       const { email, displayName, password, role, permissions } = req.body as { email?: string; displayName?: string; password?: string; role?: string; permissions?: Record<string, boolean> };
-      if (!email || !displayName || !password || password.length < 12 || !["ADMIN", "MANAGER", "CASHIER", "VIEWER"].includes(role ?? "")) {
+      if (!email || !displayName || !password || password.length < 12 || !["OWNER", "ADMIN", "ASSOCIATE", "RECEIVER", "EVENTS_COORDINATOR", "BUYER_MERCHANDISER", "ACCOUNTANT", "CONSIGNOR"].includes(role ?? "")) {
         res.status(400).json({ error: "email, displayName, password (12+ characters), and a valid role are required." });
         return;
       }
@@ -512,7 +512,7 @@ export function createApp(): express.Express {
   app.patch("/api/admin/store-members/:membershipId", async (req, res, next) => {
     try {
       const { role, permissions, isActive } = req.body as { role?: string; permissions?: Record<string, boolean>; isActive?: boolean };
-      if (role !== undefined && !["ADMIN", "MANAGER", "CASHIER", "VIEWER"].includes(role)) { res.status(400).json({ error: "Invalid role." }); return; }
+      if (role !== undefined && !["OWNER", "ADMIN", "ASSOCIATE", "RECEIVER", "EVENTS_COORDINATOR", "BUYER_MERCHANDISER", "ACCOUNTANT", "CONSIGNOR"].includes(role)) { res.status(400).json({ error: "Invalid role." }); return; }
       const membership = await prisma.storeMembership.update({ where: { id: req.params.membershipId }, data: { ...(role ? { role } : {}), ...(permissions ? { permissionsJson: JSON.stringify(permissions) } : {}), ...(typeof isActive === "boolean" ? { user: { update: { isActive } } } : {}) }, include: { user: { select: { id: true, email: true, displayName: true, isActive: true } } } });
       res.json({ id: membership.id, userId: membership.user.id, email: membership.user.email, displayName: membership.user.displayName, isActive: membership.user.isActive, role: membership.role, permissions: JSON.parse(membership.permissionsJson) });
     } catch (error) { next(error); }

@@ -41,7 +41,7 @@ function AdminPage(): JSX.Element {
   });
   const [shopifyStatus, setShopifyStatus] = useState("No Shopify connection configured.");
   const [members, setMembers] = useState<StoreMember[]>([]);
-  const [memberDraft, setMemberDraft] = useState({ email: "", displayName: "", password: "", role: "CASHIER" });
+  const [memberDraft, setMemberDraft] = useState({ email: "", displayName: "", password: "", role: "ASSOCIATE" });
 
   async function adminPost(path: string, body: Record<string, unknown>): Promise<void> {
     const response = await fetch(`${API_BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" }, body: JSON.stringify(body) });
@@ -120,7 +120,7 @@ function AdminPage(): JSX.Element {
       const payload = (await response.json().catch(() => ({}))) as StoreMember & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Member could not be added.");
       setMembers((current) => [...current, payload]);
-      setMemberDraft({ email: "", displayName: "", password: "", role: "CASHIER" });
+      setMemberDraft({ email: "", displayName: "", password: "", role: "ASSOCIATE" });
       setActionMessage("Account added to the selected bookstore.");
     } catch (error) { setActionMessage(error instanceof Error ? error.message : "Member could not be added."); }
   }

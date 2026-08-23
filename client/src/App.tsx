@@ -17,6 +17,7 @@ import OperationsPage from "./pages/OperationsPage";
 import PosRegisterPage from "./pages/PosRegisterPage";
 import ProductPage from "./pages/ProductPage";
 import ShopifyPage from "./pages/ShopifyPage";
+import { hasModuleAccess, normalizeRole, type SystemModule } from "@colophon/shared";
 
 function GridIcon(): JSX.Element {
   return (
@@ -174,27 +175,30 @@ function ShellRouteLayout(): JSX.Element {
       role: "Owner",
     };
   });
+  const [accessWarning, setAccessWarning] = useState("");
 
   useEffect(() => {
     window.localStorage.setItem("colophon-current-user", JSON.stringify(currentUser));
   }, [currentUser]);
 
-  const navItems = useMemo<ShellNavItem[]>(
-    () => [
-      { key: "dashboard", label: "Dashboard", to: "/dashboard", icon: <GridIcon /> },
-      { key: "pos-register", label: "Point of Sale", to: "/pos-register", icon: <RegisterIcon /> },
-      { key: "calendar", label: "Calendar", to: "/calendar", icon: <CalendarIcon /> },
-      { key: "lists", label: "Lists", to: "/lists", icon: <ListsIcon /> },
-      { key: "intake", label: "Intake", to: "/intake", icon: <BoxIcon /> },
-      { key: "inventory", label: "Inventory", to: "/inventory", icon: <BoxIcon /> },
-      { key: "operations", label: "Operations", to: "/operations", icon: <OperationsIcon /> },
-      { key: "marketing", label: "Marketing", to: "/marketing", icon: <MarketingIcon /> },
-      { key: "finance", label: "Accounting", to: "/finance", icon: <WalletIcon /> },
-      { key: "shopify", label: "Shopify", to: "/shopify", icon: <NetworkIcon /> },
-      { key: "open-network", label: "Open Network", to: "/open-network", icon: <NetworkIcon /> },
-    ],
-    [],
-  );
+  const navItems = useMemo<ShellNavItem[]>(() => {
+    const items: Array<ShellNavItem & { module: SystemModule }> = [
+      { key: "dashboard", label: "Dashboard", to: "/dashboard", icon: <GridIcon />, module: "DASHBOARD" },
+      { key: "pos-register", label: "Point of Sale", to: "/pos-register", icon: <RegisterIcon />, module: "POS" },
+      { key: "calendar", label: "Calendar", to: "/calendar", icon: <CalendarIcon />, module: "CALENDAR" },
+      { key: "lists", label: "Lists", to: "/lists", icon: <ListsIcon />, module: "LISTS" },
+      { key: "intake", label: "Intake", to: "/intake", icon: <BoxIcon />, module: "INTAKE" },
+      { key: "inventory", label: "Inventory", to: "/inventory", icon: <BoxIcon />, module: "INVENTORY" },
+      { key: "operations", label: "Operations", to: "/operations", icon: <OperationsIcon />, module: "DASHBOARD" },
+      { key: "marketing", label: "Marketing", to: "/marketing", icon: <MarketingIcon />, module: "LISTS" },
+      { key: "finance", label: "Accounting", to: "/finance", icon: <WalletIcon />, module: "ACCOUNTING" },
+      { key: "shopify", label: "Shopify", to: "/shopify", icon: <NetworkIcon />, module: "INVENTORY" },
+      { key: "open-network", label: "Open Network", to: "/open-network", icon: <NetworkIcon />, module: "INVENTORY" },
+    ];
+    return items.filter((item) => hasModuleAccess(normalizeRole(currentUser.role), item.module));
+  }, [currentUser.role]);
+
+  const routeModules: Record<string, SystemModule> = { "/dashboard": "DASHBOARD", "/pos-register": "POS", "/calendar": "CALENDAR", "/lists": "LISTS", "/intake": "INTAKE", "/inventory": "INVENTORY", "/finance": "ACCOUNTING", "/operations": "DASHBOARD", "/marketing": "LISTS", "/shopify": "INVENTORY", "/open-network": "INVENTORY" };
 
   const pageMeta: Record<string, { subtitle: string }> = {
     "/dashboard": {
@@ -238,6 +242,15 @@ function ShellRouteLayout(): JSX.Element {
   const activePath = navItems.find((item) => location.pathname.startsWith(item.to))?.to ?? "/dashboard";
   const meta = pageMeta[activePath] ?? pageMeta["/dashboard"];
 
+  useEffect(() => {
+    const matchedPath = Object.keys(routeModules).find((path) => location.pathname.startsWith(path));
+    const module = matchedPath ? routeModules[matchedPath] : "DASHBOARD";
+    if (!hasModuleAccess(normalizeRole(currentUser.role), module)) {
+      setAccessWarning("You do not have access to that area.");
+      navigate("/dashboard", { replace: true });
+    }
+  }, [currentUser.role, location.pathname, navigate]);
+
   return (
     <Shell
       greeting={`Welcome, ${currentUser.name} 🎉`}
@@ -248,6 +261,7 @@ function ShellRouteLayout(): JSX.Element {
       currentUser={currentUser}
       onCurrentUserChange={setCurrentUser}
     >
+      {accessWarning ? <div className="fixed right-4 top-4 z-50 rounded-xl bg-rose-100 px-4 py-3 text-sm font-semibold text-rose-800 shadow-lg" role="alert">{accessWarning}</div> : null}
       <Outlet context={{ currentUser }} />
     </Shell>
   );
