@@ -448,10 +448,14 @@ export function createApp(): express.Express {
     const shop = typeof req.query.shop === "string" ? req.query.shop : "";
     try {
       await completeShopifyInstall(code, state, shop);
-      res.redirect(`${env.CLIENT_APP_URL.replace(/\/$/, "")}/shopify?connected=1`);
+      const successUrl = new URL("/shopify?connected=1", env.CLIENT_APP_URL);
+      res.redirect(successUrl.toString());
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Shopify authorization failed.";
-      res.redirect(`${env.CLIENT_APP_URL.replace(/\/$/, "")}/shopify?error=${encodeURIComponent(reason)}`);
+      console.error("Shopify OAuth callback failed", reason);
+      const errorUrl = new URL("/shopify", env.CLIENT_APP_URL);
+      errorUrl.searchParams.set("error", reason);
+      res.redirect(errorUrl.toString());
     }
   });
 
