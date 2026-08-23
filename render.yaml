@@ -32,7 +32,7 @@ services:
     staticPublishPath: client/dist
     envVars:
       - key: VITE_API_BASE_URL
-        sync: false
+        value: https://colophon-api.onrender.com/api
     routes:
       - type: rewrite
         source: /*
