@@ -175,8 +175,8 @@ export async function lookupBookByIsbn(isbn: string): Promise<BookLookup> {
   try {
     return await request<BookLookup>(`/api/intake/isbn/${encodeURIComponent(normalized)}`);
   } catch (error) {
-    if (error instanceof Error && error.message === "Request failed: 404") {
-      throw new Error("ISBN was not found in the configured book services.");
+    if (error instanceof Error && error.message !== "Request failed: 404") {
+      throw error;
     }
     return lookupOpenLibrary(normalized);
   }

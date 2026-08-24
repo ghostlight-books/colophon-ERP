@@ -426,6 +426,12 @@ function IntakePage(): JSX.Element {
               autoFocus
               value={barcode}
               onChange={(event) => setBarcode(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleBarcodeLookup(event.currentTarget.value);
+                }
+              }}
               placeholder="Scan barcode or enter ISBN"
               aria-label="Barcode or ISBN"
               className="h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400"
