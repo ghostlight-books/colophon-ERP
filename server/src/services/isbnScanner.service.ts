@@ -101,7 +101,7 @@ function fromCache(record: {
 }): BookLookup {
   const result: Omit<BookLookup, "label"> = {
     isbn: record.isbn,
-    title: record.title,
+    title: record.title ?? record.labelTitle,
     author: record.author,
     publisher: record.publisher,
     description: record.description,
@@ -262,12 +262,16 @@ async function lookupOpenLibrary(isbn: string): Promise<BookLookup | null> {
   const authorKeys = (edition.authors ?? []).map((author) => author.key).filter((key): key is string => Boolean(key));
   const authorNames = await Promise.all(
     authorKeys.slice(0, 3).map(async (key) => {
-      const authorResponse = await fetchWithTimeout(`https://openlibrary.org${key}.json`);
-      if (!authorResponse.ok) {
+      try {
+        const authorResponse = await fetchWithTimeout(`https://openlibrary.org${key}.json`);
+        if (!authorResponse.ok) {
+          return null;
+        }
+        const author = (await authorResponse.json()) as { name?: unknown };
+        return firstString(author.name);
+      } catch {
         return null;
       }
-      const author = (await authorResponse.json()) as { name?: unknown };
-      return firstString(author.name);
     }),
   );
   const categories = normalizeCategories(edition.subjects ?? []);
@@ -332,7 +336,7 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       const fallbackPrice = thriftbooksDetails?.title
         ? thriftbooksDetails.price
         : await lookupAbeBooksPrice(normalized);
-      if (cached.publisher || cached.description || cached.seoTitle || cached.seoKeywords || cached.catalogTags) {
+      if (cachedBook.title && cachedBook.author && cached.publisher && cached.coverUrl && (cached.description || cached.catalogTags)) {
         if (fallbackPrice !== null) {
           const refreshed: BookLookup = {
             ...cachedBook,
