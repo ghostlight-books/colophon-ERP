@@ -178,6 +178,42 @@ async function getAdapter(storeId: string, platform: EcommercePlatform): Promise
   return { adapter, integration };
 }
 
+type InventorySyncRecord = {
+  sku: string;
+  isbn: string;
+  title: string | null;
+  author: string | null;
+  description: string | null;
+  coverUrl: string | null;
+  seoTitle: string | null;
+  seoDescription: string | null;
+  seoKeywords: string | null;
+  catalogTags: string | null;
+  category: string | null;
+  subcategory: string | null;
+  mediaType: string;
+  listPrice: number | null;
+  quantityOnHand: number;
+};
+
+function mapInventoryRecord(item: InventorySyncRecord) {
+  const tags = [item.category, item.subcategory, item.mediaType, ...(item.catalogTags ?? "").split(","), ...(item.seoKeywords ?? "").split(",")]
+    .filter((tag): tag is string => Boolean(tag?.trim()))
+    .map((tag) => tag.trim())
+    .filter((tag, index, all) => all.indexOf(tag) === index);
+  return { sku: item.sku, barcode: item.isbn, title: item.title ?? item.isbn, author: item.author, description: item.description, coverUrl: item.coverUrl, tags, seoTitle: item.seoTitle, seoDescription: item.seoDescription, category: item.category, price: item.listPrice ?? 0, quantity: item.quantityOnHand };
+}
+
+export async function syncInventoryItemByIsbn(storeId: string, isbn: string): Promise<{ success: boolean; message?: string }> {
+  const item = await prisma.isbnLookupCache.findUnique({ where: { isbn }, select: { sku: true, isbn: true, title: true, author: true, description: true, coverUrl: true, seoTitle: true, seoDescription: true, seoKeywords: true, catalogTags: true, category: true, subcategory: true, mediaType: true, listPrice: true, quantityOnHand: true } });
+  if (!item) return { success: false, message: `Inventory record for ${isbn} was not found.` };
+  const { adapter, integration } = await getAdapter(storeId, "shopify");
+  if (!integration.syncInventory) return { success: false, message: "Shopify inventory sync is disabled for this store." };
+  const result = await adapter.syncInventoryItem(mapInventoryRecord(item));
+  await prisma.storeEcommerceIntegration.update({ where: { id: integration.id }, data: { lastSyncedAt: new Date() } });
+  return result;
+}
+
 export async function syncStoreInventory(storeId: string, platform: EcommercePlatform, sku: string, quantity: number): Promise<{ success: boolean; message?: string }> {
   const { adapter, integration } = await getAdapter(storeId, platform);
   const result = await adapter.updateInventoryLevel(sku, quantity);
@@ -196,8 +232,7 @@ export async function syncStoreInventoryCatalog(storeId: string, platform: Ecomm
   let skipped = 0;
   for (const item of items) {
     const { adapter, integration } = await getAdapter(storeId, platform);
-    const tags = [item.category, item.subcategory, item.mediaType, ...(item.catalogTags ?? "").split(","), ...(item.seoKeywords ?? "").split(",")].filter((tag): tag is string => Boolean(tag?.trim())).map((tag) => tag.trim()).filter((tag, index, all) => all.indexOf(tag) === index);
-    const result = await adapter.syncInventoryItem({ sku: item.sku, barcode: item.isbn, title: item.title ?? item.isbn, author: item.author, description: item.description, coverUrl: item.coverUrl, tags, seoTitle: item.seoTitle, seoDescription: item.seoDescription, category: item.category, price: item.listPrice ?? 0, quantity: item.quantityOnHand });
+    const result = await adapter.syncInventoryItem(mapInventoryRecord(item));
     await prisma.storeEcommerceIntegration.update({ where: { id: integration.id }, data: { lastSyncedAt: new Date() } });
     if (result.success) {
       synced += 1;

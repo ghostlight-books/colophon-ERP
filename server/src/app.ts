@@ -12,7 +12,7 @@ import { lookupBookByIsbn, pullOpenLibraryMetadata } from "./services/isbnScanne
 import { createSquareCheckoutLink, isSquareConfigured } from "./services/squarePayment.service.js";
 import { executeDropshipSettlement } from "./services/networkSettlement.service.js";
 import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service.js";
-import { fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncStoreInventory, syncStoreInventoryCatalog, type EcommercePlatform } from "./services/ecommerce.service.js";
+import { fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncInventoryItemByIsbn, syncStoreInventory, syncStoreInventoryCatalog, type EcommercePlatform } from "./services/ecommerce.service.js";
 import { completeShopifyInstall, createShopifyInstallUrl } from "./services/shopifyOAuth.service.js";
 
 type OpsConnector = {
@@ -981,6 +981,11 @@ export function createApp(): express.Express {
           container: container ?? "Unassigned",
         },
       });
+      void syncInventoryItemByIsbn("ghostlight-demo", item.isbn)
+        .then((result) => {
+          if (!result.success) console.warn("Automatic Shopify inventory sync skipped", result.message);
+        })
+        .catch((error) => console.error("Automatic Shopify inventory sync failed", error));
       res.json(item);
     } catch (error) {
       next(error);
