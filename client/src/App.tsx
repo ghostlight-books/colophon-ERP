@@ -192,7 +192,6 @@ function ShellRouteLayout(): JSX.Element {
       { key: "operations", label: "Operations", to: "/operations", icon: <OperationsIcon />, module: "DASHBOARD" },
       { key: "marketing", label: "Marketing", to: "/marketing", icon: <MarketingIcon />, module: "LISTS" },
       { key: "finance", label: "Accounting", to: "/finance", icon: <WalletIcon />, module: "ACCOUNTING" },
-      { key: "shopify", label: "Shopify", to: "/shopify", icon: <NetworkIcon />, module: "INVENTORY" },
       { key: "open-network", label: "Open Network", to: "/open-network", icon: <NetworkIcon />, module: "INVENTORY" },
     ];
     return items.filter((item) => hasModuleAccess(normalizeRole(currentUser.role), item.module));
