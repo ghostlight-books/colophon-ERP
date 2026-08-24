@@ -183,7 +183,7 @@ function ShopifyPage(): JSX.Element {
 
       <section className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-800">Connection settings</h2>
+          <h2 className="text-xl font-semibold text-slate-800">Shopify OAuth connection</h2>
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <label className="grid gap-1 text-sm text-slate-600">
               Shopify store URL
