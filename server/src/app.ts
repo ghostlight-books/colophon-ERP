@@ -376,7 +376,7 @@ export function createApp(): express.Express {
   });
 
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok" });
+    res.json({ status: "ok", service: "colophon-api", environment: env.NODE_ENV, uptimeSeconds: Math.floor(process.uptime()), commit: env.RENDER_GIT_COMMIT ?? null });
   });
 
   app.get("/api/finance/report", async (req, res, next) => {

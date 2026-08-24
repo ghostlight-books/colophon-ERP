@@ -7,6 +7,7 @@ type AdminStore = { id: string; slug: string; storeName: string; ownerEmail: str
 type GlobalIntegration = { id: string; key: string; name: string; category: string; enabled: boolean };
 type StoreEcommerceConnection = { platform: "shopify" | "woocommerce"; storeUrl: string; syncInventory: boolean; syncOrders: boolean; lastSyncedAt: string | null };
 type StoreMember = { id: string; userId: string; email: string; displayName: string; isActive: boolean; role: string; permissions: Record<string, boolean> };
+type ApiHealth = { status: string; service: string; environment: string; uptimeSeconds: number; commit: string | null };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api";
 const adminSections = [
@@ -42,6 +43,7 @@ function AdminPage(): JSX.Element {
   const [shopifyStatus, setShopifyStatus] = useState("No Shopify connection configured.");
   const [members, setMembers] = useState<StoreMember[]>([]);
   const [memberDraft, setMemberDraft] = useState({ email: "", displayName: "", password: "", role: "ASSOCIATE" });
+  const [apiHealth, setApiHealth] = useState<ApiHealth | null>(null);
 
   async function adminPost(path: string, body: Record<string, unknown>): Promise<void> {
     const response = await fetch(`${API_BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" }, body: JSON.stringify(body) });
@@ -49,6 +51,13 @@ function AdminPage(): JSX.Element {
     if (!response.ok) throw new Error(payload.error ?? "Admin action failed.");
     setActionMessage(payload.token ? "A short-lived impersonation session was created." : "Admin action completed.");
   }
+
+  useEffect(() => {
+    fetch(`${API_BASE}/health`)
+      .then(async (response) => response.ok ? (await response.json()) as ApiHealth : null)
+      .then(setApiHealth)
+      .catch(() => setApiHealth(null));
+  }, []);
 
   useEffect(() => {
     fetch(`${API_BASE}/admin/stores`, { headers: { "X-Dev-Subdomain": "admin" } })
@@ -214,6 +223,7 @@ function AdminPage(): JSX.Element {
   }, [query, stores]);
   const totalBalance = stores.reduce((sum, store) => sum + store.ledgerBalance, 0);
   const accessPanel = <SurfaceCard className="mt-5 p-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-xl font-semibold">Site Access</h2><p className="mt-1 text-sm text-slate-500">Add accounts to a bookstore and control their role.</p></div><select value={selectedStoreId} onChange={(event) => setSelectedStoreId(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Select a bookstore</option>{stores.map((store) => <option key={store.id} value={store.id}>{store.storeName}</option>)}</select></div><div className="mt-4 grid gap-2 lg:grid-cols-[1fr_1fr_1fr_140px_auto]"><input value={memberDraft.displayName} onChange={(event) => setMemberDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Name" aria-label="New member name" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><input value={memberDraft.email} onChange={(event) => setMemberDraft((current) => ({ ...current, email: event.target.value }))} placeholder="Email" aria-label="New member email" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><input type="password" value={memberDraft.password} onChange={(event) => setMemberDraft((current) => ({ ...current, password: event.target.value }))} placeholder="Temporary password" aria-label="New member password" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><select value={memberDraft.role} onChange={(event) => setMemberDraft((current) => ({ ...current, role: event.target.value }))} aria-label="New member role" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="CASHIER">Cashier</option><option value="VIEWER">Viewer</option><option value="MANAGER">Manager</option><option value="ADMIN">Admin</option></select><button type="button" onClick={() => void inviteMember()} className="h-10 rounded-xl bg-slate-800 px-4 text-sm font-semibold text-white">Add account</button></div><div className="mt-4 grid gap-2">{members.map((member) => <div key={member.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5"><div><p className="text-sm font-semibold text-slate-700">{member.displayName}</p><p className="text-xs text-slate-500">{member.email} · {member.isActive ? "Active" : "Inactive"}</p></div><select value={member.role} onChange={(event) => void updateMember(member, event.target.value)} aria-label={`Role for ${member.displayName}`} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs"><option value="CASHIER">Cashier</option><option value="VIEWER">Viewer</option><option value="MANAGER">Manager</option><option value="ADMIN">Admin</option></select></div>)}</div></SurfaceCard>;
+  const deploymentPanel = <SurfaceCard className="mt-5 p-5"><div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">Deployment Status</h2><p className="mt-1 text-sm text-slate-500">Live service information from the deployed ERP.</p></div><span className={apiHealth?.status === "ok" ? "rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-700" : "rounded-full bg-rose-100 px-3 py-1.5 text-xs font-semibold text-rose-700"}>{apiHealth?.status === "ok" ? "API online" : "API unavailable"}</span></div><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><div><p className="text-xs text-slate-500">API</p><a href="https://colophon-api.onrender.com" target="_blank" rel="noreferrer" className="text-sm font-semibold text-sky-700">colophon-api.onrender.com</a></div><div><p className="text-xs text-slate-500">Client</p><a href={window.location.origin} target="_blank" rel="noreferrer" className="text-sm font-semibold text-sky-700">{window.location.host}</a></div><div><p className="text-xs text-slate-500">Environment</p><p className="text-sm font-semibold text-slate-700">{apiHealth?.environment ?? "Unknown"}</p></div><div><p className="text-xs text-slate-500">Uptime</p><p className="text-sm font-semibold text-slate-700">{apiHealth ? `${Math.floor(apiHealth.uptimeSeconds / 60)}m ${apiHealth.uptimeSeconds % 60}s` : "Unknown"}</p></div></div>{apiHealth?.commit ? <p className="mt-3 text-xs text-slate-500">API commit: {apiHealth.commit}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><a href="https://dashboard.render.com" target="_blank" rel="noreferrer" className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-white">Open Render</a><a href="https://github.com/ghostlight-books/colophon-ERP" target="_blank" rel="noreferrer" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">Open GitHub</a></div></SurfaceCard>;
 
   return (
     <main className="min-h-screen bg-[#f1f1f3] p-3 text-slate-800 md:p-5">
@@ -234,6 +244,7 @@ function AdminPage(): JSX.Element {
         </header>
         <p className="mt-4 rounded-xl bg-white/60 px-4 py-3 text-sm text-slate-600">{message}</p>
         {accessPanel}
+        {deploymentPanel}
         <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[["Bookstores", stores.length], ["Active tenants", stores.length], ["Network balance", `$${totalBalance.toFixed(2)}`], ["System status", "Operational"]].map(([label, value]) => <SurfaceCard key={String(label)} className="p-4"><p className="text-xs uppercase tracking-wide text-slate-500">{label}</p><p className="mt-2 text-2xl font-semibold text-slate-800">{value}</p></SurfaceCard>)}
         </section>
