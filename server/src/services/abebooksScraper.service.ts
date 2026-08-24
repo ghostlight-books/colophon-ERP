@@ -1,12 +1,11 @@
 const PRICE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 10000;
-const MIN_REQUEST_INTERVAL_MS = 3000;
+const MIN_REQUEST_INTERVAL_MS = 0;
 const BACKOFF_MS = 15 * 60 * 1000;
 const priceCache = new Map<string, { price: number; expiresAt: number }>();
 const inFlightRequests = new Map<string, Promise<number | null>>();
 let lastRequestAt = 0;
 let blockedUntil = 0;
-let requestQueue: Promise<void> = Promise.resolve();
 
 function extractPrice(html: string): number | null {
   const match = html.match(/data-test-id=["']listing-price["'][^>]*>\s*(?:US\$|\$)\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
@@ -35,16 +34,14 @@ export async function lookupAbeBooksPrice(isbn: string): Promise<number | null> 
 
 async function fetchAbeBooksPrice(isbn: string): Promise<number | null> {
   let result: number | null = null;
-  const run = requestQueue.then(async () => {
+  const run = (async () => {
     const now = Date.now();
     if (blockedUntil > now) {
       return;
     }
 
     const waitMs = Math.max(0, lastRequestAt + MIN_REQUEST_INTERVAL_MS - now);
-    if (waitMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
-    }
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
 
     try {
       const response = await fetch(`https://www.abebooks.com/servlet/SearchResults?isbn=${encodeURIComponent(isbn)}`, {
@@ -75,7 +72,6 @@ async function fetchAbeBooksPrice(isbn: string): Promise<number | null> {
       console.warn("AbeBooks request error", error instanceof Error ? error.message : error);
     }
   });
-  requestQueue = run.then(() => undefined, () => undefined);
   await run;
   return result;
 }

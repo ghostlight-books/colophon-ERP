@@ -1,13 +1,12 @@
 const PRICE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 10000;
-const MIN_REQUEST_INTERVAL_MS = 3000;
+const MIN_REQUEST_INTERVAL_MS = 0;
 const BACKOFF_MS = 15 * 60 * 1000;
 const priceCache = new Map<string, { price: number; expiresAt: number }>();
 const inFlightRequests = new Map<string, Promise<ThriftbooksDetails | null>>();
 const detailsCache = new Map<string, { details: ThriftbooksDetails; expiresAt: number }>();
 let lastRequestAt = 0;
 let blockedUntil = 0;
-let requestQueue: Promise<void> = Promise.resolve();
 
 export type ThriftbooksDetails = {
   price: number | null;
@@ -78,16 +77,14 @@ export async function lookupThriftbooksDetails(isbn: string): Promise<Thriftbook
 
 async function fetchThriftbooksDetails(isbn: string): Promise<ThriftbooksDetails | null> {
   let result: ThriftbooksDetails | null = null;
-  const run = requestQueue.then(async () => {
+  const run = (async () => {
     const now = Date.now();
     if (blockedUntil > now) {
       return;
     }
 
     const waitMs = Math.max(0, lastRequestAt + MIN_REQUEST_INTERVAL_MS - now);
-    if (waitMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
-    }
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
 
     try {
       const response = await fetch(`https://www.thriftbooks.com/browse/?b.search=${encodeURIComponent(isbn)}`, {
@@ -121,7 +118,6 @@ async function fetchThriftbooksDetails(isbn: string): Promise<ThriftbooksDetails
       console.warn("ThriftBooks request error", error instanceof Error ? error.message : error);
     }
   });
-  requestQueue = run.then(() => undefined, () => undefined);
   await run;
   return result;
 }

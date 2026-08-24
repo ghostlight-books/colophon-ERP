@@ -336,7 +336,15 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       const fallbackPrice = thriftbooksDetails?.title
         ? thriftbooksDetails.price
         : await lookupAbeBooksPrice(normalized);
-      if (cachedBook.title && cachedBook.author && cached.publisher && cached.coverUrl && (cached.description || cached.catalogTags)) {
+      if (cachedBook.title) {
+        if (!cachedBook.author && !cached.publisher && !cached.coverUrl && !cached.description && !cached.catalogTags) {
+          const enriched = await lookupOpenLibrary(normalized).catch(() => null);
+          if (enriched) {
+            const refreshed = { ...cachedBook, ...enriched, thriftbooksPrice: fallbackPrice ?? cachedBook.thriftbooksPrice, label: { ...cachedBook.label, ...enriched.label, price: fallbackPrice ?? cachedBook.thriftbooksPrice } };
+            await saveToCache(refreshed);
+            return refreshed;
+          }
+        }
         if (fallbackPrice !== null) {
           const refreshed: BookLookup = {
             ...cachedBook,
