@@ -12,6 +12,14 @@ export type EcommerceIntegrationStatus = {
   lastSyncedAt: Date | null;
 };
 
+export type InventorySyncProgress = {
+  sku: string;
+  isbn: string;
+  title: string;
+  status: "synced" | "failed";
+  message?: string;
+};
+
 interface EcommerceAdapter {
   updateInventoryLevel(sku: string, quantity: number): Promise<{ success: boolean; message?: string }>;
   updateInventoryLevelByBarcode(sku: string, barcode: string, quantity: number): Promise<{ success: boolean; message?: string }>;
@@ -177,7 +185,7 @@ export async function fetchStoreOrders(storeId: string, platform: EcommercePlatf
   return adapter.fetchRecentOrders();
 }
 
-export async function syncStoreInventoryCatalog(storeId: string, platform: EcommercePlatform): Promise<{ success: boolean; message: string; synced: number; skipped: number }> {
+export async function syncStoreInventoryCatalog(storeId: string, platform: EcommercePlatform, onProgress?: (progress: InventorySyncProgress) => void): Promise<{ success: boolean; message: string; synced: number; skipped: number }> {
   const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, isbn: true, title: true, author: true, description: true, coverUrl: true, seoTitle: true, seoDescription: true, category: true, subcategory: true, mediaType: true, listPrice: true, quantityOnHand: true } });
   let synced = 0;
   let skipped = 0;
@@ -185,8 +193,13 @@ export async function syncStoreInventoryCatalog(storeId: string, platform: Ecomm
     const { adapter, integration } = await getAdapter(storeId, platform);
     const result = await adapter.syncInventoryItem({ sku: item.sku, barcode: item.isbn, title: item.title ?? item.isbn, author: item.author, description: item.description, coverUrl: item.coverUrl, tags: [item.category, item.subcategory, item.mediaType].filter((tag): tag is string => Boolean(tag)), seoTitle: item.seoTitle, seoDescription: item.seoDescription, category: item.category, price: item.listPrice ?? 0, quantity: item.quantityOnHand });
     await prisma.storeEcommerceIntegration.update({ where: { id: integration.id }, data: { lastSyncedAt: new Date() } });
-    if (result.success) synced += 1;
-    else skipped += 1;
+    if (result.success) {
+      synced += 1;
+      onProgress?.({ sku: item.sku, isbn: item.isbn, title: item.title ?? item.isbn, status: "synced", message: result.message });
+    } else {
+      skipped += 1;
+      onProgress?.({ sku: item.sku, isbn: item.isbn, title: item.title ?? item.isbn, status: "failed", message: result.message });
+    }
   }
   return { success: true, message: `Shopify inventory sync completed: ${synced} item(s) synced, ${skipped} skipped.`, synced, skipped };
 }

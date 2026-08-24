@@ -661,6 +661,22 @@ export function createApp(): express.Express {
     } catch (error) { next(error); }
   });
 
+  app.get("/api/stores/:storeId/ecommerce/:platform/inventory-sync-stream", async (req, res, next) => {
+    try {
+      res.status(200).setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      const result = await syncStoreInventoryCatalog(req.params.storeId, req.params.platform as EcommercePlatform, (progress) => {
+        res.write(`${JSON.stringify({ type: "item", ...progress })}\n`);
+      });
+      res.write(`${JSON.stringify({ type: "complete", ...result })}\n`);
+      res.end();
+    } catch (error) {
+      if (!res.headersSent) next(error);
+      else res.end(`${JSON.stringify({ type: "error", message: error instanceof Error ? error.message : "Inventory sync failed." })}\n`);
+    }
+  });
+
   app.get("/api/stores/:storeId/ecommerce/:platform/orders", async (req, res, next) => {
     try {
       res.json({ orders: await fetchStoreOrders(req.params.storeId, req.params.platform as EcommercePlatform) });

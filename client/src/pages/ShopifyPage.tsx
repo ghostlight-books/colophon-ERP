@@ -24,6 +24,8 @@ type ShopifyProductRow = {
   quantity: number;
   title: string;
   price?: string;
+  status?: "synced" | "failed";
+  message?: string;
 };
 
 function ShopifyPage(): JSX.Element {
@@ -121,16 +123,26 @@ function ShopifyPage(): JSX.Element {
     }
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/inventory-sync-all`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" },
-      });
-      const payload = (await response.json().catch(() => ({}))) as { success?: boolean; message?: string; error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Inventory sync failed.");
-      }
+      const response = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/inventory-sync-stream`, { headers: { Accept: "application/x-ndjson", "X-Dev-Subdomain": "admin" } });
+      if (!response.ok || !response.body) throw new Error("Inventory sync could not start.");
       setProducts([]);
-      setMessage(payload.message ?? "Inventory sync succeeded.");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const chunk = await reader.read();
+        buffer += decoder.decode(chunk.value ?? new Uint8Array(), { stream: !chunk.done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as { type: string; sku?: string; isbn?: string; title?: string; status?: "synced" | "failed"; message?: string; synced?: number; skipped?: number };
+          if (event.type === "item" && event.sku && event.title && event.status) setProducts((current) => [...current, { sku: event.sku!, title: event.title!, quantity: 0, status: event.status, message: event.message }]);
+          if (event.type === "complete") setMessage(`Inventory sync completed: ${event.synced ?? 0} synced, ${event.skipped ?? 0} failed.`);
+          if (event.type === "error") throw new Error(event.message ?? "Inventory sync failed.");
+        }
+        if (chunk.done) break;
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Inventory sync failed.");
     } finally {
@@ -218,12 +230,14 @@ function ShopifyPage(): JSX.Element {
                   <th className="px-3 py-2">SKU</th>
                   <th className="px-3 py-2">Title</th>
                   <th className="px-3 py-2">Qty</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Details</th>
                 </tr>
               </thead>
               <tbody>
                 {products.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="px-3 py-6 text-center text-slate-500">No product sync has happened yet.</td>
+                    <td colSpan={5} className="px-3 py-6 text-center text-slate-500">No product sync has happened yet.</td>
                   </tr>
                 ) : (
                   products.map((product) => (
@@ -231,6 +245,8 @@ function ShopifyPage(): JSX.Element {
                       <td className="px-3 py-2 font-medium">{product.sku}</td>
                       <td className="px-3 py-2">{product.title}</td>
                       <td className="px-3 py-2">{product.quantity}</td>
+                      <td className={product.status === "synced" ? "px-3 py-2 font-semibold text-emerald-700" : "px-3 py-2 font-semibold text-rose-700"}>{product.status === "synced" ? "Synced" : "Failed"}</td>
+                      <td className="px-3 py-2 text-xs text-slate-500">{product.message ?? ""}</td>
                     </tr>
                   ))
                 )}
