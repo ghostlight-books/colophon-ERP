@@ -14,6 +14,7 @@ export type EcommerceIntegrationStatus = {
 
 interface EcommerceAdapter {
   updateInventoryLevel(sku: string, quantity: number): Promise<{ success: boolean; message?: string }>;
+  updateInventoryLevelByBarcode(sku: string, barcode: string, quantity: number): Promise<{ success: boolean; message?: string }>;
   fetchRecentOrders(): Promise<unknown[]>;
 }
 
@@ -38,6 +39,10 @@ class ShopifyAdapter implements EcommerceAdapter {
   }
 
   async updateInventoryLevel(sku: string, quantity: number): Promise<{ success: boolean; message?: string }> {
+    return this.updateInventoryLevelByBarcode(sku, "", quantity);
+  }
+
+  async updateInventoryLevelByBarcode(sku: string, barcode: string, quantity: number): Promise<{ success: boolean; message?: string }> {
     if (this.isLocalDevConnector()) {
       return {
         success: true,
@@ -45,10 +50,10 @@ class ShopifyAdapter implements EcommerceAdapter {
       };
     }
 
-    const products = await parseResponse<{ products?: Array<{ variants?: Array<{ sku?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json?limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
-    const variant = products.products?.flatMap((product) => product.variants ?? []).find((candidate) => candidate.sku === sku);
+    const products = await parseResponse<{ products?: Array<{ variants?: Array<{ sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json?limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
+    const variant = products.products?.flatMap((product) => product.variants ?? []).find((candidate) => candidate.sku === sku || (barcode && candidate.barcode === barcode));
     if (!variant?.inventory_item_id) {
-      return { success: false, message: `Shopify SKU ${sku} was not found.` };
+      return { success: false, message: `Shopify SKU or barcode for ${sku} was not found.` };
     }
     await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/inventory_levels/set.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ inventory_item_id: variant.inventory_item_id, available: Math.max(0, Math.floor(quantity)) }) }));
     return { success: true };
@@ -59,7 +64,7 @@ class ShopifyAdapter implements EcommerceAdapter {
       return [];
     }
 
-    const result = await parseResponse<{ orders?: unknown[] }>(await fetch(`${this.storeUrl}/admin/api/2026-01/orders.json?status=open&limit=50`, { headers: { "X-Shopify-Access-Token": this.token } }));
+    const result = await parseResponse<{ orders?: unknown[] }>(await fetch(`${this.storeUrl}/admin/api/2026-01/orders.json?status=any&limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
     return result.orders ?? [];
   }
 }
@@ -79,6 +84,10 @@ class WooCommerceAdapter implements EcommerceAdapter {
     }
     await parseResponse(await fetch(`${this.storeUrl}/wp-json/wc/v3/products/${product.id}`, { method: "PUT", headers: { Authorization: this.authorization, "Content-Type": "application/json" }, body: JSON.stringify({ manage_stock: true, stock_quantity: Math.max(0, Math.floor(quantity)) }) }));
     return { success: true };
+  }
+
+  async updateInventoryLevelByBarcode(sku: string, _barcode: string, quantity: number): Promise<{ success: boolean; message?: string }> {
+    return this.updateInventoryLevel(sku, quantity);
   }
 
   async fetchRecentOrders(): Promise<unknown[]> {
@@ -132,11 +141,13 @@ export async function fetchStoreOrders(storeId: string, platform: EcommercePlatf
 }
 
 export async function syncStoreInventoryCatalog(storeId: string, platform: EcommercePlatform): Promise<{ success: boolean; message: string; synced: number; skipped: number }> {
-  const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, quantityOnHand: true } });
+  const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, isbn: true, quantityOnHand: true } });
   let synced = 0;
   let skipped = 0;
   for (const item of items) {
-    const result = await syncStoreInventory(storeId, platform, item.sku, item.quantityOnHand);
+    const { adapter, integration } = await getAdapter(storeId, platform);
+    const result = await adapter.updateInventoryLevelByBarcode(item.sku, item.isbn, item.quantityOnHand);
+    await prisma.storeEcommerceIntegration.update({ where: { id: integration.id }, data: { lastSyncedAt: new Date() } });
     if (result.success) synced += 1;
     else skipped += 1;
   }
