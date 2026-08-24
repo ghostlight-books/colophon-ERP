@@ -15,7 +15,7 @@ export type EcommerceIntegrationStatus = {
 interface EcommerceAdapter {
   updateInventoryLevel(sku: string, quantity: number): Promise<{ success: boolean; message?: string }>;
   updateInventoryLevelByBarcode(sku: string, barcode: string, quantity: number): Promise<{ success: boolean; message?: string }>;
-  syncInventoryItem(item: { sku: string; barcode: string; title: string; price: number; quantity: number }): Promise<{ success: boolean; message?: string }>;
+  syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number }): Promise<{ success: boolean; message?: string }>;
   fetchRecentOrders(): Promise<unknown[]>;
 }
 
@@ -37,6 +37,15 @@ class ShopifyAdapter implements EcommerceAdapter {
   private isLocalDevConnector(): boolean {
     const normalized = this.storeUrl.trim().toLowerCase();
     return normalized.includes("example-store") || normalized.includes("localhost") || normalized === "" || !this.token.trim();
+  }
+
+  private async assignToCollection(productId: number, category: string | null): Promise<void> {
+    if (!category) return;
+    const headers = { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" };
+    const collections = await parseResponse<{ custom_collections?: Array<{ id?: number; title?: string }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/custom_collections.json?limit=250`, { headers }));
+    const existing = collections.custom_collections?.find((collection) => collection.title?.trim().toLowerCase() === category.trim().toLowerCase());
+    const collectionId = existing?.id ?? (await parseResponse<{ custom_collection?: { id?: number } }>(await fetch(`${this.storeUrl}/admin/api/2026-01/custom_collections.json`, { method: "POST", headers, body: JSON.stringify({ custom_collection: { title: category.trim(), published: true } }) }))).custom_collection?.id;
+    if (collectionId) await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/collects.json`, { method: "POST", headers, body: JSON.stringify({ collect: { product_id: productId, collection_id: collectionId } }) }));
   }
 
   async updateInventoryLevel(sku: string, quantity: number): Promise<{ success: boolean; message?: string }> {
@@ -63,12 +72,17 @@ class ShopifyAdapter implements EcommerceAdapter {
     return { success: true };
   }
 
-  async syncInventoryItem(item: { sku: string; barcode: string; title: string; price: number; quantity: number }): Promise<{ success: boolean; message?: string }> {
+  async syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number }): Promise<{ success: boolean; message?: string }> {
     if (this.isLocalDevConnector()) return { success: true };
-    const products = await parseResponse<{ products?: Array<{ variants?: Array<{ sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json?limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
-    const variant = products.products?.flatMap((product) => product.variants ?? []).find((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode));
-    if (variant?.inventory_item_id) return this.updateInventoryLevelByBarcode(item.sku, item.barcode, item.quantity);
-    const created = await parseResponse<{ product?: { variants?: Array<{ inventory_item_id?: number }> } }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ product: { title: item.title, status: "active", variants: [{ sku: item.sku, barcode: item.barcode, price: item.price.toFixed(2), inventory_management: "shopify" }] } }) }));
+    const products = await parseResponse<{ products?: Array<{ id?: number; variants?: Array<{ sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json?limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
+    const matchedProduct = products.products?.find((product) => product.variants?.some((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode)));
+    const variant = matchedProduct?.variants?.find((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode));
+    const productPayload = { title: item.title, body_html: item.description ?? "", vendor: item.author ?? "", tags: item.tags.join(", "), metafields: [{ namespace: "global", key: "title_tag", type: "single_line_text_field", value: item.seoTitle ?? item.title }, { namespace: "global", key: "description_tag", type: "multi_line_text_field", value: item.seoDescription ?? item.description ?? item.title }], ...(item.coverUrl ? { images: [{ src: item.coverUrl }] } : {}) };
+    if (matchedProduct?.id) {
+      await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/products/${matchedProduct.id}.json`, { method: "PUT", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ product: productPayload }) }));
+    }
+    const created = variant?.inventory_item_id ? { product: { id: matchedProduct?.id, variants: [{ inventory_item_id: variant.inventory_item_id }] } } : await parseResponse<{ product?: { id?: number; variants?: Array<{ inventory_item_id?: number }> } }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ product: { ...productPayload, status: "active", variants: [{ sku: item.sku, barcode: item.barcode, price: item.price.toFixed(2), inventory_management: "shopify" }] } }) }));
+    if (created.product?.id) await this.assignToCollection(created.product.id, item.category);
     const createdInventoryItemId = created.product?.variants?.[0]?.inventory_item_id;
     if (!createdInventoryItemId) return { success: false, message: `Shopify product could not be created for ${item.sku}.` };
     const locations = await parseResponse<{ locations?: Array<{ id?: number }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/locations.json`, { headers: { "X-Shopify-Access-Token": this.token } }));
@@ -109,7 +123,7 @@ class WooCommerceAdapter implements EcommerceAdapter {
     return this.updateInventoryLevel(sku, quantity);
   }
 
-  async syncInventoryItem(item: { sku: string; barcode: string; title: string; price: number; quantity: number }): Promise<{ success: boolean; message?: string }> {
+  async syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number }): Promise<{ success: boolean; message?: string }> {
     return this.updateInventoryLevel(item.sku, item.quantity);
   }
 
@@ -164,12 +178,12 @@ export async function fetchStoreOrders(storeId: string, platform: EcommercePlatf
 }
 
 export async function syncStoreInventoryCatalog(storeId: string, platform: EcommercePlatform): Promise<{ success: boolean; message: string; synced: number; skipped: number }> {
-  const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, isbn: true, title: true, listPrice: true, quantityOnHand: true } });
+  const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, isbn: true, title: true, author: true, description: true, coverUrl: true, seoTitle: true, seoDescription: true, category: true, subcategory: true, mediaType: true, listPrice: true, quantityOnHand: true } });
   let synced = 0;
   let skipped = 0;
   for (const item of items) {
     const { adapter, integration } = await getAdapter(storeId, platform);
-    const result = await adapter.syncInventoryItem({ sku: item.sku, barcode: item.isbn, title: item.title ?? item.isbn, price: item.listPrice ?? 0, quantity: item.quantityOnHand });
+    const result = await adapter.syncInventoryItem({ sku: item.sku, barcode: item.isbn, title: item.title ?? item.isbn, author: item.author, description: item.description, coverUrl: item.coverUrl, tags: [item.category, item.subcategory, item.mediaType].filter((tag): tag is string => Boolean(tag)), seoTitle: item.seoTitle, seoDescription: item.seoDescription, category: item.category, price: item.listPrice ?? 0, quantity: item.quantityOnHand });
     await prisma.storeEcommerceIntegration.update({ where: { id: integration.id }, data: { lastSyncedAt: new Date() } });
     if (result.success) synced += 1;
     else skipped += 1;
