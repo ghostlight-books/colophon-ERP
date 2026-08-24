@@ -616,7 +616,8 @@ export function createApp(): express.Express {
 
   app.get("/api/stores/:storeId/ecommerce", async (req, res, next) => {
     try {
-      res.json(await listEcommerceIntegrations(req.params.storeId));
+      const store = await prisma.store.findFirst({ where: { OR: [{ id: req.params.storeId }, { slug: req.params.storeId }] } });
+      res.json(await listEcommerceIntegrations(store?.id ?? req.params.storeId));
     } catch (error) {
       next(error);
     }

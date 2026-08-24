@@ -105,7 +105,10 @@ export async function listEcommerceIntegrations(storeId: string): Promise<Ecomme
 }
 
 async function getAdapter(storeId: string, platform: EcommercePlatform): Promise<{ adapter: EcommerceAdapter; integration: { id: string; syncInventory: boolean; syncOrders: boolean } }> {
-  const integration = await prisma.storeEcommerceIntegration.findUnique({ where: { storeId_platform: { storeId, platform } } });
+  const store = await prisma.store.findFirst({ where: { OR: [{ id: storeId }, { slug: storeId }] }, select: { id: true } });
+  const integration = store
+    ? await prisma.storeEcommerceIntegration.findUnique({ where: { storeId_platform: { storeId: store.id, platform } } })
+    : null;
   if (!integration) {
     throw new Error(`${platform} is not connected for this store.`);
   }

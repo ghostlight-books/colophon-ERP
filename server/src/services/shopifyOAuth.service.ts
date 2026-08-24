@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import { env } from "../config/env.js";
+import { prisma } from "../config/database.js";
 import { saveEcommerceIntegration } from "./ecommerce.service.js";
 
 const pendingStates = new Map<string, { storeId: string; shop: string; expiresAt: number }>();
@@ -35,6 +36,11 @@ export async function completeShopifyInstall(code: string, state: string, shopIn
   const response = await fetch(`https://${shop}/admin/oauth/access_token`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_id: env.SHOPIFY_API_KEY, client_secret: env.SHOPIFY_API_SECRET, code }) });
   const payload = (await response.json().catch(() => ({}))) as { access_token?: string };
   if (!response.ok || !payload.access_token) throw new Error("Shopify authorization could not be completed.");
-  await saveEcommerceIntegration(pending.storeId, "shopify", `https://${shop}`, { accessToken: payload.access_token });
+  const store = await prisma.store.upsert({
+    where: { slug: pending.storeId },
+    update: {},
+    create: { slug: pending.storeId, storeName: shop.replace(".myshopify.com", ""), ownerEmail: "owner@ghostlightbooks.com" },
+  });
+  await saveEcommerceIntegration(store.id, "shopify", `https://${shop}`, { accessToken: payload.access_token });
   return pending.storeId;
 }
