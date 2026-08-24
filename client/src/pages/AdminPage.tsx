@@ -9,6 +9,25 @@ type StoreEcommerceConnection = { platform: "shopify" | "woocommerce"; storeUrl:
 type StoreMember = { id: string; userId: string; email: string; displayName: string; isActive: boolean; role: string; permissions: Record<string, boolean> };
 type ApiHealth = { status: string; service: string; environment: string; uptimeSeconds: number; commit: string | null };
 
+function DeploymentStatusCard(): JSX.Element {
+  const [health, setHealth] = useState<ApiHealth | null>(null);
+  const [checkedAt, setCheckedAt] = useState<string | null>(null);
+  const [clientOnline, setClientOnline] = useState(true);
+  const check = async (): Promise<void> => {
+    try {
+      const response = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+      setHealth(response.ok ? (await response.json()) as ApiHealth : null);
+      setClientOnline(true);
+    } catch {
+      setHealth(null);
+      setClientOnline(false);
+    }
+    setCheckedAt(new Date().toLocaleTimeString());
+  };
+  useEffect(() => { void check(); }, []);
+  return <SurfaceCard className="mt-5 p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">Live Deployment Status</h2><p className="mt-1 text-sm text-slate-500">Operational status from inside the ERP.</p></div><button type="button" onClick={() => void check()} className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-white">Refresh status</button></div><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><div className="rounded-xl bg-white/70 p-3"><p className="text-xs text-slate-500">API</p><p className={health?.status === "ok" ? "mt-1 font-semibold text-emerald-700" : "mt-1 font-semibold text-rose-700"}>{health?.status === "ok" ? "Online" : "Unavailable"}</p></div><div className="rounded-xl bg-white/70 p-3"><p className="text-xs text-slate-500">Client</p><p className={clientOnline ? "mt-1 font-semibold text-emerald-700" : "mt-1 font-semibold text-rose-700"}>{clientOnline ? "Online" : "Unavailable"}</p></div><div className="rounded-xl bg-white/70 p-3"><p className="text-xs text-slate-500">Environment</p><p className="mt-1 font-semibold text-slate-700">{health?.environment ?? "Unknown"}</p></div><div className="rounded-xl bg-white/70 p-3"><p className="text-xs text-slate-500">API uptime</p><p className="mt-1 font-semibold text-slate-700">{health ? `${Math.floor(health.uptimeSeconds / 60)}m ${health.uptimeSeconds % 60}s` : "Unknown"}</p></div></div><div className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-2"><p>API: <span className="font-semibold text-slate-700">https://colophon-api.onrender.com</span></p><p>Client: <span className="font-semibold text-slate-700">{window.location.origin}</span></p><p>Commit: <span className="font-semibold text-slate-700">{health?.commit ?? "Not exposed by Render"}</span></p><p>Last checked: <span className="font-semibold text-slate-700">{checkedAt ?? "Checking..."}</span></p></div></SurfaceCard>;
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api";
 const adminSections = [
   ["overview", "Overview", LayoutDashboard],
@@ -248,6 +267,7 @@ function AdminPage(): JSX.Element {
           <span className="rounded-full bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white">Super-admin surface</span>
         </header>
         <p className="mt-4 rounded-xl bg-white/60 px-4 py-3 text-sm text-slate-600">{message}</p>
+        {activeSection === "health" ? <DeploymentStatusCard /> : null}
         {activeSection === "access" ? accessPanel : null}
         {activeSection === "overview" ? deploymentPanel : null}
         <section className={activeSection === "overview" ? "mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" : "hidden"}>
