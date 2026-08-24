@@ -12,7 +12,7 @@ import { lookupBookByIsbn, pullOpenLibraryMetadata } from "./services/isbnScanne
 import { createSquareCheckoutLink, isSquareConfigured } from "./services/squarePayment.service.js";
 import { executeDropshipSettlement } from "./services/networkSettlement.service.js";
 import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service.js";
-import { fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncInventoryItemByIsbn, syncStoreInventory, syncStoreInventoryCatalog, type EcommercePlatform } from "./services/ecommerce.service.js";
+import { checkStoreConnection, fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncInventoryItemByIsbn, syncStoreInventory, syncStoreInventoryCatalog, type EcommercePlatform } from "./services/ecommerce.service.js";
 import { completeShopifyInstall, createShopifyInstallUrl } from "./services/shopifyOAuth.service.js";
 
 type OpsConnector = {
@@ -683,6 +683,12 @@ export function createApp(): express.Express {
     } catch (error) {
       next(error);
     }
+  });
+
+  app.get("/api/stores/:storeId/ecommerce/:platform/status", async (req, res, next) => {
+    try {
+      res.json(await checkStoreConnection(req.params.storeId, req.params.platform as EcommercePlatform));
+    } catch (error) { next(error); }
   });
 
   app.get("/api/open-network/availability", async (req, res, next) => {

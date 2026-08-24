@@ -57,6 +57,9 @@ function ShopifyPage(): JSX.Element {
           setSyncInventory(shopify.syncInventory);
           setSyncOrders(shopify.syncOrders);
           setMessage(`Connected to ${shopify.storeUrl}`);
+          const statusResponse = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/status`, { headers: { "X-Dev-Subdomain": "admin" } });
+          const status = (await statusResponse.json().catch(() => ({}))) as { connected?: boolean; message?: string };
+          if (status.message) setMessage(status.message);
         } else {
           setMessage("Enter your real Shopify store domain and connect it first.");
         }

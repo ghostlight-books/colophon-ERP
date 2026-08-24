@@ -25,6 +25,7 @@ interface EcommerceAdapter {
   updateInventoryLevelByBarcode(sku: string, barcode: string, quantity: number): Promise<{ success: boolean; message?: string }>;
   syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number }): Promise<{ success: boolean; message?: string }>;
   fetchRecentOrders(): Promise<unknown[]>;
+  checkConnection(): Promise<{ connected: boolean; message: string }>;
 }
 
 function normalizeUrl(value: string): string {
@@ -113,6 +114,15 @@ class ShopifyAdapter implements EcommerceAdapter {
     const result = await parseResponse<{ orders?: unknown[] }>(await fetch(`${this.storeUrl}/admin/api/2026-01/orders.json?status=any&limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
     return result.orders ?? [];
   }
+
+  async checkConnection(): Promise<{ connected: boolean; message: string }> {
+    try {
+      await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/shop.json`, { headers: { "X-Shopify-Access-Token": this.token } }));
+      return { connected: true, message: "Shopify offline connection is active." };
+    } catch {
+      return { connected: false, message: "Shopify authorization was revoked or expired. Reauthorize the app." };
+    }
+  }
 }
 
 class WooCommerceAdapter implements EcommerceAdapter {
@@ -142,6 +152,10 @@ class WooCommerceAdapter implements EcommerceAdapter {
 
   async fetchRecentOrders(): Promise<unknown[]> {
     return parseResponse<unknown[]>(await fetch(`${this.storeUrl}/wp-json/wc/v3/orders?status=processing&per_page=50`, { headers: { Authorization: this.authorization } }));
+  }
+
+  async checkConnection(): Promise<{ connected: boolean; message: string }> {
+    return { connected: true, message: "WooCommerce connection is saved." };
   }
 }
 
@@ -243,4 +257,9 @@ export async function syncStoreInventoryCatalog(storeId: string, platform: Ecomm
     }
   }
   return { success: true, message: `Shopify inventory sync completed: ${synced} item(s) synced, ${skipped} skipped.`, synced, skipped };
+}
+
+export async function checkStoreConnection(storeId: string, platform: EcommercePlatform): Promise<{ connected: boolean; message: string }> {
+  const { adapter } = await getAdapter(storeId, platform);
+  return adapter.checkConnection();
 }
