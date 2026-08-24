@@ -127,6 +127,16 @@ function InventoryPage(): JSX.Element {
     setMessage(`${item.title ?? "This title"} is available from connected partner stores. Partner status cached for 30 minutes.`);
   };
 
+  async function removeItem(item: InventoryRecord): Promise<void> {
+    if (!window.confirm(`Remove all on-hand units of ${item.title ?? item.isbn} from active inventory?`)) return;
+    try {
+      const response = await fetch(`${API_BASE}/inventory/products/${encodeURIComponent(item.isbn)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Inventory item could not be removed.");
+      setItems((current) => current.filter((record) => record.id !== item.id));
+      setMessage(`${item.title ?? item.isbn} was removed from active inventory.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Inventory item could not be removed."); }
+  }
+
   return (
     <section className="grid gap-4">
       <SurfaceCard className="p-5">
@@ -186,7 +196,7 @@ function InventoryPage(): JSX.Element {
                 <th className="px-3 py-2">Price</th>
                 <th className="px-3 py-2">Shopify</th>
                 <th className="px-3 py-2">Open Network</th>
-                <th className="px-3 py-2">Partner action</th>
+                <th className="px-3 py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -202,7 +212,7 @@ function InventoryPage(): JSX.Element {
                   <td className="px-3 py-3"><p className="font-semibold">{item.listPrice === null ? "Manual lookup" : `$${item.listPrice.toFixed(2)}`}</p><p className="mt-1 text-xs text-slate-500">{item.condition ?? "Condition pending"}</p></td>
                   <td className="px-3 py-3"><StatusPill label={item.shopifyStatus} tone={item.shopifyStatus === "Published" ? "mint" : "slate"} /></td>
                   <td className="px-3 py-3"><StatusPill label={item.networkStatus} tone={item.networkStatus === "Shared" ? "mint" : "violet"} /></td>
-                  <td className="rounded-r-xl px-3 py-3"><div className="flex flex-wrap gap-2">{connectedPartnerStores > 0 ? <><button type="button" onClick={() => checkPartnerAvailability(item)} className="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-xs font-semibold text-emerald-700">Partner availability</button><button type="button" onClick={() => navigate(`/open-network/order?partner=Riverlight%20Books&isbn=${encodeURIComponent(item.isbn)}&title=${encodeURIComponent(item.title ?? "")}&price=${item.listPrice ?? ""}&cover=${encodeURIComponent(item.coverUrl ?? "")}`)} className="rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-white">Order from Store</button></> : <span className="text-xs text-slate-400">No partner stores connected</span>}</div></td>
+                  <td className="rounded-r-xl px-3 py-3"><div className="flex flex-wrap gap-2">{connectedPartnerStores > 0 ? <><button type="button" onClick={() => checkPartnerAvailability(item)} className="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-xs font-semibold text-emerald-700">Partner availability</button><button type="button" onClick={() => navigate(`/open-network/order?partner=Riverlight%20Books&isbn=${encodeURIComponent(item.isbn)}&title=${encodeURIComponent(item.title ?? "")}&price=${item.listPrice ?? ""}&cover=${encodeURIComponent(item.coverUrl ?? "")}`)} className="rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-white">Order from Store</button></> : null}<button type="button" onClick={() => void removeItem(item)} className="rounded-lg bg-rose-100 px-2.5 py-1.5 text-xs font-semibold text-rose-700">Remove</button></div></td>
                 </tr>
               ))}
             </tbody>

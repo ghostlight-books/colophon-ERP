@@ -925,6 +925,13 @@ export function createApp(): express.Express {
     } catch (error) { next(error); }
   });
 
+  app.delete("/api/inventory/products/:isbn", async (req, res, next) => {
+    try {
+      const product = await prisma.isbnLookupCache.update({ where: { isbn: req.params.isbn }, data: { quantityOnHand: 0 } });
+      res.json({ success: true, product });
+    } catch (error) { next(error); }
+  });
+
   app.post("/api/inventory/products/:isbn/pull-open-library", async (req, res, next) => {
     try {
       const metadata = await pullOpenLibraryMetadata(req.params.isbn);
