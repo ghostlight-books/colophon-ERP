@@ -220,6 +220,20 @@ function ShopifyPage(): JSX.Element {
         </div>
       </section>
 
+      <section className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+        <h2 className="text-xl font-semibold text-slate-800">ERP to Shopify mapping</h2>
+        <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+          <p><strong>Title</strong> maps to Shopify product title.</p>
+          <p><strong>Author</strong> maps to vendor, visible description, and custom author metafield.</p>
+          <p><strong>Description</strong> maps to the storefront product description.</p>
+          <p><strong>Cover</strong> maps to the Shopify product image.</p>
+          <p><strong>Category</strong> maps to product type and a matching Shopify collection.</p>
+          <p><strong>Tags and SEO keywords</strong> map to Shopify product tags.</p>
+          <p><strong>SEO title and description</strong> map to Shopify SEO metafields.</p>
+          <p><strong>ISBN and SKU</strong> map to the Shopify variant barcode and SKU.</p>
+        </div>
+      </section>
+
       <section className="grid gap-5 xl:grid-cols-2">
         <div className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
           <h2 className="text-xl font-semibold text-slate-800">Inventory sync preview</h2>

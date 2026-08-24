@@ -31,6 +31,10 @@ function normalizeUrl(value: string): string {
   return value.trim().replace(/\/$/, "");
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   const body = (await response.json().catch(() => ({}))) as { message?: string; error?: string } & T;
   if (!response.ok) {
@@ -85,7 +89,8 @@ class ShopifyAdapter implements EcommerceAdapter {
     const products = await parseResponse<{ products?: Array<{ id?: number; variants?: Array<{ sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json?limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
     const matchedProduct = products.products?.find((product) => product.variants?.some((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode)));
     const variant = matchedProduct?.variants?.find((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode));
-    const productPayload = { title: item.title, body_html: item.description ?? "", vendor: item.author ?? "", tags: item.tags.join(", "), metafields: [{ namespace: "global", key: "title_tag", type: "single_line_text_field", value: item.seoTitle ?? item.title }, { namespace: "global", key: "description_tag", type: "multi_line_text_field", value: item.seoDescription ?? item.description ?? item.title }], ...(item.coverUrl ? { images: [{ src: item.coverUrl }] } : {}) };
+    const visibleDescription = [item.author ? `<p><strong>Author:</strong> ${escapeHtml(item.author)}</p>` : "", item.description ? `<p>${escapeHtml(item.description)}</p>` : ""].filter(Boolean).join("");
+    const productPayload = { title: item.title, body_html: visibleDescription, vendor: item.author ?? "", product_type: item.category ?? "Book", tags: item.tags.join(", "), metafields: [{ namespace: "custom", key: "author", type: "single_line_text_field", value: item.author ?? "" }, { namespace: "global", key: "title_tag", type: "single_line_text_field", value: item.seoTitle ?? item.title }, { namespace: "global", key: "description_tag", type: "multi_line_text_field", value: item.seoDescription ?? item.description ?? item.title }], ...(item.coverUrl ? { images: [{ src: item.coverUrl }] } : {}) };
     if (matchedProduct?.id) {
       await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/products/${matchedProduct.id}.json`, { method: "PUT", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ product: productPayload }) }));
     }
@@ -186,12 +191,13 @@ export async function fetchStoreOrders(storeId: string, platform: EcommercePlatf
 }
 
 export async function syncStoreInventoryCatalog(storeId: string, platform: EcommercePlatform, onProgress?: (progress: InventorySyncProgress) => void): Promise<{ success: boolean; message: string; synced: number; skipped: number }> {
-  const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, isbn: true, title: true, author: true, description: true, coverUrl: true, seoTitle: true, seoDescription: true, category: true, subcategory: true, mediaType: true, listPrice: true, quantityOnHand: true } });
+  const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, isbn: true, title: true, author: true, description: true, coverUrl: true, seoTitle: true, seoDescription: true, seoKeywords: true, catalogTags: true, category: true, subcategory: true, mediaType: true, listPrice: true, quantityOnHand: true } });
   let synced = 0;
   let skipped = 0;
   for (const item of items) {
     const { adapter, integration } = await getAdapter(storeId, platform);
-    const result = await adapter.syncInventoryItem({ sku: item.sku, barcode: item.isbn, title: item.title ?? item.isbn, author: item.author, description: item.description, coverUrl: item.coverUrl, tags: [item.category, item.subcategory, item.mediaType].filter((tag): tag is string => Boolean(tag)), seoTitle: item.seoTitle, seoDescription: item.seoDescription, category: item.category, price: item.listPrice ?? 0, quantity: item.quantityOnHand });
+    const tags = [item.category, item.subcategory, item.mediaType, ...(item.catalogTags ?? "").split(","), ...(item.seoKeywords ?? "").split(",")].filter((tag): tag is string => Boolean(tag?.trim())).map((tag) => tag.trim()).filter((tag, index, all) => all.indexOf(tag) === index);
+    const result = await adapter.syncInventoryItem({ sku: item.sku, barcode: item.isbn, title: item.title ?? item.isbn, author: item.author, description: item.description, coverUrl: item.coverUrl, tags, seoTitle: item.seoTitle, seoDescription: item.seoDescription, category: item.category, price: item.listPrice ?? 0, quantity: item.quantityOnHand });
     await prisma.storeEcommerceIntegration.update({ where: { id: integration.id }, data: { lastSyncedAt: new Date() } });
     if (result.success) {
       synced += 1;
