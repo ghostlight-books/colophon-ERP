@@ -4,7 +4,7 @@ import { env } from "../config/env.js";
 import { prisma } from "../config/database.js";
 import { saveEcommerceIntegration } from "./ecommerce.service.js";
 
-const scopes = "read_products,write_products,read_inventory,write_inventory,read_orders,write_fulfillments";
+const scopes = "read_products,write_products,read_inventory,write_inventory,read_orders,write_fulfillments,read_locations";
 
 function normalizeShop(value: string): string {
   return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");

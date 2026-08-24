@@ -15,6 +15,7 @@ export type EcommerceIntegrationStatus = {
 interface EcommerceAdapter {
   updateInventoryLevel(sku: string, quantity: number): Promise<{ success: boolean; message?: string }>;
   updateInventoryLevelByBarcode(sku: string, barcode: string, quantity: number): Promise<{ success: boolean; message?: string }>;
+  syncInventoryItem(item: { sku: string; barcode: string; title: string; price: number; quantity: number }): Promise<{ success: boolean; message?: string }>;
   fetchRecentOrders(): Promise<unknown[]>;
 }
 
@@ -55,7 +56,25 @@ class ShopifyAdapter implements EcommerceAdapter {
     if (!variant?.inventory_item_id) {
       return { success: false, message: `Shopify SKU or barcode for ${sku} was not found.` };
     }
-    await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/inventory_levels/set.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ inventory_item_id: variant.inventory_item_id, available: Math.max(0, Math.floor(quantity)) }) }));
+    const locations = await parseResponse<{ locations?: Array<{ id?: number }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/locations.json`, { headers: { "X-Shopify-Access-Token": this.token } }));
+    const locationId = locations.locations?.find((location) => location.id)?.id;
+    if (!locationId) return { success: false, message: "Shopify has no active inventory location." };
+    await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/inventory_levels/set.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ location_id: locationId, inventory_item_id: variant.inventory_item_id, available: Math.max(0, Math.floor(quantity)) }) }));
+    return { success: true };
+  }
+
+  async syncInventoryItem(item: { sku: string; barcode: string; title: string; price: number; quantity: number }): Promise<{ success: boolean; message?: string }> {
+    if (this.isLocalDevConnector()) return { success: true };
+    const products = await parseResponse<{ products?: Array<{ variants?: Array<{ sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json?limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
+    const variant = products.products?.flatMap((product) => product.variants ?? []).find((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode));
+    if (variant?.inventory_item_id) return this.updateInventoryLevelByBarcode(item.sku, item.barcode, item.quantity);
+    const created = await parseResponse<{ product?: { variants?: Array<{ inventory_item_id?: number }> } }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ product: { title: item.title, status: "active", variants: [{ sku: item.sku, barcode: item.barcode, price: item.price.toFixed(2), inventory_management: "shopify" }] } }) }));
+    const createdInventoryItemId = created.product?.variants?.[0]?.inventory_item_id;
+    if (!createdInventoryItemId) return { success: false, message: `Shopify product could not be created for ${item.sku}.` };
+    const locations = await parseResponse<{ locations?: Array<{ id?: number }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/locations.json`, { headers: { "X-Shopify-Access-Token": this.token } }));
+    const locationId = locations.locations?.find((location) => location.id)?.id;
+    if (!locationId) return { success: false, message: "Shopify has no active inventory location." };
+    await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/inventory_levels/set.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ location_id: locationId, inventory_item_id: createdInventoryItemId, available: Math.max(0, Math.floor(item.quantity)) }) }));
     return { success: true };
   }
 
@@ -88,6 +107,10 @@ class WooCommerceAdapter implements EcommerceAdapter {
 
   async updateInventoryLevelByBarcode(sku: string, _barcode: string, quantity: number): Promise<{ success: boolean; message?: string }> {
     return this.updateInventoryLevel(sku, quantity);
+  }
+
+  async syncInventoryItem(item: { sku: string; barcode: string; title: string; price: number; quantity: number }): Promise<{ success: boolean; message?: string }> {
+    return this.updateInventoryLevel(item.sku, item.quantity);
   }
 
   async fetchRecentOrders(): Promise<unknown[]> {
@@ -141,12 +164,12 @@ export async function fetchStoreOrders(storeId: string, platform: EcommercePlatf
 }
 
 export async function syncStoreInventoryCatalog(storeId: string, platform: EcommercePlatform): Promise<{ success: boolean; message: string; synced: number; skipped: number }> {
-  const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, isbn: true, quantityOnHand: true } });
+  const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, isbn: true, title: true, listPrice: true, quantityOnHand: true } });
   let synced = 0;
   let skipped = 0;
   for (const item of items) {
     const { adapter, integration } = await getAdapter(storeId, platform);
-    const result = await adapter.updateInventoryLevelByBarcode(item.sku, item.isbn, item.quantityOnHand);
+    const result = await adapter.syncInventoryItem({ sku: item.sku, barcode: item.isbn, title: item.title ?? item.isbn, price: item.listPrice ?? 0, quantity: item.quantityOnHand });
     await prisma.storeEcommerceIntegration.update({ where: { id: integration.id }, data: { lastSyncedAt: new Date() } });
     if (result.success) synced += 1;
     else skipped += 1;
