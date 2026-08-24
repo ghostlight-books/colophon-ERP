@@ -130,3 +130,15 @@ export async function fetchStoreOrders(storeId: string, platform: EcommercePlatf
   const { adapter } = await getAdapter(storeId, platform);
   return adapter.fetchRecentOrders();
 }
+
+export async function syncStoreInventoryCatalog(storeId: string, platform: EcommercePlatform): Promise<{ success: boolean; message: string; synced: number; skipped: number }> {
+  const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, quantityOnHand: true } });
+  let synced = 0;
+  let skipped = 0;
+  for (const item of items) {
+    const result = await syncStoreInventory(storeId, platform, item.sku, item.quantityOnHand);
+    if (result.success) synced += 1;
+    else skipped += 1;
+  }
+  return { success: true, message: `Shopify inventory sync completed: ${synced} item(s) synced, ${skipped} skipped.`, synced, skipped };
+}

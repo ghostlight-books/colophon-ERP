@@ -4,14 +4,13 @@ import { env } from "../config/env.js";
 import { prisma } from "../config/database.js";
 import { saveEcommerceIntegration } from "./ecommerce.service.js";
 
-const pendingStates = new Map<string, { storeId: string; shop: string; expiresAt: number }>();
 const scopes = "read_products,write_products,read_inventory,write_inventory,read_orders,write_fulfillments";
 
 function normalizeShop(value: string): string {
   return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
 }
 
-export function createShopifyInstallUrl(storeId: string, shopInput: string): string {
+export async function createShopifyInstallUrl(storeId: string, shopInput: string): Promise<string> {
   if (!env.SHOPIFY_API_KEY || !env.SHOPIFY_API_SECRET) {
     throw new Error("Shopify OAuth is not configured. Add SHOPIFY_API_KEY and SHOPIFY_API_SECRET.");
   }
@@ -20,17 +19,18 @@ export function createShopifyInstallUrl(storeId: string, shopInput: string): str
     throw new Error("Enter a valid your-store.myshopify.com domain.");
   }
   const state = randomBytes(24).toString("base64url");
-  pendingStates.set(state, { storeId, shop, expiresAt: Date.now() + 10 * 60 * 1000 });
+  await prisma.shopifyOAuthState.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+  await prisma.shopifyOAuthState.create({ data: { state, storeId, shop, expiresAt: new Date(Date.now() + 10 * 60 * 1000) } });
   const callback = `${env.SHOPIFY_APP_URL.replace(/\/$/, "")}/api/auth/shopify/callback`;
   const params = new URLSearchParams({ client_id: env.SHOPIFY_API_KEY, scope: scopes, redirect_uri: callback, state });
   return `https://${shop}/admin/oauth/authorize?${params.toString()}`;
 }
 
 export async function completeShopifyInstall(code: string, state: string, shopInput: string): Promise<string> {
-  const pending = pendingStates.get(state);
-  pendingStates.delete(state);
   const shop = normalizeShop(shopInput);
-  if (!pending || pending.expiresAt < Date.now() || pending.shop !== shop || !env.SHOPIFY_API_KEY || !env.SHOPIFY_API_SECRET) {
+  const pending = await prisma.shopifyOAuthState.findUnique({ where: { state } });
+  await prisma.shopifyOAuthState.deleteMany({ where: { state } });
+  if (!pending || pending.expiresAt < new Date() || pending.shop !== shop || !env.SHOPIFY_API_KEY || !env.SHOPIFY_API_SECRET) {
     throw new Error("Shopify installation state is invalid or expired.");
   }
   const response = await fetch(`https://${shop}/admin/oauth/access_token`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_id: env.SHOPIFY_API_KEY, client_secret: env.SHOPIFY_API_SECRET, code }) });

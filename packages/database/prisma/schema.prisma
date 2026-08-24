@@ -198,6 +198,17 @@ model AuthSession {
   @@index([userId, expiresAt])
 }
 
+model ShopifyOAuthState {
+  id        String   @id @default(uuid())
+  state     String   @unique
+  storeId   String
+  shop      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
 model NetworkDispute {
   id             String   @id @default(uuid())
   buyingStoreId  String

@@ -12,7 +12,7 @@ import { lookupBookByIsbn, pullOpenLibraryMetadata } from "./services/isbnScanne
 import { createSquareCheckoutLink, isSquareConfigured } from "./services/squarePayment.service.js";
 import { executeDropshipSettlement } from "./services/networkSettlement.service.js";
 import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service.js";
-import { fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncStoreInventory, type EcommercePlatform } from "./services/ecommerce.service.js";
+import { fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncStoreInventory, syncStoreInventoryCatalog, type EcommercePlatform } from "./services/ecommerce.service.js";
 import { completeShopifyInstall, createShopifyInstallUrl } from "./services/shopifyOAuth.service.js";
 
 type OpsConnector = {
@@ -433,12 +433,12 @@ export function createApp(): express.Express {
     }
   });
 
-  app.get("/api/auth/shopify/install", (req, res, next) => {
+  app.get("/api/auth/shopify/install", async (req, res, next) => {
     try {
       const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "";
       const shop = typeof req.query.shop === "string" ? req.query.shop : "";
       if (!storeId || !shop) { res.status(400).json({ error: "storeId and shop are required." }); return; }
-      res.redirect(createShopifyInstallUrl(storeId, shop));
+      res.redirect(await createShopifyInstallUrl(storeId, shop));
     } catch (error) { next(error); }
   });
 
@@ -653,6 +653,12 @@ export function createApp(): express.Express {
     } catch (error) {
       next(error);
     }
+  });
+
+  app.post("/api/stores/:storeId/ecommerce/:platform/inventory-sync-all", async (req, res, next) => {
+    try {
+      res.json(await syncStoreInventoryCatalog(req.params.storeId, req.params.platform as EcommercePlatform));
+    } catch (error) { next(error); }
   });
 
   app.get("/api/stores/:storeId/ecommerce/:platform/orders", async (req, res, next) => {

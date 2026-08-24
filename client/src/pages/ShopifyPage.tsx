@@ -121,16 +121,15 @@ function ShopifyPage(): JSX.Element {
     }
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/inventory-sync`, {
+      const response = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/inventory-sync-all`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" },
-        body: JSON.stringify({ sku: "BK-9780143127741-USED-GOOD", quantity: 4 }),
       });
       const payload = (await response.json().catch(() => ({}))) as { success?: boolean; message?: string; error?: string };
       if (!response.ok) {
         throw new Error(payload.error ?? "Inventory sync failed.");
       }
-      setProducts([{ sku: "BK-9780143127741-USED-GOOD", quantity: 4, title: "The Martian" }]);
+      setProducts([]);
       setMessage(payload.message ?? "Inventory sync succeeded.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Inventory sync failed.");
