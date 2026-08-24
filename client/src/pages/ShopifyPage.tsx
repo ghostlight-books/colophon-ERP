@@ -27,7 +27,7 @@ type ShopifyProductRow = {
 };
 
 function ShopifyPage(): JSX.Element {
-  const [storeUrl, setStoreUrl] = useState("https://example-store.myshopify.com");
+  const [storeUrl, setStoreUrl] = useState("");
   const [syncInventory, setSyncInventory] = useState(true);
   const [syncOrders, setSyncOrders] = useState(true);
   const [message, setMessage] = useState("Loading Shopify connection...");
@@ -43,7 +43,7 @@ function ShopifyPage(): JSX.Element {
           headers: { "X-Dev-Subdomain": "admin" },
         });
         if (!response.ok) {
-          setMessage("No Shopify store is connected yet.");
+          setMessage("Enter your real Shopify store domain and connect it first.");
           return;
         }
 
@@ -56,7 +56,7 @@ function ShopifyPage(): JSX.Element {
           setSyncOrders(shopify.syncOrders);
           setMessage(`Connected to ${shopify.storeUrl}`);
         } else {
-          setMessage("No Shopify store is connected yet.");
+          setMessage("Enter your real Shopify store domain and connect it first.");
         }
       } catch {
         setMessage("Shopify connection metadata is unavailable.");
@@ -106,10 +106,19 @@ function ShopifyPage(): JSX.Element {
       setMessage("Enter your Shopify store domain first.");
       return;
     }
-    window.location.href = `${API_BASE}/auth/shopify/install?storeId=ghostlight-demo&shop=${encodeURIComponent(storeUrl)}`;
+    const shop = storeUrl.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
+    if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(shop)) {
+      setMessage("Use the store's myshopify.com domain, such as your-store.myshopify.com.");
+      return;
+    }
+    window.location.href = `${API_BASE}/auth/shopify/install?storeId=ghostlight-demo&shop=${encodeURIComponent(shop)}`;
   };
 
   const syncProducts = async (): Promise<void> => {
+    if (!connection) {
+      setMessage("Connect your Shopify store before syncing data.");
+      return;
+    }
     setLoading(true);
     try {
       const response = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/inventory-sync`, {
@@ -131,6 +140,10 @@ function ShopifyPage(): JSX.Element {
   };
 
   const importOrders = async (): Promise<void> => {
+    if (!connection) {
+      setMessage("Connect your Shopify store before importing orders.");
+      return;
+    }
     setLoading(true);
     try {
       const response = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/orders`, {
