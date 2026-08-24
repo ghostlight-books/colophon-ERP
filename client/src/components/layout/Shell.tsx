@@ -822,6 +822,19 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
                           <button
                             key={item}
                             type="button"
+                            onClick={() => {
+                              if (item === "Store Settings") {
+                                onNavigate("/shopify");
+                                setMenu("none");
+                              } else if (item === "Help Center") {
+                                setMenu("none");
+                                window.alert("Help Center is coming soon. Use the deployment and connector status panels for live diagnostics.");
+                              } else if (item === "Sign Out") {
+                                window.localStorage.removeItem("colophon-current-user");
+                                onCurrentUserChange({ name: "Sarah", email: "owner@ghostlightbooks.com", role: "Owner" });
+                                setMenu("none");
+                              }
+                            }}
                             className={[
                               "rounded-xl px-3 py-2 text-left text-sm font-medium transition",
                               isDark ? "bg-white/8 hover:bg-white/12" : "bg-slate-50 hover:bg-slate-100",
