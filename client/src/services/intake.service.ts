@@ -90,7 +90,10 @@ async function request<T>(path: string): Promise<T> {
 }
 
 export async function searchBooks(title: string, author = "", skuOrIsbn = ""): Promise<BookSearchResult[]> {
-  const params = new URLSearchParams({ limit: "15" });
+  const params = new URLSearchParams({
+    limit: "15",
+    fields: "title,author_name,first_publish_year,isbn,cover_i,publisher",
+  });
   if (title.trim()) params.set("title", title.trim());
   if (author.trim()) params.set("author", author.trim());
   if (skuOrIsbn.trim()) {
