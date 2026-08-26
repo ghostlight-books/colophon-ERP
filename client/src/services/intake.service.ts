@@ -34,6 +34,7 @@ export type BookSearchResult = {
   title: string;
   author: string | null;
   year: number | null;
+  publisher?: string | null;
   coverUrl: string | null;
 };
 
@@ -88,19 +89,44 @@ async function request<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function searchBooks(title: string, author: string): Promise<BookSearchResult[]> {
-  const params = new URLSearchParams({ limit: "10" });
+export async function searchBooks(title: string, author = "", skuOrIsbn = ""): Promise<BookSearchResult[]> {
+  const params = new URLSearchParams({ limit: "15" });
   if (title.trim()) params.set("title", title.trim());
   if (author.trim()) params.set("author", author.trim());
+  if (skuOrIsbn.trim()) {
+    const clean = skuOrIsbn.replace(/[^0-9X]/gi, "").toUpperCase();
+    if (clean.length === 10 || clean.length === 13) {
+      params.set("isbn", clean);
+    } else if (!title.trim() && !author.trim()) {
+      params.set("q", skuOrIsbn.trim());
+    }
+  }
+
   const response = await fetchWithTimeout(`https://openlibrary.org/search.json?${params.toString()}`);
   if (!response.ok) throw new Error("Book search is unavailable right now.");
-  const data = (await response.json()) as { docs?: Array<{ title?: string; author_name?: string[]; first_publish_year?: number; isbn?: string[]; cover_i?: number }> };
+  const data = (await response.json()) as {
+    docs?: Array<{
+      title?: string;
+      author_name?: string[];
+      first_publish_year?: number;
+      publisher?: string[];
+      isbn?: string[];
+      cover_i?: number;
+    }>;
+  };
   const seen = new Set<string>();
   return (data.docs ?? []).flatMap((doc) => {
     const isbn = doc.isbn?.find((value) => value.length === 13) ?? doc.isbn?.find((value) => value.length === 10);
     if (!isbn || !doc.title || seen.has(isbn)) return [];
     seen.add(isbn);
-    return [{ isbn, title: doc.title, author: doc.author_name?.[0] ?? null, year: doc.first_publish_year ?? null, coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null }];
+    return [{
+      isbn,
+      title: doc.title,
+      author: doc.author_name?.[0] ?? null,
+      year: doc.first_publish_year ?? null,
+      publisher: doc.publisher?.[0] ?? null,
+      coverUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null,
+    }];
   });
 }
 

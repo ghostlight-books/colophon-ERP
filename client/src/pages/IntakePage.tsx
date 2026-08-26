@@ -73,9 +73,12 @@ function IntakePage(): JSX.Element {
   const [sessionActive] = useState(true);
   const [message, setMessage] = useState("Ready to scan or enter an ISBN.");
   const [barcode, setBarcode] = useState("");
-  const [searchTitle, setSearchTitle] = useState("");
-  const [searchAuthor, setSearchAuthor] = useState("");
-  const [searchResults, setSearchResults] = useState<BookSearchResult[]>([]);
+  const [manualSkuOrIsbn, setManualSkuOrIsbn] = useState("");
+  const [manualTitle, setManualTitle] = useState("");
+  const [manualAuthor, setManualAuthor] = useState("");
+  const [editionModalOpen, setEditionModalOpen] = useState(false);
+  const [editionResults, setEditionResults] = useState<BookSearchResult[]>([]);
+  const [editionLoadingIsbn, setEditionLoadingIsbn] = useState<string | null>(null);
   const [searchBusy, setSearchBusy] = useState(false);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const scannerBufferRef = useRef("");
@@ -201,20 +204,78 @@ function IntakePage(): JSX.Element {
     }
   };
 
-  const handleTitleAuthorSearch = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
-    if (!searchTitle.trim() && !searchAuthor.trim()) return;
+  const handleManualSearch = async (event?: FormEvent): Promise<void> => {
+    if (event) event.preventDefault();
+    const skuIsbn = manualSkuOrIsbn.trim();
+    const title = manualTitle.trim();
+    const author = manualAuthor.trim();
+
+    if (!skuIsbn && !title && !author) {
+      setMessage("Enter an SKU, ISBN, Title, or Author to search.");
+      return;
+    }
+
+    // Direct lookup if only a valid ISBN was entered
+    if (skuIsbn && !title && !author) {
+      const normalized = skuIsbn.replace(/[^0-9X]/gi, "").toUpperCase();
+      if (normalized.length === 10 || normalized.length === 13) {
+        setLookupBusy(true);
+        try {
+          const book = await lookupBookByIsbn(normalized);
+          setPendingBook(book);
+          setManualSkuOrIsbn("");
+        } catch (error) {
+          setMessage(error instanceof Error ? error.message : "Unable to look up this SKU/ISBN.");
+        } finally {
+          setLookupBusy(false);
+        }
+        return;
+      }
+    }
+
     setSearchBusy(true);
-    try { setSearchResults(await searchBooks(searchTitle, searchAuthor)); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "Book search failed."); }
-    finally { setSearchBusy(false); }
+    try {
+      const results = await searchBooks(title, author, skuIsbn);
+      if (results.length === 0) {
+        setMessage("No books found matching those details. Try adjusting your search.");
+      } else if (results.length === 1) {
+        setLookupBusy(true);
+        try {
+          const book = await lookupBookByIsbn(results[0].isbn);
+          setPendingBook(book);
+          setManualSkuOrIsbn("");
+          setManualTitle("");
+          setManualAuthor("");
+        } finally {
+          setLookupBusy(false);
+        }
+      } else {
+        setEditionResults(results);
+        setEditionModalOpen(true);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Book search failed.");
+    } finally {
+      setSearchBusy(false);
+    }
   };
 
-  const handleSearchResultSelected = async (result: BookSearchResult): Promise<void> => {
+  const handleEditionSelected = async (result: BookSearchResult): Promise<void> => {
+    setEditionLoadingIsbn(result.isbn);
     setLookupBusy(true);
-    try { setPendingBook(await lookupBookByIsbn(result.isbn)); setSearchResults([]); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "Unable to load that title."); }
-    finally { setLookupBusy(false); }
+    try {
+      const book = await lookupBookByIsbn(result.isbn);
+      setEditionModalOpen(false);
+      setPendingBook(book);
+      setManualSkuOrIsbn("");
+      setManualTitle("");
+      setManualAuthor("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load that title.");
+    } finally {
+      setLookupBusy(false);
+      setEditionLoadingIsbn(null);
+    }
   };
 
   useEffect(() => {
@@ -345,6 +406,73 @@ function IntakePage(): JSX.Element {
       </div>
       {activeView === "scan" ? (
       <>
+      {editionModalOpen ? (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-slate-900/40 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-2xl border border-white/70 bg-[#f7f7f8] p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200/70 pb-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-600">Manual Entry Matches</p>
+                <h2 className="mt-1 text-xl font-semibold text-slate-800">Select Book Edition</h2>
+                <p className="mt-0.5 text-xs text-slate-500">Found {editionResults.length} matching titles. Choose the correct edition to route and price.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditionModalOpen(false)}
+                className="rounded-lg px-2.5 py-1 text-sm font-medium text-slate-500 hover:bg-white"
+                aria-label="Close edition selector"
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
+              {editionResults.map((result) => {
+                const isLoading = editionLoadingIsbn === result.isbn;
+                return (
+                  <button
+                    key={result.isbn}
+                    type="button"
+                    disabled={lookupBusy}
+                    onClick={() => void handleEditionSelected(result)}
+                    className="group flex w-full items-center gap-3.5 rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-sky-400 hover:bg-sky-50/70 disabled:opacity-50"
+                  >
+                    {result.coverUrl ? (
+                      <img src={result.coverUrl} alt="" className="h-16 w-11 flex-shrink-0 rounded-md object-cover shadow-sm" />
+                    ) : (
+                      <div className="grid h-16 w-11 flex-shrink-0 place-items-center rounded-md bg-slate-100 text-center text-[10px] font-semibold text-slate-400">
+                        No cover
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <span className="line-clamp-1 block text-sm font-semibold text-slate-800 group-hover:text-sky-700">
+                        {result.title}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-slate-500">
+                        {result.author ?? "Author unavailable"}
+                        {result.year ? ` · ${result.year}` : ""}
+                        {result.publisher ? ` · ${result.publisher}` : ""}
+                      </span>
+                      <span className="mt-1.5 inline-block rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-medium text-slate-600">
+                        ISBN: {result.isbn}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      {isLoading ? (
+                        <span className="text-xs font-semibold text-sky-600">Loading...</span>
+                      ) : (
+                        <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 transition group-hover:bg-sky-600 group-hover:text-white">
+                          Select →
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {pendingBook ? (
         <div className="fixed inset-0 z-40 grid place-items-center bg-slate-900/35 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-white/70 bg-[#f7f7f8] p-5 shadow-2xl">
@@ -452,14 +580,60 @@ function IntakePage(): JSX.Element {
             </button>
           </form>
 
-          <form className="mt-4 border-t border-slate-200/70 pt-4" onSubmit={(event) => void handleTitleAuthorSearch(event)}>
-            <p className="text-sm font-semibold text-slate-700">Find by title or author</p>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-              <input value={searchTitle} onChange={(event) => setSearchTitle(event.target.value)} placeholder="Title" aria-label="Search by title" className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400" />
-              <input value={searchAuthor} onChange={(event) => setSearchAuthor(event.target.value)} placeholder="Author" aria-label="Search by author" className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400" />
-              <button type="submit" disabled={searchBusy || (!searchTitle.trim() && !searchAuthor.trim())} className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 disabled:opacity-50">{searchBusy ? "Searching..." : "Search"}</button>
+          <form className="mt-4 border-t border-slate-200/70 pt-4" onSubmit={(event) => void handleManualSearch(event)}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-700">Manual Book Entry</p>
+                <p className="text-xs text-slate-500">Enter SKU, ISBN, Title, and/or Author when barcode is unavailable.</p>
+              </div>
+              {(manualSkuOrIsbn || manualTitle || manualAuthor) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManualSkuOrIsbn("");
+                    setManualTitle("");
+                    setManualAuthor("");
+                  }}
+                  className="text-xs text-slate-400 hover:text-slate-600"
+                >
+                  Clear fields
+                </button>
+              ) : null}
             </div>
-            {searchResults.length > 0 ? <div className="mt-3 grid gap-2">{searchResults.map((result) => <button key={result.isbn} type="button" onClick={() => void handleSearchResultSelected(result)} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2 text-left hover:border-sky-400 hover:bg-sky-50">{result.coverUrl ? <img src={result.coverUrl} alt="" className="h-12 w-9 rounded object-cover" /> : <span className="h-12 w-9 rounded bg-slate-100" />}<span className="min-w-0"><span className="block truncate text-sm font-semibold text-slate-800">{result.title}</span><span className="block text-xs text-slate-500">{result.author ?? "Author unavailable"}{result.year ? ` · ${result.year}` : ""} · {result.isbn}</span></span></button>)}</div> : null}
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <input
+                value={manualSkuOrIsbn}
+                onChange={(event) => setManualSkuOrIsbn(event.target.value)}
+                placeholder="Manual SKU or ISBN"
+                aria-label="Manual SKU or ISBN"
+                className="h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400"
+              />
+              <input
+                value={manualTitle}
+                onChange={(event) => setManualTitle(event.target.value)}
+                placeholder="Title"
+                aria-label="Search by title"
+                className="h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400"
+              />
+              <input
+                value={manualAuthor}
+                onChange={(event) => setManualAuthor(event.target.value)}
+                placeholder="Author"
+                aria-label="Search by author"
+                className="h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400"
+              />
+            </div>
+
+            <div className="mt-2.5 flex justify-end">
+              <button
+                type="submit"
+                disabled={searchBusy || lookupBusy || (!manualSkuOrIsbn.trim() && !manualTitle.trim() && !manualAuthor.trim())}
+                className="h-10 rounded-xl bg-sky-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {searchBusy ? "Searching..." : "Find & Route Book"}
+              </button>
+            </div>
           </form>
 
           {cameraActive ? (
