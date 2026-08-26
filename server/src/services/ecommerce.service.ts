@@ -117,10 +117,20 @@ class ShopifyAdapter implements EcommerceAdapter {
 
   async checkConnection(): Promise<{ connected: boolean; message: string }> {
     try {
-      await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/shop.json`, { headers: { "X-Shopify-Access-Token": this.token } }));
-      return { connected: true, message: "Shopify offline connection is active." };
-    } catch {
-      return { connected: false, message: "Shopify authorization was revoked or expired. Reauthorize the app." };
+      const response = await fetch(`${this.storeUrl}/admin/api/2026-01/shop.json`, {
+        headers: { "X-Shopify-Access-Token": this.token },
+      });
+      if (!response.ok) {
+        return {
+          connected: false,
+          message: `Shopify returned HTTP ${response.status} (${response.statusText}). Check your Admin API Access Token and permissions.`,
+        };
+      }
+      const data = (await response.json()) as { shop?: { name?: string; myshopify_domain?: string } };
+      const storeName = data.shop?.name ?? data.shop?.myshopify_domain ?? this.storeUrl;
+      return { connected: true, message: `Connected to Shopify store: ${storeName}` };
+    } catch (error) {
+      return { connected: false, message: error instanceof Error ? error.message : "Shopify authorization could not be verified." };
     }
   }
 }
@@ -166,15 +176,26 @@ export async function saveEcommerceIntegration(storeId: string, platform: Ecomme
   if (platform === "woocommerce" && (!config.consumerKey || !config.consumerSecret)) {
     throw new Error("WooCommerce consumer key and secret are required.");
   }
+
+  const store = await prisma.store.upsert({
+    where: { slug: storeId },
+    update: {},
+    create: { slug: storeId, storeName: "Ghostlight Books", ownerEmail: "owner@ghostlightbooks.com" },
+  });
+
+  const formattedUrl = normalizeUrl(storeUrl.startsWith("http") ? storeUrl : `https://${storeUrl}`);
+
   await prisma.storeEcommerceIntegration.upsert({
-    where: { storeId_platform: { storeId, platform } },
-    create: { storeId, platform, storeUrl: normalizeUrl(storeUrl), encryptedCredentials: encryptSecret(JSON.stringify(config)), syncInventory, syncOrders },
-    update: { storeUrl: normalizeUrl(storeUrl), encryptedCredentials: encryptSecret(JSON.stringify(config)), syncInventory, syncOrders },
+    where: { storeId_platform: { storeId: store.id, platform } },
+    create: { storeId: store.id, platform, storeUrl: formattedUrl, encryptedCredentials: encryptSecret(JSON.stringify(config)), syncInventory, syncOrders },
+    update: { storeUrl: formattedUrl, encryptedCredentials: encryptSecret(JSON.stringify(config)), syncInventory, syncOrders },
   });
 }
 
 export async function listEcommerceIntegrations(storeId: string): Promise<EcommerceIntegrationStatus[]> {
-  return prisma.storeEcommerceIntegration.findMany({ where: { storeId }, orderBy: { platform: "asc" }, select: { platform: true, storeUrl: true, syncInventory: true, syncOrders: true, lastSyncedAt: true } }) as Promise<EcommerceIntegrationStatus[]>;
+  const store = await prisma.store.findFirst({ where: { OR: [{ id: storeId }, { slug: storeId }] } });
+  if (!store) return [];
+  return prisma.storeEcommerceIntegration.findMany({ where: { storeId: store.id }, orderBy: { platform: "asc" }, select: { platform: true, storeUrl: true, syncInventory: true, syncOrders: true, lastSyncedAt: true } }) as Promise<EcommerceIntegrationStatus[]>;
 }
 
 async function getAdapter(storeId?: string, platform: EcommercePlatform = "shopify"): Promise<{ adapter: EcommerceAdapter; integration: { id: string; syncInventory: boolean; syncOrders: boolean } }> {

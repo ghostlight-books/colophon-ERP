@@ -30,6 +30,7 @@ type ShopifyProductRow = {
 
 function ShopifyPage(): JSX.Element {
   const [storeUrl, setStoreUrl] = useState("");
+  const [accessToken, setAccessToken] = useState("");
   const [syncInventory, setSyncInventory] = useState(true);
   const [syncOrders, setSyncOrders] = useState(true);
   const [message, setMessage] = useState("Loading Shopify connection...");
@@ -37,49 +38,61 @@ function ShopifyPage(): JSX.Element {
   const [products, setProducts] = useState<ShopifyProductRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [connection, setConnection] = useState<ShopifyConnection | null>(null);
+  const [connectionDetails, setConnectionDetails] = useState<{ connected: boolean; message: string } | null>(null);
+
+  const loadConnection = async (): Promise<void> => {
+    try {
+      const response = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce`, {
+        headers: { "X-Dev-Subdomain": "admin" },
+      });
+      if (!response.ok) {
+        setMessage("Enter your Shopify store URL and Admin API Access Token to connect.");
+        return;
+      }
+
+      const payload = (await response.json()) as ShopifyConnection[];
+      const shopify = payload.find((item) => item.platform === "shopify") ?? null;
+      setConnection(shopify);
+      if (shopify) {
+        setStoreUrl(shopify.storeUrl);
+        setSyncInventory(shopify.syncInventory);
+        setSyncOrders(shopify.syncOrders);
+        const statusResponse = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/status`, { headers: { "X-Dev-Subdomain": "admin" } });
+        const status = (await statusResponse.json().catch(() => ({}))) as { connected?: boolean; message?: string };
+        setConnectionDetails({ connected: Boolean(status.connected), message: status.message ?? "Connected to Shopify." });
+        setMessage(status.message ?? `Connected to ${shopify.storeUrl}`);
+      } else {
+        setMessage("Enter your Shopify store URL and Admin API Access Token to connect.");
+      }
+    } catch {
+      setMessage("Shopify connection metadata is unavailable.");
+    }
+  };
 
   useEffect(() => {
-    const loadConnection = async (): Promise<void> => {
-      try {
-        const response = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce`, {
-          headers: { "X-Dev-Subdomain": "admin" },
-        });
-        if (!response.ok) {
-          setMessage("Enter your real Shopify store domain and connect it first.");
-          return;
-        }
-
-        const payload = (await response.json()) as ShopifyConnection[];
-        const shopify = payload.find((item) => item.platform === "shopify") ?? null;
-        setConnection(shopify);
-        if (shopify) {
-          setStoreUrl(shopify.storeUrl);
-          setSyncInventory(shopify.syncInventory);
-          setSyncOrders(shopify.syncOrders);
-          setMessage(`Connected to ${shopify.storeUrl}`);
-          const statusResponse = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/status`, { headers: { "X-Dev-Subdomain": "admin" } });
-          const status = (await statusResponse.json().catch(() => ({}))) as { connected?: boolean; message?: string };
-          if (status.message) setMessage(status.message);
-        } else {
-          setMessage("Enter your real Shopify store domain and connect it first.");
-        }
-      } catch {
-        setMessage("Shopify connection metadata is unavailable.");
-      }
-    };
-
     void loadConnection();
   }, []);
 
   const saveConnection = async (): Promise<void> => {
+    if (!storeUrl.trim()) {
+      setMessage("Enter your Shopify store URL (e.g. ghostlight-books.myshopify.com).");
+      return;
+    }
+    if (!accessToken.trim() && !connection) {
+      setMessage("Enter your Shopify Admin API Access Token (starts with shpat_).");
+      return;
+    }
+
     setLoading(true);
+    setMessage("Testing and saving Shopify connection...");
     try {
+      const formattedUrl = storeUrl.trim().startsWith("http") ? storeUrl.trim() : `https://${storeUrl.trim()}`;
       const response = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" },
         body: JSON.stringify({
-          storeUrl,
-          config: {},
+          storeUrl: formattedUrl,
+          config: accessToken.trim() ? { accessToken: accessToken.trim() } : undefined,
           syncInventory,
           syncOrders,
         }),
@@ -92,31 +105,25 @@ function ShopifyPage(): JSX.Element {
 
       const nextConnection: ShopifyConnection = {
         platform: "shopify",
-        storeUrl,
+        storeUrl: formattedUrl,
         syncInventory,
         syncOrders,
         lastSyncedAt: new Date().toISOString(),
       };
       setConnection(nextConnection);
-      setMessage(`Shopify saved for ${storeUrl}.`);
+      setAccessToken("");
+
+      // Test live status immediately
+      const statusResponse = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/status`, { headers: { "X-Dev-Subdomain": "admin" } });
+      const status = (await statusResponse.json().catch(() => ({}))) as { connected?: boolean; message?: string };
+      setConnectionDetails({ connected: Boolean(status.connected), message: status.message ?? "Connected to Shopify." });
+      setMessage(status.message ?? `Shopify connection saved for ${formattedUrl}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Shopify settings could not be saved.");
+      setConnectionDetails({ connected: false, message: error instanceof Error ? error.message : "Connection failed." });
     } finally {
       setLoading(false);
     }
-  };
-
-  const connectShopify = (): void => {
-    if (!storeUrl.trim()) {
-      setMessage("Enter your Shopify store domain first.");
-      return;
-    }
-    const shop = storeUrl.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
-    if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(shop)) {
-      setMessage("Use the store's myshopify.com domain, such as your-store.myshopify.com.");
-      return;
-    }
-    window.location.href = `${API_BASE}/auth/shopify/install?storeId=ghostlight-demo&shop=${encodeURIComponent(shop)}`;
   };
 
   const syncProducts = async (): Promise<void> => {
@@ -125,6 +132,7 @@ function ShopifyPage(): JSX.Element {
       return;
     }
     setLoading(true);
+    setMessage("Syncing inventory catalog to Shopify...");
     try {
       const response = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/inventory-sync-stream`, { headers: { Accept: "application/x-ndjson", "X-Dev-Subdomain": "admin" } });
       if (!response.ok || !response.body) throw new Error("Inventory sync could not start.");
@@ -141,7 +149,7 @@ function ShopifyPage(): JSX.Element {
           if (!line.trim()) continue;
           const event = JSON.parse(line) as { type: string; sku?: string; isbn?: string; title?: string; status?: "synced" | "failed"; message?: string; synced?: number; skipped?: number };
           if (event.type === "item" && event.sku && event.title && event.status) setProducts((current) => [...current, { sku: event.sku!, title: event.title!, quantity: 0, status: event.status, message: event.message }]);
-          if (event.type === "complete") setMessage(`Inventory sync completed: ${event.synced ?? 0} synced, ${event.skipped ?? 0} failed.`);
+          if (event.type === "complete") setMessage(`Inventory sync completed: ${event.synced ?? 0} synced, ${event.skipped ?? 0} skipped.`);
           if (event.type === "error") throw new Error(event.message ?? "Inventory sync failed.");
         }
         if (chunk.done) break;
@@ -177,11 +185,14 @@ function ShopifyPage(): JSX.Element {
   };
 
   const connectionSummary = useMemo(() => {
-    if (!connection) {
-      return "Not connected";
+    if (connectionDetails?.connected) {
+      return "Connected & Active";
     }
-    return `Last sync: ${connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : "never"}`;
-  }, [connection]);
+    if (connection) {
+      return "Connected";
+    }
+    return "Not connected";
+  }, [connection, connectionDetails]);
 
   return (
     <main className="space-y-5 p-4 md:p-6">
@@ -191,34 +202,111 @@ function ShopifyPage(): JSX.Element {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">Shopify</p>
             <h1 className="mt-2 text-3xl font-semibold text-slate-800">Store connector</h1>
           </div>
-          <span className="rounded-full bg-sky-100 px-3 py-1.5 text-xs font-semibold text-sky-700">{connectionSummary}</span>
+          <span
+            className={[
+              "rounded-full px-3.5 py-1.5 text-xs font-bold",
+              connectionDetails?.connected ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600",
+            ].join(" ")}
+          >
+            {connectionSummary}
+          </span>
         </div>
-        <p className="mt-3 text-sm text-slate-600">{message}</p>
+        <p className="mt-3 text-sm font-medium text-slate-600">{message}</p>
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-800">Shopify OAuth connection</h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <label className="grid gap-1 text-sm text-slate-600">
-              Shopify store URL
-              <input value={storeUrl} onChange={(event) => setStoreUrl(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm focus:border-sky-500" placeholder="https://your-store.myshopify.com" />
+          <h2 className="text-xl font-semibold text-slate-800">Shopify Admin API Connection</h2>
+          <p className="mt-1 text-xs text-slate-500">Connect your Shopify store using a Custom App Access Token to enable instant scan-to-Shopify product publishing.</p>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-1 text-sm font-semibold text-slate-700">
+              Shopify Store Domain / URL
+              <input
+                value={storeUrl}
+                onChange={(event) => setStoreUrl(event.target.value)}
+                className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-sky-500"
+                placeholder="your-store.myshopify.com"
+              />
             </label>
-            <div className="flex items-end"><button type="button" onClick={connectShopify} className="h-11 rounded-xl bg-sky-600 px-4 text-sm font-semibold text-white">Connect Shopify</button></div>
+            <label className="grid gap-1 text-sm font-semibold text-slate-700">
+              Admin API Access Token
+              <input
+                type="password"
+                value={accessToken}
+                onChange={(event) => setAccessToken(event.target.value)}
+                className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-sky-500"
+                placeholder={connection ? "•••••••••••••••• (Leave blank to keep current)" : "shpat_..."}
+              />
+            </label>
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={syncInventory} onChange={(event) => setSyncInventory(event.target.checked)} /> Inventory sync</label>
-            <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={syncOrders} onChange={(event) => setSyncOrders(event.target.checked)} /> Order sync</label>
-            <button type="button" onClick={connectShopify} disabled={loading} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">Connect Shopify</button>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={syncInventory}
+                  onChange={(event) => setSyncInventory(event.target.checked)}
+                  className="rounded text-sky-600 focus:ring-sky-500"
+                />
+                Auto-sync inventory on scan
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={syncOrders}
+                  onChange={(event) => setSyncOrders(event.target.checked)}
+                  className="rounded text-sky-600 focus:ring-sky-500"
+                />
+                Sync orders
+              </label>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => void saveConnection()}
+              disabled={loading}
+              className="h-11 rounded-xl bg-sky-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-50"
+            >
+              {loading ? "Connecting..." : "Save & Test Connection"}
+            </button>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50/60 p-4 text-xs text-slate-600">
+            <p className="font-semibold text-sky-800">How to get your Shopify Access Token (1-minute setup):</p>
+            <ol className="mt-2 list-decimal space-y-1 pl-4 leading-relaxed">
+              <li>In your Shopify Admin, go to: <strong>Settings → Apps and sales channels → Develop apps</strong>.</li>
+              <li>Click <strong>Create an app</strong> (Name it <em>Colophon ERP</em>).</li>
+              <li>Under <strong>Configure Admin API scopes</strong>, enable:
+                <span className="font-mono text-[11px] text-sky-900 block mt-0.5">read_products, write_products, read_inventory, write_inventory, read_orders, read_locations</span>
+              </li>
+              <li>Click <strong>Install app</strong> and reveal the <strong>Admin API access token</strong> (starts with <code className="rounded bg-sky-100 px-1 py-0.5 font-mono">shpat_</code>).</li>
+              <li>Paste it into the field above and click <strong>Save & Test Connection</strong>.</li>
+            </ol>
           </div>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-800">Sync actions</h2>
+          <h2 className="text-xl font-semibold text-slate-800">Manual Sync Actions</h2>
+          <p className="mt-1 text-xs text-slate-500">Trigger on-demand syncs for your existing inventory catalog or incoming orders.</p>
           <div className="mt-4 grid gap-3">
-            <button type="button" onClick={() => void syncProducts()} className="rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white">Sync product inventory</button>
-            <button type="button" onClick={() => void importOrders()} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">Import recent orders</button>
+            <button
+              type="button"
+              disabled={!connection || loading}
+              onClick={() => void syncProducts()}
+              className="rounded-xl bg-slate-800 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-900 disabled:opacity-40"
+            >
+              {loading ? "Syncing..." : "Sync Full Inventory Catalog to Shopify"}
+            </button>
+            <button
+              type="button"
+              disabled={!connection || loading}
+              onClick={() => void importOrders()}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
+            >
+              Import Recent Orders
+            </button>
           </div>
         </div>
       </section>
