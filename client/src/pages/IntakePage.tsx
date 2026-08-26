@@ -108,7 +108,17 @@ function IntakePage(): JSX.Element {
   const [scanSessions, setScanSessions] = useState<ScanSession[]>(readScanSessions);
   const [currentSessionId] = useState(() => `INTAKE-${Date.now()}`);
   const [historyQuery, setHistoryQuery] = useState("");
-  const [historySort, setHistorySort] = useState<"newest" | "oldest" | "title">("newest");
+  const [historySortField, setHistorySortField] = useState<"time" | "title" | "condition" | "container" | "value" | "status">("time");
+  const [historySortDir, setHistorySortDir] = useState<"asc" | "desc">("desc");
+
+  const handleHistoryHeaderSort = (field: "time" | "title" | "condition" | "container" | "value" | "status"): void => {
+    if (historySortField === field) {
+      setHistorySortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setHistorySortField(field);
+      setHistorySortDir(field === "time" ? "desc" : "asc");
+    }
+  };
 
   const scannedToday = scannedBooks.length;
   const flaggedCount = 0;
@@ -125,12 +135,35 @@ function IntakePage(): JSX.Element {
       ? items.filter((item) => [item.title, item.isbn, item.status, item.condition, item.container].some((value) => value?.toLowerCase().includes(query)))
       : items;
     return [...filtered].sort((left, right) => {
-      if (historySort === "title") return (left.title ?? "").localeCompare(right.title ?? "");
-      const leftStamp = `${left.day} ${left.time}`;
-      const rightStamp = `${right.day} ${right.time}`;
-      return historySort === "oldest" ? leftStamp.localeCompare(rightStamp) : rightStamp.localeCompare(leftStamp);
+      let cmp = 0;
+      switch (historySortField) {
+        case "title":
+          cmp = (left.title ?? "").localeCompare(right.title ?? "");
+          break;
+        case "time": {
+          const leftStamp = `${left.day} ${left.time}`;
+          const rightStamp = `${right.day} ${right.time}`;
+          cmp = leftStamp.localeCompare(rightStamp);
+          break;
+        }
+        case "condition":
+          cmp = (left.condition ?? "").localeCompare(right.condition ?? "");
+          break;
+        case "container":
+          cmp = (left.container ?? "").localeCompare(right.container ?? "");
+          break;
+        case "value":
+          cmp = (left.value ?? 0) - (right.value ?? 0);
+          break;
+        case "status":
+          cmp = (left.status ?? "").localeCompare(right.status ?? "");
+          break;
+        default:
+          cmp = 0;
+      }
+      return historySortDir === "asc" ? cmp : -cmp;
     });
-  }, [historyQuery, historySort, scanSessions]);
+  }, [historyQuery, historySortDir, historySortField, scanSessions]);
 
   useEffect(() => {
     window.localStorage.setItem("colophon-scan-sessions", JSON.stringify(scanSessions));
@@ -771,10 +804,56 @@ function IntakePage(): JSX.Element {
         </div>
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <input value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="Search title, ISBN, condition, or bin" aria-label="Search intake report" className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400" />
-          <select value={historySort} onChange={(event) => setHistorySort(event.target.value as typeof historySort)} aria-label="Sort intake report" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="title">Title A-Z</option></select>
         </div>
         <div className="mt-3 overflow-x-auto">
-          {historyItems.length === 0 ? <p className="rounded-xl bg-white/60 px-3 py-2 text-sm text-slate-500">No scans match this report.</p> : <table className="w-full min-w-[760px] border-separate border-spacing-y-2 text-left text-sm"><thead className="text-xs uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-2">Title</th><th className="px-3 py-2">Day</th><th className="px-3 py-2">Time</th><th className="px-3 py-2">Condition</th><th className="px-3 py-2">Bin</th><th className="px-3 py-2">Value</th><th className="px-3 py-2">Status</th></tr></thead><tbody>{historyItems.map((item) => <tr key={item.id} className="bg-white/80"><td className="rounded-l-xl px-3 py-3"><p className="font-semibold text-slate-800">{item.title ?? "Title unavailable"}</p><p className="mt-1 text-xs text-slate-500">{item.isbn}</p></td><td className="px-3 py-3 text-xs">{item.day}</td><td className="px-3 py-3 text-xs">{item.time}</td><td className="px-3 py-3 text-xs">{item.condition ?? "—"}</td><td className="px-3 py-3 text-xs">{item.container ?? "—"}</td><td className="px-3 py-3 font-semibold">{item.value === null ? "Manual lookup" : `$${item.value.toFixed(2)}`}</td><td className="rounded-r-xl px-3 py-3 text-xs font-semibold"><span className={item.status === "Received" ? "text-emerald-700" : "text-rose-700"}>{item.status}</span>{item.reason ? <span className="mt-1 block font-normal text-slate-500">{item.reason}</span> : null}</td></tr>)}</tbody></table>}
+          {historyItems.length === 0 ? <p className="rounded-xl bg-white/60 px-3 py-2 text-sm text-slate-500">No scans match this report.</p> : (
+            <table className="w-full min-w-[760px] border-separate border-spacing-y-2 text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  {[
+                    { field: "title" as const, label: "Title" },
+                    { field: "time" as const, label: "Day" },
+                    { field: "time" as const, label: "Time" },
+                    { field: "condition" as const, label: "Condition" },
+                    { field: "container" as const, label: "Bin" },
+                    { field: "value" as const, label: "Value" },
+                    { field: "status" as const, label: "Status" },
+                  ].map(({ field, label }, idx) => {
+                    const isActive = historySortField === field && (field !== "time" || idx === 1);
+                    return (
+                      <th
+                        key={`${field}-${label}`}
+                        scope="col"
+                        onClick={() => handleHistoryHeaderSort(field)}
+                        className="cursor-pointer select-none px-3 py-2 transition-colors hover:text-slate-700"
+                        title={`Sort by ${label}`}
+                      >
+                        <div className="inline-flex items-center gap-1.5">
+                          <span className={isActive ? "font-bold text-slate-800" : ""}>{label}</span>
+                          <span className={["text-xs transition-colors", isActive ? "font-bold text-sky-600" : "text-slate-300"].join(" ")}>
+                            {isActive ? (historySortDir === "asc" ? "▲" : "▼") : "↕"}
+                          </span>
+                        </div>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {historyItems.map((item) => (
+                  <tr key={item.id} className="bg-white/80">
+                    <td className="rounded-l-xl px-3 py-3"><p className="font-semibold text-slate-800">{item.title ?? "Title unavailable"}</p><p className="mt-1 text-xs text-slate-500">{item.isbn}</p></td>
+                    <td className="px-3 py-3 text-xs">{item.day}</td>
+                    <td className="px-3 py-3 text-xs">{item.time}</td>
+                    <td className="px-3 py-3 text-xs">{item.condition ?? "—"}</td>
+                    <td className="px-3 py-3 text-xs">{item.container ?? "—"}</td>
+                    <td className="px-3 py-3 font-semibold">{item.value === null ? "Manual lookup" : `$${item.value.toFixed(2)}`}</td>
+                    <td className="rounded-r-xl px-3 py-3 text-xs font-semibold"><span className={item.status === "Received" ? "text-emerald-700" : "text-rose-700"}>{item.status}</span>{item.reason ? <span className="mt-1 block font-normal text-slate-500">{item.reason}</span> : null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </SurfaceCard> : null}
     </section>

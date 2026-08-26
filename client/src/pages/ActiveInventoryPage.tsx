@@ -47,6 +47,9 @@ const fallbackInventory: InventoryRecord[] = [
   },
 ];
 
+type SortField = "title" | "sku" | "category" | "mediaType" | "listPrice" | "shopifyStatus" | "networkStatus";
+type SortDirection = "asc" | "desc";
+
 function InventoryPage(): JSX.Element {
   const navigate = useNavigate();
   const [items, setItems] = useState<InventoryRecord[]>([]);
@@ -57,6 +60,17 @@ function InventoryPage(): JSX.Element {
   const [connectedPartnerStores, setConnectedPartnerStores] = useState(0);
   const [availabilityFilter, setAvailabilityFilter] = useState<"my-store" | "partner">("my-store");
   const [mediaFilter, setMediaFilter] = useState("All");
+  const [sortField, setSortField] = useState<SortField>("title");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+
+  const handleSort = (field: SortField): void => {
+    if (sortField === field) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  };
 
   const loadInventory = async (): Promise<void> => {
     setLoading(true);
@@ -95,14 +109,44 @@ function InventoryPage(): JSX.Element {
 
   const filteredItems = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return items.filter((item) =>
+    const filtered = items.filter((item) =>
       (availabilityFilter === "my-store" || connectedPartnerStores > 0)
       && (mediaFilter === "All" || item.mediaType === mediaFilter)
       && (!query || [item.title, item.author, item.isbn, item.sku, item.category, item.subcategory, item.mediaType]
         .filter(Boolean)
         .some((value) => value!.toLowerCase().includes(query))),
     );
-  }, [availabilityFilter, connectedPartnerStores, items, mediaFilter, search]);
+
+    return [...filtered].sort((a, b) => {
+      let comparison = 0;
+      switch (sortField) {
+        case "title":
+          comparison = (a.title ?? "").localeCompare(b.title ?? "");
+          break;
+        case "sku":
+          comparison = (a.sku ?? "").localeCompare(b.sku ?? "");
+          break;
+        case "category":
+          comparison = (a.category ?? "").localeCompare(b.category ?? "");
+          break;
+        case "mediaType":
+          comparison = (a.mediaType ?? "").localeCompare(b.mediaType ?? "");
+          break;
+        case "listPrice":
+          comparison = (a.listPrice ?? 0) - (b.listPrice ?? 0);
+          break;
+        case "shopifyStatus":
+          comparison = (a.shopifyStatus ?? "").localeCompare(b.shopifyStatus ?? "");
+          break;
+        case "networkStatus":
+          comparison = (a.networkStatus ?? "").localeCompare(b.networkStatus ?? "");
+          break;
+        default:
+          comparison = 0;
+      }
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [availabilityFilter, connectedPartnerStores, items, mediaFilter, search, sortField, sortDirection]);
 
   const totalUnits = items.reduce((sum, item) => sum + item.quantityOnHand, 0);
   const pricedItems = items.filter((item) => item.thriftbooksPrice !== null).length;
@@ -183,19 +227,42 @@ function InventoryPage(): JSX.Element {
             <select value={mediaFilter} onChange={(event) => setMediaFilter(event.target.value)} aria-label="Filter by media type" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">{mediaTypes.map((type) => <option key={type}>{type}</option>)}</select>
           </div>
         </div>
-        <p className="mt-3 rounded-xl bg-white/60 px-3 py-2 text-xs text-slate-500">{loading ? "Loading..." : message}</p>
-
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[900px] border-separate border-spacing-y-2 text-left text-sm">
             <thead className="text-xs uppercase tracking-wide text-slate-400">
               <tr>
-                <th className="px-3 py-2">Item</th>
-                <th className="px-3 py-2">SKU / Barcode</th>
-                <th className="px-3 py-2">Category</th>
-                <th className="px-3 py-2">Media type</th>
-                <th className="px-3 py-2">Price</th>
-                <th className="px-3 py-2">Shopify</th>
-                <th className="px-3 py-2">Open Network</th>
+                {[
+                  { field: "title" as const, label: "Item" },
+                  { field: "sku" as const, label: "SKU / Barcode" },
+                  { field: "category" as const, label: "Category" },
+                  { field: "mediaType" as const, label: "Media type" },
+                  { field: "listPrice" as const, label: "Price" },
+                  { field: "shopifyStatus" as const, label: "Shopify" },
+                  { field: "networkStatus" as const, label: "Open Network" },
+                ].map(({ field, label }) => {
+                  const isActive = sortField === field;
+                  return (
+                    <th
+                      key={field}
+                      scope="col"
+                      onClick={() => handleSort(field)}
+                      className="cursor-pointer select-none px-3 py-2 transition-colors hover:text-slate-700"
+                      title={`Sort by ${label} (${isActive && sortDirection === "asc" ? "descending" : "ascending"})`}
+                    >
+                      <div className="inline-flex items-center gap-1.5">
+                        <span className={isActive ? "font-bold text-slate-800" : ""}>{label}</span>
+                        <span
+                          className={[
+                            "text-xs transition-colors",
+                            isActive ? "font-bold text-sky-600" : "text-slate-300",
+                          ].join(" ")}
+                        >
+                          {isActive ? (sortDirection === "asc" ? "▲" : "▼") : "↕"}
+                        </span>
+                      </div>
+                    </th>
+                  );
+                })}
                 <th className="px-3 py-2">Actions</th>
               </tr>
             </thead>
