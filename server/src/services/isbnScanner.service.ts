@@ -2,7 +2,7 @@ import { prisma } from "../config/database.js";
 import { lookupAbeBooksPrice } from "./abebooksScraper.service.js";
 import { lookupThriftbooksDetails } from "./thriftbooksScraper.service.js";
 
-const PROVIDER_TIMEOUT_MS = 8000;
+const PROVIDER_TIMEOUT_MS = 10000;
 const skuSequences = new Map<string, number>();
 
 async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {
@@ -330,28 +330,36 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
     const cached = await prisma.isbnLookupCache.findUnique({ where: { isbn: normalized } });
     if (cached) {
       const cachedBook = fromCache(cached);
-      const thriftbooksDetails = cachedBook.thriftbooksPrice === null
-        ? await lookupThriftbooksDetails(normalized)
-        : null;
-      const fallbackPrice = thriftbooksDetails?.title
-        ? thriftbooksDetails.price
-        : await lookupAbeBooksPrice(normalized);
+      let resolvedPrice = cachedBook.thriftbooksPrice;
+      let fetchedTbDetails: import("./thriftbooksScraper.service.js").ThriftbooksDetails | null = null;
+
+      // Only attempt live scraping if price was not previously found
+      if (resolvedPrice === null) {
+        fetchedTbDetails = await lookupThriftbooksDetails(normalized);
+        resolvedPrice = fetchedTbDetails?.price ?? await lookupAbeBooksPrice(normalized);
+      }
+
       if (cachedBook.title) {
         if (!cachedBook.author && !cached.publisher && !cached.coverUrl && !cached.description && !cached.catalogTags) {
           const enriched = await lookupOpenLibrary(normalized).catch(() => null);
           if (enriched) {
-            const refreshed = { ...cachedBook, ...enriched, thriftbooksPrice: fallbackPrice ?? cachedBook.thriftbooksPrice, label: { ...cachedBook.label, ...enriched.label, price: fallbackPrice ?? cachedBook.thriftbooksPrice } };
+            const refreshed = {
+              ...cachedBook,
+              ...enriched,
+              thriftbooksPrice: resolvedPrice,
+              label: { ...cachedBook.label, ...enriched.label, price: resolvedPrice },
+            };
             await saveToCache(refreshed);
             return refreshed;
           }
         }
-        if (fallbackPrice !== null) {
+        if (resolvedPrice !== cachedBook.thriftbooksPrice) {
           const refreshed: BookLookup = {
             ...cachedBook,
-            thriftbooksPrice: fallbackPrice,
-            category: cachedBook.category ?? normalizeCategories([], thriftbooksDetails?.category).category,
-            subcategory: cachedBook.subcategory ?? thriftbooksDetails?.subcategory ?? null,
-            label: { ...cachedBook.label, price: fallbackPrice },
+            thriftbooksPrice: resolvedPrice,
+            category: cachedBook.category ?? normalizeCategories([], fetchedTbDetails?.category).category,
+            subcategory: cachedBook.subcategory ?? fetchedTbDetails?.subcategory ?? null,
+            label: { ...cachedBook.label, price: resolvedPrice },
           };
           await saveToCache(refreshed);
           return refreshed;
@@ -375,11 +383,11 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
         category: cachedBook.category ?? enriched.category,
         subcategory: cachedBook.subcategory ?? enriched.subcategory,
         mediaType: cachedBook.mediaType || enriched.mediaType,
-        thriftbooksPrice: fallbackPrice ?? cachedBook.thriftbooksPrice,
+        thriftbooksPrice: resolvedPrice,
         label: {
           ...cachedBook.label,
           title: cachedBook.title ?? enriched.title,
-          price: fallbackPrice ?? cachedBook.thriftbooksPrice,
+          price: resolvedPrice,
         },
       };
       await saveToCache(result);
@@ -390,9 +398,7 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       lookupOpenLibrary(normalized).catch(() => null),
       lookupThriftbooksDetails(normalized),
     ]);
-    const fallbackPrice = thriftbooksDetails?.title
-      ? thriftbooksDetails.price
-      : await lookupAbeBooksPrice(normalized);
+    const fallbackPrice = thriftbooksDetails?.price ?? await lookupAbeBooksPrice(normalized);
     const book = bookResult;
     if (!book) {
       if (fallbackPrice === null) {

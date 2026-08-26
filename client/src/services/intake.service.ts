@@ -39,7 +39,7 @@ export type BookSearchResult = {
 
 const rawApiBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 const API_BASE = rawApiBase.replace(/\/$/, "").replace(/\/api$/, "");
-const PROVIDER_TIMEOUT_MS = 8000;
+const PROVIDER_TIMEOUT_MS = 20000;
 const skuSequences = new Map<string, number>();
 
 async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {

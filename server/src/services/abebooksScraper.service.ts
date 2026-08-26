@@ -1,19 +1,71 @@
+import {
+  fetchScraperHtml,
+  extractJsonLdBlocks,
+  parseOffersFromJsonLd,
+  extractMetaPrice,
+  normalizeCondition,
+  BookCondition,
+  ScrapedOffer,
+} from "./scraperGateway.service.js";
+
 const PRICE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const REQUEST_TIMEOUT_MS = 10000;
-const MIN_REQUEST_INTERVAL_MS = 0;
-const BACKOFF_MS = 15 * 60 * 1000;
 const priceCache = new Map<string, { price: number; expiresAt: number }>();
 const inFlightRequests = new Map<string, Promise<number | null>>();
-let lastRequestAt = 0;
-let blockedUntil = 0;
 
-function extractPrice(html: string): number | null {
-  const match = html.match(/data-test-id=["']listing-price["'][^>]*>\s*(?:US\$|\$)\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
-  if (!match) {
-    return null;
+function firstNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return value;
   }
-  const price = Number(match[1]);
-  return Number.isFinite(price) && price > 0 ? price : null;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[^0-9.]/g, ""));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+export function extractAbeBooksPrice(html: string): { price: number | null; offers: ScrapedOffer[] } {
+  // 1. JSON-LD structured extraction
+  const jsonLdBlocks = extractJsonLdBlocks(html);
+  const structuredOffers = parseOffersFromJsonLd(jsonLdBlocks);
+
+  if (structuredOffers.length > 0) {
+    const conditionPrices: Partial<Record<BookCondition, number>> = {};
+    for (const offer of structuredOffers) {
+      if (!conditionPrices[offer.condition] || offer.price < conditionPrices[offer.condition]!) {
+        conditionPrices[offer.condition] = offer.price;
+      }
+    }
+    const bestPrice = conditionPrices["Good"]
+      ?? conditionPrices["Very Good"]
+      ?? conditionPrices["Acceptable"]
+      ?? conditionPrices["Like New"]
+      ?? Math.min(...structuredOffers.map((o) => o.price));
+
+    return { price: bestPrice, offers: structuredOffers };
+  }
+
+  // 2. OpenGraph / Microdata
+  const metaPrice = extractMetaPrice(html);
+  if (metaPrice !== null) {
+    return { price: metaPrice, offers: [] };
+  }
+
+  // 3. Resilient AbeBooks HTML regex matches
+  const regexList = [
+    /data-test-id=["']listing-price["'][^>]*>\s*(?:US\$|\$)?\s*([0-9]+(?:\.[0-9]{1,2})?)/gi,
+    /class=["'][^"']*(?:item-price|listing-price|s-price)[^"']*["'][^>]*>\s*(?:US\$|\$)?\s*([0-9]+(?:\.[0-9]{1,2})?)/gi,
+    /"price"\s*:\s*"?\$?([0-9]+(?:\.[0-9]+)?)/gi,
+  ];
+
+  for (const regex of regexList) {
+    const matches = Array.from(html.matchAll(regex));
+    const price = matches.map((m) => firstNumber(m[1])).find((p): p is number => p !== null);
+    if (price) {
+      return { price, offers: [] };
+    }
+  }
+
+  return { price: null, offers: [] };
 }
 
 export async function lookupAbeBooksPrice(isbn: string): Promise<number | null> {
@@ -33,45 +85,18 @@ export async function lookupAbeBooksPrice(isbn: string): Promise<number | null> 
 }
 
 async function fetchAbeBooksPrice(isbn: string): Promise<number | null> {
-  let result: number | null = null;
-  const run = (async () => {
-    const now = Date.now();
-    if (blockedUntil > now) {
-      return;
-    }
+  const targetUrl = `https://www.abebooks.com/servlet/SearchResults?isbn=${encodeURIComponent(isbn)}`;
+  const { html } = await fetchScraperHtml(targetUrl);
 
-    const waitMs = Math.max(0, lastRequestAt + MIN_REQUEST_INTERVAL_MS - now);
-    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+  if (!html) {
+    return null;
+  }
 
-    try {
-      const response = await fetch(`https://www.abebooks.com/servlet/SearchResults?isbn=${encodeURIComponent(isbn)}`, {
-        headers: {
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.9",
-          "User-Agent": "ColophonERP/1.0 (bookstore inventory lookup)",
-        },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-      lastRequestAt = Date.now();
-      if (response.status === 403 || response.status === 429) {
-        blockedUntil = Date.now() + BACKOFF_MS;
-        console.warn(`AbeBooks request blocked with status ${response.status}`);
-        return;
-      }
-      if (!response.ok) {
-        console.warn(`AbeBooks request failed with status ${response.status}`);
-        return;
-      }
+  const { price } = extractAbeBooksPrice(html);
 
-      result = extractPrice(await response.text());
-      if (result !== null) {
-        priceCache.set(isbn, { price: result, expiresAt: Date.now() + PRICE_CACHE_TTL_MS });
-      }
-    } catch (error) {
-      lastRequestAt = Date.now();
-      console.warn("AbeBooks request error", error instanceof Error ? error.message : error);
-    }
-  });
-  await run;
-  return result;
+  if (price !== null) {
+    priceCache.set(isbn, { price, expiresAt: Date.now() + PRICE_CACHE_TTL_MS });
+  }
+
+  return price;
 }

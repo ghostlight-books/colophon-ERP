@@ -28,3 +28,5 @@ Thumbs.db
 
 # Prisma generated output
 packages/database/generated/
+
+colophon-erp/
