@@ -67,6 +67,16 @@ function readScanSessions(): ScanSession[] {
   }
 }
 
+function readCurrentScannedBooks(): ScannedBook[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("colophon-current-scanned-books") ?? "[]") as ScannedBook[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function IntakePage(): JSX.Element {
   const [activeView, setActiveView] = useState<"scan" | "history">("scan");
   const [scannerConnected, setScannerConnected] = useState(false);
@@ -83,7 +93,7 @@ function IntakePage(): JSX.Element {
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const scannerBufferRef = useRef("");
   const scannerTimerRef = useRef<number | null>(null);
-  const [scannedBooks, setScannedBooks] = useState<ScannedBook[]>([]);
+  const [scannedBooks, setScannedBooks] = useState<ScannedBook[]>(readCurrentScannedBooks);
   const [lookupBusy, setLookupBusy] = useState(false);
   const [pendingBook, setPendingBook] = useState<BookLookup | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
@@ -125,6 +135,10 @@ function IntakePage(): JSX.Element {
   useEffect(() => {
     window.localStorage.setItem("colophon-scan-sessions", JSON.stringify(scanSessions));
   }, [scanSessions]);
+
+  useEffect(() => {
+    window.localStorage.setItem("colophon-current-scanned-books", JSON.stringify(scannedBooks));
+  }, [scannedBooks]);
 
   useEffect(() => {
     setScanSessions((current) => current.some((session) => session.id === currentSessionId)
@@ -645,7 +659,16 @@ function IntakePage(): JSX.Element {
 
           {scannedBooks.length > 0 ? (
             <div className="mt-4 border-t border-slate-200/70 pt-4">
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Running scan list</p>
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Running scan list ({scannedBooks.length})</p>
+                <button
+                  type="button"
+                  onClick={() => setScannedBooks([])}
+                  className="text-xs font-medium text-slate-400 hover:text-slate-600"
+                >
+                  Clear scan list
+                </button>
+              </div>
               <div className="grid gap-3 xl:grid-cols-2">
               {scannedBooks.map((book, index) => (
                 <div
