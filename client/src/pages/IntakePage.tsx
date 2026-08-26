@@ -619,6 +619,12 @@ function IntakePage(): JSX.Element {
               <input
                 value={manualSkuOrIsbn}
                 onChange={(event) => setManualSkuOrIsbn(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void handleManualSearch();
+                  }
+                }}
                 placeholder="Manual SKU or ISBN"
                 aria-label="Manual SKU or ISBN"
                 className="h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400"
@@ -626,6 +632,12 @@ function IntakePage(): JSX.Element {
               <input
                 value={manualTitle}
                 onChange={(event) => setManualTitle(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void handleManualSearch();
+                  }
+                }}
                 placeholder="Title"
                 aria-label="Search by title"
                 className="h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400"
@@ -633,6 +645,12 @@ function IntakePage(): JSX.Element {
               <input
                 value={manualAuthor}
                 onChange={(event) => setManualAuthor(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void handleManualSearch();
+                  }
+                }}
                 placeholder="Author"
                 aria-label="Search by author"
                 className="h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400"
