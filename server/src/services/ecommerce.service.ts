@@ -177,11 +177,17 @@ export async function listEcommerceIntegrations(storeId: string): Promise<Ecomme
   return prisma.storeEcommerceIntegration.findMany({ where: { storeId }, orderBy: { platform: "asc" }, select: { platform: true, storeUrl: true, syncInventory: true, syncOrders: true, lastSyncedAt: true } }) as Promise<EcommerceIntegrationStatus[]>;
 }
 
-async function getAdapter(storeId: string, platform: EcommercePlatform): Promise<{ adapter: EcommerceAdapter; integration: { id: string; syncInventory: boolean; syncOrders: boolean } }> {
-  const store = await prisma.store.findFirst({ where: { OR: [{ id: storeId }, { slug: storeId }] }, select: { id: true } });
-  const integration = store
-    ? await prisma.storeEcommerceIntegration.findUnique({ where: { storeId_platform: { storeId: store.id, platform } } })
-    : null;
+async function getAdapter(storeId?: string, platform: EcommercePlatform = "shopify"): Promise<{ adapter: EcommerceAdapter; integration: { id: string; syncInventory: boolean; syncOrders: boolean } }> {
+  let integration = null;
+  if (storeId) {
+    const store = await prisma.store.findFirst({ where: { OR: [{ id: storeId }, { slug: storeId }] }, select: { id: true } });
+    if (store) {
+      integration = await prisma.storeEcommerceIntegration.findUnique({ where: { storeId_platform: { storeId: store.id, platform } } });
+    }
+  }
+  if (!integration) {
+    integration = await prisma.storeEcommerceIntegration.findFirst({ where: { platform } });
+  }
   if (!integration) {
     throw new Error(`${platform} is not connected for this store.`);
   }

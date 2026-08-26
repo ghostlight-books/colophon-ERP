@@ -874,12 +874,14 @@ export function createApp(): express.Express {
     try {
       await syncInventoryLookupCache();
       const connectedStores = await prisma.store.count({ where: { subscriptionStatus: { in: ["trial", "active"] } } });
+      const shopifyIntegration = await prisma.storeEcommerceIntegration.findFirst({ where: { platform: "shopify" } });
+      const isShopifyConnected = Boolean(shopifyIntegration && shopifyIntegration.syncInventory);
       const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, orderBy: { updatedAt: "desc" } });
       res.json({
         connectedStores: Math.max(connectedStores - 1, 0),
         items: items.map((item) => ({
           ...item,
-          shopifyStatus: "Not connected",
+          shopifyStatus: isShopifyConnected ? (item.quantityOnHand > 0 ? "Published" : "Draft") : "Not connected",
           networkStatus: connectedStores > 1 ? "Available to share" : "Private",
         })),
       });
