@@ -52,3 +52,4 @@ describe("Dimensions & Physical Metadata Service", () => {
     assert.strictEqual(sparseBook.packageType, "Flat Rate Envelope");
   });
 });
+

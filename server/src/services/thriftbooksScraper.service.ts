@@ -40,7 +40,7 @@ function extractText(html: string, pattern: RegExp): string | null {
 }
 
 export function extractThriftbooksDetails(html: string): ThriftbooksDetails {
-  // 1. Structured JSON-LD extraction
+  // 1. Structured JSON-LD extraction (Only inspect Book/Product/IndividualProduct schemas - never Reviews)
   const jsonLdBlocks = extractJsonLdBlocks(html);
   const structuredOffers = parseOffersFromJsonLd(jsonLdBlocks);
   
@@ -50,20 +50,42 @@ export function extractThriftbooksDetails(html: string): ThriftbooksDetails {
   for (const block of jsonLdBlocks) {
     if (block && typeof block === "object") {
       const obj = block as Record<string, unknown>;
-      if (!jsonTitle && typeof obj.name === "string") {
-        jsonTitle = obj.name;
+      const type = String(obj["@type"] || "").toLowerCase();
+      
+      // Specifically ignore Reviews and AggregateRating schemas
+      if (type.includes("review") || type.includes("rating")) {
+        continue;
       }
-      if (!jsonAuthor) {
-        if (typeof obj.author === "string") {
-          jsonAuthor = obj.author;
-        } else if (typeof obj.author === "object" && obj.author !== null && "name" in obj.author) {
-          jsonAuthor = String((obj.author as Record<string, unknown>).name);
+
+      if (type.includes("book") || type.includes("product") || type.includes("creativework")) {
+        if (!jsonTitle && typeof obj.name === "string" && obj.name.trim().length > 0) {
+          jsonTitle = obj.name.trim();
+        }
+        if (!jsonAuthor) {
+          if (typeof obj.author === "string" && obj.author.trim().length > 0) {
+            jsonAuthor = obj.author.trim();
+          } else if (typeof obj.author === "object" && obj.author !== null && "name" in obj.author) {
+            jsonAuthor = String((obj.author as Record<string, unknown>).name).trim();
+          }
         }
       }
     }
   }
 
-  // 2. DataLayer / Embedded Analytics Fallbacks
+  // 2. HTML elements for search & product pages
+  const htmlTitleMatch = html.match(/<[^>]*class=["'][^"']*(?:Search-Item-Title|product-title|All-Search-Item-Title|book-title)[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
+  let htmlTitle = htmlTitleMatch ? htmlTitleMatch[1].replace(/<[^>]+>/g, "").trim() : null;
+  if (htmlTitle && (htmlTitle.length < 2 || htmlTitle.toLowerCase() === "featured" || htmlTitle.toLowerCase().includes("book overview"))) {
+    htmlTitle = null;
+  }
+
+  const htmlAuthorMatch = html.match(/<[^>]*class=["'][^"']*(?:Search-Item-Author|All-Search-Item-Author|product-author|by-author)[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
+  let htmlAuthor = htmlAuthorMatch ? htmlAuthorMatch[1].replace(/<[^>]+>/g, "").trim() : null;
+  if (htmlAuthor) {
+    htmlAuthor = htmlAuthor.replace(/^by\s+/i, "").trim();
+  }
+
+  // 3. DataLayer / Embedded Analytics Fallbacks
   const dataLayerTitle = extractText(html, /"item_name"\s*:\s*"([^"]+)"/i)
     || extractText(html, /"title"\s*:\s*"([^"]+)"/i);
   const dataLayerAuthor = extractText(html, /"item_author"\s*:\s*"([^"]+)"/i)
@@ -72,7 +94,7 @@ export function extractThriftbooksDetails(html: string): ThriftbooksDetails {
     || extractText(html, /"category"\s*:\s*"([^"]+)"/i);
   const subcategory = extractText(html, /"item_category2"\s*:\s*"([^"]+)"/i);
 
-  // 3. Resilient price extraction
+  // 4. Resilient price extraction
   const conditionPrices: Partial<Record<BookCondition, number>> = {};
   for (const offer of structuredOffers) {
     if (!conditionPrices[offer.condition] || offer.price < conditionPrices[offer.condition]!) {
@@ -105,15 +127,33 @@ export function extractThriftbooksDetails(html: string): ThriftbooksDetails {
     finalPrice = regexMatches.map((m) => firstNumber(m[1])).find((p): p is number => p !== null) ?? null;
   }
 
+  const rawTitle = jsonTitle || htmlTitle || dataLayerTitle;
+  const rawAuthor = jsonAuthor || htmlAuthor || dataLayerAuthor;
+
+  const finalTitle = rawTitle ? decodeHtmlEntities(rawTitle) : null;
+  const finalAuthor = rawAuthor ? decodeHtmlEntities(rawAuthor) : null;
+
   return {
     price: finalPrice,
-    title: jsonTitle || dataLayerTitle,
-    author: jsonAuthor || dataLayerAuthor,
+    title: finalTitle,
+    author: finalAuthor,
     category,
     subcategory,
     offers: structuredOffers,
     conditionPrices,
   };
+}
+
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .trim();
 }
 
 export async function lookupThriftbooksPrice(isbn: string): Promise<number | null> {

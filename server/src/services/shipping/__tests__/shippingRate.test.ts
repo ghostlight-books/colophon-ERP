@@ -72,3 +72,4 @@ describe("USPS Shipping Rate & Auto-Selection Engine", () => {
     assert.ok(selection.selectedRate.recommendationReason?.includes("High-Value Item Protection"));
   });
 });
+

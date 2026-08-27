@@ -400,6 +400,95 @@ export async function pullOpenLibraryMetadata(isbn: string): Promise<Pick<BookLo
   };
 }
 
+export function resolveSmartBookPrice(format?: string | null, pageCount?: number | null): number {
+  const cleanFormat = (format || "").toLowerCase();
+  if (cleanFormat.includes("mass") || cleanFormat.includes("pocket") || cleanFormat.includes("mmpb")) {
+    return 4.99;
+  }
+  if (cleanFormat.includes("hardcover") || cleanFormat.includes("cloth") || cleanFormat.includes("hardback")) {
+    return (pageCount && pageCount > 500) ? 17.99 : 14.99;
+  }
+  if (cleanFormat.includes("leather") || cleanFormat.includes("collector") || cleanFormat.includes("deluxe")) {
+    return 24.99;
+  }
+  // Standard Trade Paperback default
+  return (pageCount && pageCount > 450) ? 12.99 : 9.99;
+}
+
+export async function lookupGoogleBooks(isbn: string): Promise<{
+  title: string | null;
+  author: string | null;
+  publisher: string | null;
+  description: string | null;
+  coverUrl: string | null;
+  pageCount: number | null;
+  categories: string[];
+  listPrice: number | null;
+} | null> {
+  const cleanIsbn = isbn.replace(/[^0-9X]/gi, "");
+  try {
+    const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(4500),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      items?: Array<{
+        volumeInfo?: {
+          title?: string;
+          authors?: string[];
+          publisher?: string;
+          description?: string;
+          pageCount?: number;
+          categories?: string[];
+          imageLinks?: {
+            extraLarge?: string;
+            large?: string;
+            medium?: string;
+            thumbnail?: string;
+            smallThumbnail?: string;
+          };
+        };
+        saleInfo?: {
+          listPrice?: { amount?: number };
+          retailPrice?: { amount?: number };
+        };
+      }>;
+    };
+    const item = data.items?.[0];
+    const volume = item?.volumeInfo;
+    if (!volume) return null;
+
+    let price: number | null = null;
+    if (item.saleInfo?.listPrice?.amount && item.saleInfo.listPrice.amount > 0) {
+      price = item.saleInfo.listPrice.amount;
+    } else if (item.saleInfo?.retailPrice?.amount && item.saleInfo.retailPrice.amount > 0) {
+      price = item.saleInfo.retailPrice.amount;
+    }
+
+    const cover =
+      volume.imageLinks?.extraLarge ||
+      volume.imageLinks?.large ||
+      volume.imageLinks?.medium ||
+      volume.imageLinks?.thumbnail ||
+      volume.imageLinks?.smallThumbnail ||
+      null;
+
+    return {
+      title: volume.title || null,
+      author: Array.isArray(volume.authors) ? volume.authors.join(", ") : null,
+      publisher: volume.publisher || null,
+      description: volume.description || null,
+      coverUrl: cover ? cover.replace("http://", "https://") : null,
+      pageCount: volume.pageCount || null,
+      categories: volume.categories || [],
+      listPrice: Number.isFinite(price) && (price ?? 0) > 0 ? price : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function lookupBookByIsbn(input: string): Promise<BookLookup | null> {
   const { normalized } = parseIsbn(input);
   if ((normalized.length !== 10 && normalized.length !== 13) || !hasValidCheckDigit(normalized)) {
@@ -411,11 +500,14 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
     if (cached) {
       const cachedBook = fromCache(cached);
       let resolvedPrice = cachedBook.thriftbooksPrice;
-      let fetchedTbDetails: import("./thriftbooksScraper.service.js").ThriftbooksDetails | null = null;
 
-      if (resolvedPrice === null) {
-        fetchedTbDetails = await lookupThriftbooksDetails(normalized);
-        resolvedPrice = fetchedTbDetails?.price ?? await lookupAbeBooksPrice(normalized);
+      if (resolvedPrice === null || resolvedPrice <= 0) {
+        const [tb, abePrice, gb] = await Promise.all([
+          lookupThriftbooksDetails(normalized).catch(() => null),
+          lookupAbeBooksPrice(normalized).catch(() => null),
+          lookupGoogleBooks(normalized).catch(() => null),
+        ]);
+        resolvedPrice = tb?.price ?? abePrice ?? gb?.listPrice ?? resolveSmartBookPrice(cachedBook.bindingFormat, cachedBook.pageCount);
       }
 
       if (cachedBook.title) {
@@ -439,28 +531,13 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
             await saveToCache(enriched);
             return enriched;
           }
-
-          const olMatch = await lookupOpenLibrary(normalized).catch(() => null);
-          if (olMatch) {
-            const refreshed = {
-              ...cachedBook,
-              ...olMatch,
-              category: "Print Books",
-              thriftbooksPrice: resolvedPrice,
-              label: { ...cachedBook.label, ...olMatch.label, price: resolvedPrice, category: "Print Books" },
-            };
-            await saveToCache(refreshed);
-            return refreshed;
-          }
         }
         if (resolvedPrice !== cachedBook.thriftbooksPrice || cachedBook.category !== "Print Books") {
-          const classification = extractGenreAndCategory([], fetchedTbDetails?.category);
           const refreshed: BookLookup = {
             ...cachedBook,
             category: "Print Books",
-            subcategory: cachedBook.subcategory ?? classification.genre ?? classification.subcategory,
             thriftbooksPrice: resolvedPrice,
-            label: { ...cachedBook.label, price: resolvedPrice, category: "Print Books", subcategory: cachedBook.subcategory ?? classification.genre ?? classification.subcategory },
+            label: { ...cachedBook.label, price: resolvedPrice, category: "Print Books" },
           };
           await saveToCache(refreshed);
           return refreshed;
@@ -473,9 +550,12 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
     const isbndbData = await lookupIsbndb(normalized);
     if (isbndbData) {
       let price = isbndbData.listPrice;
-      if (price === null) {
-        const tb = await lookupThriftbooksDetails(normalized);
-        price = tb?.price ?? await lookupAbeBooksPrice(normalized);
+      if (price === null || price <= 0) {
+        const [tb, abePrice] = await Promise.all([
+          lookupThriftbooksDetails(normalized).catch(() => null),
+          lookupAbeBooksPrice(normalized).catch(() => null),
+        ]);
+        price = tb?.price ?? abePrice ?? resolveSmartBookPrice(isbndbData.binding || isbndbData.format, isbndbData.pages);
       }
 
       const physical = resolveBookDimensions({
@@ -553,113 +633,75 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       return bookLookup;
     }
 
-    // Step 2: Fallback to OpenLibrary + Web Scraper
-    const [bookResult, thriftbooksDetails] = await Promise.all([
+    // Step 2: Fallback to OpenLibrary + Google Books + Web Scrapers (all queried concurrently with short timeouts)
+    const [olResult, gbResult, tbDetails, abePrice] = await Promise.all([
       lookupOpenLibrary(normalized).catch(() => null),
-      lookupThriftbooksDetails(normalized),
+      lookupGoogleBooks(normalized).catch(() => null),
+      lookupThriftbooksDetails(normalized).catch(() => null),
+      lookupAbeBooksPrice(normalized).catch(() => null),
     ]);
-    const fallbackPrice = thriftbooksDetails?.price ?? await lookupAbeBooksPrice(normalized);
-    const book = bookResult;
-    if (!book) {
-      if (fallbackPrice === null) {
-        return null;
-      }
-      const classification = extractGenreAndCategory([], thriftbooksDetails?.category);
-      const sku = createSku(classification.category, classification.genre || classification.subcategory, null);
-      const physical = resolveBookDimensions({
-        title: thriftbooksDetails?.title,
-      });
-      const quotes = quoteAllShippingRates({
-        isbn: normalized,
-        weightOz: physical.weightOz,
-        length: physical.lengthInches,
-        width: physical.widthInches,
-        thickness: physical.thicknessInches,
-        itemPrice: fallbackPrice,
-        isBookMedia: true,
-      });
-      const selectedRate = autoSelectShippingRate({
-        isbn: normalized,
-        weightOz: physical.weightOz,
-        length: physical.lengthInches,
-        width: physical.widthInches,
-        thickness: physical.thicknessInches,
-        itemPrice: fallbackPrice,
-        isBookMedia: true,
-      }, physical);
 
-      const partial: BookLookup = {
-        isbn: normalized,
-        title: thriftbooksDetails?.title ?? null,
-        author: null,
-        coverUrl: null,
-        quantityOnHand: 0,
-        thriftbooksPrice: fallbackPrice,
-        publisher: null,
-        description: null,
-        ...generateCatalogContent(thriftbooksDetails?.title ?? null, null, classification.category, classification.genre || classification.subcategory, []),
-        catalogTags: classification.tags.join(", "),
-        category: classification.category, // "Print Books"
-        subcategory: classification.genre || classification.subcategory,
-        sku,
-        weightOz: physical.weightOz,
-        weightLbs: physical.weightLbs,
-        lengthInches: physical.lengthInches,
-        widthInches: physical.widthInches,
-        thicknessInches: physical.thicknessInches,
-        pageCount: physical.pageCount,
-        bindingFormat: physical.bindingFormat,
-        packageType: physical.packageType,
-        suggestedShippingService: selectedRate.selectedRate?.serviceName,
-        estimatedShippingCost: selectedRate.selectedRate?.rate,
-        shippingQuotes: quotes,
-        label: {
-          sku,
-          barcode: normalized,
-          title: thriftbooksDetails?.title ?? null,
-          category: classification.category,
-          subcategory: classification.genre || classification.subcategory,
-          price: fallbackPrice,
-          weightOz: physical.weightOz,
-          shippingService: selectedRate.selectedRate?.serviceName,
-        },
-        source: "Thriftbooks",
-        mediaType: "Book",
-      };
-      await saveToCache(partial);
-      return partial;
+    const title = olResult?.title || gbResult?.title || tbDetails?.title || null;
+    const author = olResult?.author || gbResult?.author || tbDetails?.author || null;
+    const publisher = olResult?.publisher || gbResult?.publisher || null;
+    const description = olResult?.description || gbResult?.description || null;
+    const coverUrl = olResult?.coverUrl || gbResult?.coverUrl || null;
+    const pageCount = gbResult?.pageCount || null;
+    const categoriesList = gbResult?.categories || [];
+
+    const classification = extractGenreAndCategory(categoriesList, tbDetails?.category || olResult?.subcategory);
+    const physical = resolveBookDimensions({
+      title,
+      description,
+      pages: pageCount,
+    });
+
+    const resolvedPrice = tbDetails?.price ?? abePrice ?? gbResult?.listPrice ?? resolveSmartBookPrice(physical.bindingFormat, pageCount);
+
+    if (!title && resolvedPrice === null) {
+      return null;
     }
 
-    const classification = extractGenreAndCategory([], thriftbooksDetails?.category || book.subcategory);
-    const resolvedPriceFinal = fallbackPrice ?? book.thriftbooksPrice;
-    const physical = resolveBookDimensions({
-      title: book.title,
-      description: book.description,
-    });
     const quotes = quoteAllShippingRates({
       isbn: normalized,
       weightOz: physical.weightOz,
       length: physical.lengthInches,
       width: physical.widthInches,
       thickness: physical.thicknessInches,
-      itemPrice: resolvedPriceFinal,
+      itemPrice: resolvedPrice,
       isBookMedia: true,
     });
+
     const selectedRate = autoSelectShippingRate({
       isbn: normalized,
       weightOz: physical.weightOz,
       length: physical.lengthInches,
       width: physical.widthInches,
       thickness: physical.thicknessInches,
-      itemPrice: resolvedPriceFinal,
+      itemPrice: resolvedPrice,
       isBookMedia: true,
     }, physical);
 
+    const seo = generateCatalogContent(title, author, classification.category, classification.genre || classification.subcategory, categoriesList);
+    const sku = createSku(classification.category, classification.genre || classification.subcategory, author);
+
+    const source = olResult ? "Open Library" : tbDetails?.price ? "Thriftbooks" : "Open Library";
+
     const result: BookLookup = {
-      ...book,
-      thriftbooksPrice: resolvedPriceFinal,
+      isbn: normalized,
+      title: title || `Book (${normalized})`,
+      author,
+      publisher,
+      description,
+      coverUrl,
+      ...seo,
+      catalogTags: classification.tags.join(", "),
+      quantityOnHand: 0,
+      thriftbooksPrice: resolvedPrice,
       category: "Print Books",
-      subcategory: book.subcategory ?? classification.genre ?? classification.subcategory,
+      subcategory: classification.genre || classification.subcategory,
+      mediaType: "Book",
+      sku,
       weightOz: physical.weightOz,
       weightLbs: physical.weightLbs,
       lengthInches: physical.lengthInches,
@@ -672,14 +714,18 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       estimatedShippingCost: selectedRate.selectedRate?.rate,
       shippingQuotes: quotes,
       label: {
-        ...book.label,
+        sku,
+        barcode: normalized,
+        title: title || `Book (${normalized})`,
         category: "Print Books",
-        subcategory: book.subcategory ?? classification.genre ?? classification.subcategory,
-        price: resolvedPriceFinal,
+        subcategory: classification.genre || classification.subcategory,
+        price: resolvedPrice,
         weightOz: physical.weightOz,
         shippingService: selectedRate.selectedRate?.serviceName,
       },
+      source,
     };
+
     await saveToCache(result);
     return result;
   } catch (error) {
