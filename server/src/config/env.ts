@@ -16,6 +16,7 @@ const envSchema = z.object({
   SHOPIFY_API_SECRET: z.string().optional(),
   SHOPIFY_APP_URL: z.string().url().default("https://colophon-api.onrender.com"),
   RENDER_GIT_COMMIT: z.string().optional(),
+  ISBNDB_API_KEY: z.string().optional(),
   SCRAPING_API_PROVIDER: z.enum(["zenrows", "scrapingbee", "scraperapi", "crawlbase", "custom"]).optional(),
   SCRAPING_API_KEY: z.string().optional(),
   SCRAPER_PROXY_URL: z.string().optional(),

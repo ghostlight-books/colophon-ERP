@@ -125,23 +125,88 @@ class ShopifyAdapter implements EcommerceAdapter {
 
   async syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number }): Promise<{ success: boolean; message?: string }> {
     if (this.isLocalDevConnector()) return { success: true };
-    const products = await parseResponse<{ products?: Array<{ id?: number; variants?: Array<{ sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.baseUrl}/admin/api/2024-01/products.json?limit=250`, { headers: this.headers }));
+    const products = await parseResponse<{ products?: Array<{ id?: number; variants?: Array<{ id?: number; sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.baseUrl}/admin/api/2024-01/products.json?limit=250`, { headers: this.headers }));
     const matchedProduct = products.products?.find((product) => product.variants?.some((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode)));
     const variant = matchedProduct?.variants?.find((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode));
     const visibleDescription = [item.author ? `<p><strong>Author:</strong> ${escapeHtml(item.author)}</p>` : "", item.description ? `<p>${escapeHtml(item.description)}</p>` : ""].filter(Boolean).join("");
-    const productPayload = { title: item.title, body_html: visibleDescription, vendor: item.author ?? "", product_type: item.category ?? "Book", tags: item.tags.join(", "), metafields: [{ namespace: "custom", key: "author", type: "single_line_text_field", value: item.author ?? "" }, { namespace: "global", key: "title_tag", type: "single_line_text_field", value: item.seoTitle ?? item.title }, { namespace: "global", key: "description_tag", type: "multi_line_text_field", value: item.seoDescription ?? item.description ?? item.title }], ...(item.coverUrl ? { images: [{ src: item.coverUrl }] } : {}) };
+    const productPayload = {
+      title: item.title,
+      body_html: visibleDescription,
+      vendor: item.author ?? "Unknown Author",
+      product_type: "Print Books",
+      status: "active",
+      published: true,
+      published_scope: "global",
+      tags: item.tags.join(", "),
+      metafields: [
+        { namespace: "custom", key: "author", type: "single_line_text_field", value: item.author ?? "" },
+        { namespace: "custom", key: "genre", type: "single_line_text_field", value: item.tags[1] ?? "" },
+        { namespace: "global", key: "title_tag", type: "single_line_text_field", value: item.seoTitle ?? item.title },
+        { namespace: "global", key: "description_tag", type: "multi_line_text_field", value: item.seoDescription ?? item.description ?? item.title },
+      ],
+      ...(item.coverUrl ? { images: [{ src: item.coverUrl }] } : {}),
+    };
+
+    let inventoryItemId: number | undefined = variant?.inventory_item_id;
+
     if (matchedProduct?.id) {
       await parseResponse(await fetch(`${this.baseUrl}/admin/api/2024-01/products/${matchedProduct.id}.json`, { method: "PUT", headers: this.headers, body: JSON.stringify({ product: productPayload }) }));
+      if (variant?.id) {
+        await parseResponse(await fetch(`${this.baseUrl}/admin/api/2024-01/variants/${variant.id}.json`, {
+          method: "PUT",
+          headers: this.headers,
+          body: JSON.stringify({
+            variant: {
+              id: variant.id,
+              sku: item.sku,
+              barcode: item.barcode,
+              price: item.price > 0 ? item.price.toFixed(2) : "14.99",
+              inventory_management: "shopify",
+              inventory_policy: "deny",
+            },
+          }),
+        }));
+      }
+    } else {
+      const created = await parseResponse<{ product?: { id?: number; variants?: Array<{ id?: number; inventory_item_id?: number }> } }>(
+        await fetch(`${this.baseUrl}/admin/api/2024-01/products.json`, {
+          method: "POST",
+          headers: this.headers,
+          body: JSON.stringify({
+            product: {
+              ...productPayload,
+              variants: [
+                {
+                  sku: item.sku,
+                  barcode: item.barcode,
+                  price: item.price > 0 ? item.price.toFixed(2) : "14.99",
+                  inventory_management: "shopify",
+                  inventory_policy: "deny",
+                  fulfillment_service: "manual",
+                  requires_shipping: true,
+                },
+              ],
+            },
+          }),
+        })
+      );
+      if (created.product?.id) await this.assignToCollection(created.product.id, "Print Books");
+      inventoryItemId = created.product?.variants?.[0]?.inventory_item_id;
     }
-    const created = variant?.inventory_item_id ? { product: { id: matchedProduct?.id, variants: [{ inventory_item_id: variant.inventory_item_id }] } } : await parseResponse<{ product?: { id?: number; variants?: Array<{ inventory_item_id?: number }> } }>(await fetch(`${this.baseUrl}/admin/api/2024-01/products.json`, { method: "POST", headers: this.headers, body: JSON.stringify({ product: { ...productPayload, status: "active", variants: [{ sku: item.sku, barcode: item.barcode, price: item.price.toFixed(2), inventory_management: "shopify" }] } }) }));
-    if (created.product?.id) await this.assignToCollection(created.product.id, item.category);
-    const createdInventoryItemId = created.product?.variants?.[0]?.inventory_item_id;
-    if (!createdInventoryItemId) return { success: false, message: `Shopify product could not be created for ${item.sku}.` };
+
+    if (!inventoryItemId) return { success: false, message: `Shopify product could not be created for ${item.sku}.` };
     const locations = await parseResponse<{ locations?: Array<{ id?: number }> }>(await fetch(`${this.baseUrl}/admin/api/2024-01/locations.json`, { headers: this.headers }));
     const locationId = locations.locations?.find((location) => location.id)?.id;
     if (!locationId) return { success: false, message: "Shopify has no active inventory location." };
-    await parseResponse(await fetch(`${this.baseUrl}/admin/api/2024-01/inventory_levels/set.json`, { method: "POST", headers: this.headers, body: JSON.stringify({ location_id: locationId, inventory_item_id: createdInventoryItemId, available: Math.max(0, Math.floor(item.quantity)) }) }));
-    return { success: true };
+
+    const stockQuantity = Math.max(1, Math.floor(item.quantity));
+    await parseResponse(await fetch(`${this.baseUrl}/admin/api/2024-01/inventory_levels/set.json`, {
+      method: "POST",
+      headers: this.headers,
+      body: JSON.stringify({ location_id: locationId, inventory_item_id: inventoryItemId, available: stockQuantity }),
+    }));
+
+    return { success: true, message: `Synced ${item.title} to Shopify: In Stock (Qty ${stockQuantity}, Category: Print Books)` };
   }
 
   async fetchRecentOrders(): Promise<unknown[]> {
@@ -294,11 +359,25 @@ type InventorySyncRecord = {
 };
 
 function mapInventoryRecord(item: InventorySyncRecord) {
-  const tags = [item.category, item.subcategory, item.mediaType, ...(item.catalogTags ?? "").split(","), ...(item.seoKeywords ?? "").split(",")]
+  const genreTag = item.subcategory ?? "";
+  const tags = ["Print Books", genreTag, item.mediaType, ...(item.catalogTags ?? "").split(","), ...(item.seoKeywords ?? "").split(",")]
     .filter((tag): tag is string => Boolean(tag?.trim()))
     .map((tag) => tag.trim())
     .filter((tag, index, all) => all.indexOf(tag) === index);
-  return { sku: item.sku, barcode: item.isbn, title: item.title ?? item.isbn, author: item.author, description: item.description, coverUrl: item.coverUrl, tags, seoTitle: item.seoTitle, seoDescription: item.seoDescription, category: item.category, price: item.listPrice ?? 0, quantity: item.quantityOnHand };
+  return {
+    sku: item.sku,
+    barcode: item.isbn,
+    title: item.title ?? item.isbn,
+    author: item.author,
+    description: item.description,
+    coverUrl: item.coverUrl,
+    tags,
+    seoTitle: item.seoTitle,
+    seoDescription: item.seoDescription,
+    category: "Print Books",
+    price: item.listPrice && item.listPrice > 0 ? item.listPrice : 14.99,
+    quantity: Math.max(1, item.quantityOnHand),
+  };
 }
 
 export async function syncInventoryItemByIsbn(storeId: string, isbn: string): Promise<{ success: boolean; message?: string }> {

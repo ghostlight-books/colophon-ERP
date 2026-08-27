@@ -1,6 +1,7 @@
 import { prisma } from "../config/database.js";
 import { lookupAbeBooksPrice } from "./abebooksScraper.service.js";
 import { lookupThriftbooksDetails } from "./thriftbooksScraper.service.js";
+import { lookupIsbndb, extractGenreAndCategory } from "./isbndb.service.js";
 
 const PROVIDER_TIMEOUT_MS = 10000;
 const skuSequences = new Map<string, number>();
@@ -39,14 +40,14 @@ export interface BookLookup {
     subcategory: string | null;
     price: number | null;
   };
-  source: "Open Library";
+  source: "ISBNdb" | "Open Library" | "Thriftbooks";
 }
 
 function generateCatalogContent(title: string | null, author: string | null, category: string | null, subcategory: string | null, subjects: string[]): Pick<BookLookup, "seoKeywords" | "seoTitle" | "seoDescription"> {
   const safeTitle = title ?? "Book";
-  const keywordValues = [...new Set([safeTitle, author, category, subcategory, ...subjects.slice(0, 5), "independent bookstore"].filter(Boolean))];
+  const keywordValues = [...new Set([safeTitle, author, category, subcategory, ...subjects.slice(0, 5), "independent bookstore", "print books"].filter(Boolean))];
   const seoTitle = `${safeTitle}${author ? ` by ${author}` : ""}`;
-  const seoDescription = `Explore ${safeTitle}${author ? ` by ${author}` : ""} at Ghostlight Books${category ? ` in ${category}` : ""}${subcategory ? ` and ${subcategory}` : ""}.`;
+  const seoDescription = `Explore ${safeTitle}${author ? ` by ${author}` : ""} at Ghostlight Books${subcategory ? ` in ${subcategory}` : ""}.`;
   return {
     seoKeywords: keywordValues.join(", "),
     seoTitle: seoTitle.length > 60 ? `${seoTitle.slice(0, 57).trimEnd()}...` : seoTitle,
@@ -62,7 +63,7 @@ function codePart(value: string | null, fallback: string): string {
 function createSku(category: string | null, subcategory: string | null, author: string | null): string {
   const authorParts = (author ?? "").trim().split(/\s+/);
   const authorLastName = authorParts[authorParts.length - 1] || null;
-  const prefix = `${codePart(category, "GEN")}${codePart(subcategory, "GEN")}${codePart(authorLastName, "UNK")}`;
+  const prefix = `${codePart(subcategory || category, "BOK")}${codePart(subcategory, "GEN")}${codePart(authorLastName, "UNK")}`;
   const sequence = skuSequences.get(prefix) ?? 0;
   skuSequences.set(prefix, sequence + 1);
   return `${prefix.slice(0, 3)}-${prefix.slice(3, 6)}-${prefix.slice(6, 9)}-${String(sequence).padStart(4, "0")}`;
@@ -222,27 +223,9 @@ function firstNumber(value: unknown): number | null {
   return null;
 }
 
-function normalizeCategories(subjects: string[], providerCategory: string | null = null): { category: string | null; subcategory: string | null } {
-  const values = [providerCategory, ...subjects].filter((value): value is string => Boolean(value?.trim())).map((value) => value.trim());
-  const categoryRules: Array<[string, string[]]> = [
-    ["Fiction", ["fiction", "novel", "literary", "literature"]],
-    ["Non-Fiction", ["non-fiction", "nonfiction"]],
-    ["Biography", ["biography", "autobiography", "memoir"]],
-    ["History", ["history"]],
-    ["Children", ["juvenile", "children"]],
-    ["Young Adult", ["young adult"]],
-    ["Business", ["business", "economics"]],
-    ["Science", ["science", "mathematics", "technology"]],
-    ["Religion", ["religion", "buddhism", "christianity", "islam", "judaism"]],
-    ["Arts", ["art", "music", "photography"]],
-    ["Reference", ["reference"]],
-  ];
-  const lowerValues = values.map((value) => value.toLowerCase());
-  const matched = categoryRules.find(([, terms]) => lowerValues.some((value) => terms.some((term) => value === term || value.includes(term))));
-  const category = matched?.[0] ?? null;
-  const matchedTerms = matched?.[1] ?? [];
-  const subcategory = values.find((value) => value.toLowerCase() !== category?.toLowerCase() && !matchedTerms.includes(value.toLowerCase())) ?? null;
-  return { category, subcategory };
+function normalizeCategories(subjects: string[], providerCategory: string | null = null): { category: string; subcategory: string | null } {
+  const result = extractGenreAndCategory(subjects, providerCategory);
+  return { category: result.category, subcategory: result.genre || result.subcategory };
 }
 
 async function lookupOpenLibrary(isbn: string): Promise<BookLookup | null> {
@@ -274,14 +257,14 @@ async function lookupOpenLibrary(isbn: string): Promise<BookLookup | null> {
       }
     }),
   );
-  const categories = normalizeCategories(edition.subjects ?? []);
+  const classification = extractGenreAndCategory(edition.subjects ?? []);
   const author = authorNames.filter((name): name is string => Boolean(name)).join(", ") || null;
   const description = typeof edition.description === "string"
     ? edition.description
     : typeof edition.description === "object" && edition.description !== null && "value" in edition.description
       ? firstString((edition.description as { value?: unknown }).value)
       : null;
-  const seo = generateCatalogContent(firstString(edition.title), author, categories.category, categories.subcategory, edition.subjects ?? []);
+  const seo = generateCatalogContent(firstString(edition.title), author, classification.category, classification.genre || classification.subcategory, edition.subjects ?? []);
 
   const result: Omit<BookLookup, "label"> = {
     isbn,
@@ -290,12 +273,13 @@ async function lookupOpenLibrary(isbn: string): Promise<BookLookup | null> {
     publisher: firstString(edition.publishers),
     description,
     ...seo,
-    catalogTags: (edition.subjects ?? []).join(", ") || null,
+    catalogTags: classification.tags.join(", ") || null,
     coverUrl: edition.covers?.[0] ? `https://covers.openlibrary.org/b/id/${edition.covers[0]}-L.jpg` : null,
     quantityOnHand: 0,
     thriftbooksPrice: null,
-    ...categories,
-    sku: createSku(categories.category, categories.subcategory, author), 
+    category: classification.category,
+    subcategory: classification.genre || classification.subcategory,
+    sku: createSku(classification.category, classification.genre || classification.subcategory, author), 
     source: "Open Library",
     mediaType: "Book",
   };
@@ -333,67 +317,103 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       let resolvedPrice = cachedBook.thriftbooksPrice;
       let fetchedTbDetails: import("./thriftbooksScraper.service.js").ThriftbooksDetails | null = null;
 
-      // Only attempt live scraping if price was not previously found
       if (resolvedPrice === null) {
         fetchedTbDetails = await lookupThriftbooksDetails(normalized);
         resolvedPrice = fetchedTbDetails?.price ?? await lookupAbeBooksPrice(normalized);
       }
 
       if (cachedBook.title) {
-        if (!cachedBook.author && !cached.publisher && !cached.coverUrl && !cached.description && !cached.catalogTags) {
-          const enriched = await lookupOpenLibrary(normalized).catch(() => null);
-          if (enriched) {
+        const needsEnrichment = !cachedBook.category || cachedBook.category !== "Print Books" || (!cachedBook.author && !cached.publisher && !cached.coverUrl && !cached.description);
+        if (needsEnrichment) {
+          const isbndbMatch = await lookupIsbndb(normalized);
+          if (isbndbMatch) {
+            const enriched: BookLookup = {
+              ...cachedBook,
+              title: cachedBook.title || isbndbMatch.title,
+              author: cachedBook.author || isbndbMatch.author,
+              publisher: cached.publisher || isbndbMatch.publisher,
+              description: cached.description || isbndbMatch.description,
+              coverUrl: cachedBook.coverUrl || isbndbMatch.coverUrl,
+              catalogTags: isbndbMatch.tags.join(", "),
+              category: "Print Books",
+              subcategory: isbndbMatch.genre || isbndbMatch.subcategory,
+              thriftbooksPrice: resolvedPrice ?? isbndbMatch.listPrice,
+              label: { ...cachedBook.label, price: resolvedPrice ?? isbndbMatch.listPrice, category: "Print Books", subcategory: isbndbMatch.genre || isbndbMatch.subcategory },
+            };
+            await saveToCache(enriched);
+            return enriched;
+          }
+
+          const olMatch = await lookupOpenLibrary(normalized).catch(() => null);
+          if (olMatch) {
             const refreshed = {
               ...cachedBook,
-              ...enriched,
+              ...olMatch,
+              category: "Print Books",
               thriftbooksPrice: resolvedPrice,
-              label: { ...cachedBook.label, ...enriched.label, price: resolvedPrice },
+              label: { ...cachedBook.label, ...olMatch.label, price: resolvedPrice, category: "Print Books" },
             };
             await saveToCache(refreshed);
             return refreshed;
           }
         }
-        if (resolvedPrice !== cachedBook.thriftbooksPrice) {
+        if (resolvedPrice !== cachedBook.thriftbooksPrice || cachedBook.category !== "Print Books") {
+          const classification = extractGenreAndCategory([], fetchedTbDetails?.category);
           const refreshed: BookLookup = {
             ...cachedBook,
+            category: "Print Books",
+            subcategory: cachedBook.subcategory ?? classification.genre ?? classification.subcategory,
             thriftbooksPrice: resolvedPrice,
-            category: cachedBook.category ?? normalizeCategories([], fetchedTbDetails?.category).category,
-            subcategory: cachedBook.subcategory ?? fetchedTbDetails?.subcategory ?? null,
-            label: { ...cachedBook.label, price: resolvedPrice },
+            label: { ...cachedBook.label, price: resolvedPrice, category: "Print Books", subcategory: cachedBook.subcategory ?? classification.genre ?? classification.subcategory },
           };
           await saveToCache(refreshed);
           return refreshed;
         }
         return cachedBook;
       }
-      const enriched = await lookupOpenLibrary(normalized).catch(() => null);
-      if (!enriched) {
-        return cachedBook;
-      }
-      const result: BookLookup = {
-        ...cachedBook,
-        title: cachedBook.title ?? enriched.title,
-        author: cachedBook.author ?? enriched.author,
-        publisher: enriched.publisher,
-        description: enriched.description,
-        seoKeywords: enriched.seoKeywords,
-        seoTitle: enriched.seoTitle,
-        seoDescription: enriched.seoDescription,
-        catalogTags: enriched.catalogTags,
-        category: cachedBook.category ?? enriched.category,
-        subcategory: cachedBook.subcategory ?? enriched.subcategory,
-        mediaType: cachedBook.mediaType || enriched.mediaType,
-        thriftbooksPrice: resolvedPrice,
-        label: {
-          ...cachedBook.label,
-          title: cachedBook.title ?? enriched.title,
-          price: resolvedPrice,
-        },
-      };
-      await saveToCache(result);
-      return result;
     }
 
+    // Step 1: Query ISBNdb first
+    const isbndbData = await lookupIsbndb(normalized);
+    if (isbndbData) {
+      let price = isbndbData.listPrice;
+      if (price === null) {
+        const tb = await lookupThriftbooksDetails(normalized);
+        price = tb?.price ?? await lookupAbeBooksPrice(normalized);
+      }
+
+      const seo = generateCatalogContent(isbndbData.title, isbndbData.author, isbndbData.category, isbndbData.genre || isbndbData.subcategory, isbndbData.subjects);
+      const sku = createSku(isbndbData.category, isbndbData.genre || isbndbData.subcategory, isbndbData.author);
+      const bookLookup: BookLookup = {
+        isbn: normalized,
+        title: isbndbData.title,
+        author: isbndbData.author,
+        publisher: isbndbData.publisher,
+        description: isbndbData.description,
+        ...seo,
+        catalogTags: isbndbData.tags.join(", "),
+        coverUrl: isbndbData.coverUrl,
+        quantityOnHand: 0,
+        thriftbooksPrice: price,
+        category: isbndbData.category, // "Print Books"
+        subcategory: isbndbData.genre || isbndbData.subcategory,
+        mediaType: "Book",
+        sku,
+        label: {
+          sku,
+          barcode: normalized,
+          title: isbndbData.title,
+          category: isbndbData.category,
+          subcategory: isbndbData.genre || isbndbData.subcategory,
+          price,
+        },
+        source: "ISBNdb",
+      };
+      await saveToCache(bookLookup);
+      return bookLookup;
+    }
+
+    // Step 2: Fallback to OpenLibrary + Web Scraper
     const [bookResult, thriftbooksDetails] = await Promise.all([
       lookupOpenLibrary(normalized).catch(() => null),
       lookupThriftbooksDetails(normalized),
@@ -404,37 +424,40 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       if (fallbackPrice === null) {
         return null;
       }
-      const sku = createSku(null, null, null);
+      const classification = extractGenreAndCategory([], thriftbooksDetails?.category);
+      const sku = createSku(classification.category, classification.genre || classification.subcategory, null);
       const partial: BookLookup = {
         isbn: normalized,
-        title: null,
+        title: thriftbooksDetails?.title ?? null,
         author: null,
         coverUrl: null,
         quantityOnHand: 0,
         thriftbooksPrice: fallbackPrice,
         publisher: null,
         description: null,
-        ...generateCatalogContent(thriftbooksDetails?.title ?? null, null, null, null, []),
-        catalogTags: null,
-        ...normalizeCategories([], thriftbooksDetails?.category),
+        ...generateCatalogContent(thriftbooksDetails?.title ?? null, null, classification.category, classification.genre || classification.subcategory, []),
+        catalogTags: classification.tags.join(", "),
+        category: classification.category, // "Print Books"
+        subcategory: classification.genre || classification.subcategory,
         sku,
-        label: { sku, barcode: normalized, title: thriftbooksDetails?.title ?? null, category: null, subcategory: null, price: fallbackPrice },
-        source: "Open Library",
+        label: { sku, barcode: normalized, title: thriftbooksDetails?.title ?? null, category: classification.category, subcategory: classification.genre || classification.subcategory, price: fallbackPrice },
+        source: "Thriftbooks",
         mediaType: "Book",
       };
       await saveToCache(partial);
       return partial;
     }
 
-    const result = {
+    const classification = extractGenreAndCategory([], thriftbooksDetails?.category || book.subcategory);
+    const result: BookLookup = {
       ...book,
       thriftbooksPrice: fallbackPrice ?? book.thriftbooksPrice,
-      category: book.category ?? normalizeCategories([], thriftbooksDetails?.category).category,
-      subcategory: book.subcategory ?? thriftbooksDetails?.subcategory ?? null,
+      category: "Print Books",
+      subcategory: book.subcategory ?? classification.genre ?? classification.subcategory,
       label: {
         ...book.label,
-        category: book.category ?? normalizeCategories([], thriftbooksDetails?.category).category,
-        subcategory: book.subcategory ?? thriftbooksDetails?.subcategory ?? null,
+        category: "Print Books",
+        subcategory: book.subcategory ?? classification.genre ?? classification.subcategory,
         price: fallbackPrice ?? book.thriftbooksPrice,
       },
     };

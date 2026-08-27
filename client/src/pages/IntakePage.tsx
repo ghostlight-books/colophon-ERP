@@ -204,21 +204,29 @@ function IntakePage(): JSX.Element {
 
   const addScannedBook = async (book: BookLookup, condition: BookCondition): Promise<void> => {
     const normalizedIsbn = book.isbn.replace(/[^0-9X]/gi, "").toUpperCase();
-    const duplicate = scannedBooks.some((item) => item.isbn.replace(/[^0-9X]/gi, "").toUpperCase() === normalizedIsbn);
-    if (duplicate) {
-      setMessage(`${book.title ?? "This ISBN"} is already on this session's scan list.`);
-      return;
-    }
     const basePrice = book.thriftbooksPrice;
     const discount = conditionOptions.find((option) => option.value === condition)?.discount ?? 0;
     const listPrice = basePrice === null ? null : Number((basePrice * (1 - discount)).toFixed(2));
     const container = getIntakeContainer(listPrice);
     await receiveInventory(book, condition, listPrice, container);
-    const scannedBook: ScannedBook = { ...book, container, condition, listPrice, scannedAt: nowTime() };
-    setScannedBooks((current) => [scannedBook, ...current]);
+
+    let currentQty = 1;
+    setScannedBooks((current) => {
+      const existingIndex = current.findIndex((item) => item.isbn.replace(/[^0-9X]/gi, "").toUpperCase() === normalizedIsbn);
+      if (existingIndex >= 0) {
+        const updated = [...current];
+        const existing = updated[existingIndex];
+        currentQty = (existing.quantityOnHand || 1) + 1;
+        updated[existingIndex] = { ...existing, quantityOnHand: currentQty, container, condition, listPrice, scannedAt: nowTime() };
+        return updated;
+      }
+      const scannedBook: ScannedBook = { ...book, quantityOnHand: 1, container, condition, listPrice, scannedAt: nowTime() };
+      return [scannedBook, ...current];
+    });
+
     setBarcode("");
     window.requestAnimationFrame(() => barcodeInputRef.current?.focus());
-    setMessage(listPrice === null ? `${book.title ?? "Book"} routed to ${container} for manual price lookup.` : `${book.title ?? "Book"} routed to ${container}.`);
+    setMessage(`${book.title ?? "Book"} received (Qty ${currentQty}) & synced to Shopify (In stock, Print Books).`);
     addSessionItem({ isbn: book.isbn, title: book.title, status: "Received", condition, container, reason: null, value: listPrice });
   };
 
