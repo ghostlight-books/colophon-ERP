@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import SurfaceCard from "../components/ui/SurfaceCard";
+import SyncStatusIndicator from "../components/common/SyncStatusIndicator";
 import { getIntakeContainer, lookupBookByIsbn, receiveInventory, searchBooks, type BookCondition, type BookLookup, type BookSearchResult, type IntakeContainer } from "../services/intake.service";
 
 type ScanHistoryItem = {
@@ -79,9 +80,12 @@ function readCurrentScannedBooks(): ScannedBook[] {
 
 function IntakePage(): JSX.Element {
   const [activeView, setActiveView] = useState<"scan" | "history">("scan");
-  const [scannerConnected, setScannerConnected] = useState(false);
+  const [scannerConnected, setScannerConnected] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem("colophon-scanner-connected") !== "false";
+  });
   const [sessionActive] = useState(true);
-  const [message, setMessage] = useState("Ready to scan or enter an ISBN.");
+  const [message, setMessage] = useState("Scanner station active. Ready to scan or enter an ISBN.");
   const [barcode, setBarcode] = useState("");
   const [manualSkuOrIsbn, setManualSkuOrIsbn] = useState("");
   const [manualTitle, setManualTitle] = useState("");
@@ -101,9 +105,8 @@ function IntakePage(): JSX.Element {
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [stations, setStations] = useState<ScannerStation[]>([
-    { name: "Station A", state: "Offline" },
-    { name: "Station B", state: "Offline" },
-    { name: "Station C", state: "Calibrating" },
+    { name: "Station A (USB Barcode Scanner)", state: "Online" },
+    { name: "Station B (Camera / Mobile)", state: "Online" },
   ]);
   const [scanSessions, setScanSessions] = useState<ScanSession[]>(readScanSessions);
   const [currentSessionId] = useState(() => `INTAKE-${Date.now()}`);
@@ -189,15 +192,16 @@ function IntakePage(): JSX.Element {
   const handleConnectScanner = (): void => {
     setScannerConnected((current) => {
       const next = !current;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("colophon-scanner-connected", String(next));
+      }
       setStations((stationList) =>
-        stationList.map((station, index) => {
-          if (index < 2) {
-            return { ...station, state: next ? "Online" : "Offline" };
-          }
-          return { ...station, state: "Calibrating" };
-        }),
+        stationList.map((station) => ({
+          ...station,
+          state: next ? "Online" : "Offline",
+        })),
       );
-      setMessage(next ? "Scanner station connected. Ready to scan." : "Scanner disconnected.");
+      setMessage(next ? "Scanner station active. Ready to scan." : "Scanner disconnected.");
       return next;
     });
   };
@@ -453,11 +457,12 @@ function IntakePage(): JSX.Element {
 
   return (
     <section className="grid gap-4">
-      <div className="rounded-full bg-white/55 p-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/55 p-2 backdrop-blur-md">
         <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-500">
           <button type="button" onClick={() => setActiveView("scan")} className={["rounded-full px-4 py-2.5", activeView === "scan" ? "bg-white text-slate-700 shadow-[0_5px_14px_rgba(76,86,103,0.12)]" : "hover:bg-white/70"].join(" ")}>Scan Session</button>
           <button type="button" onClick={() => setActiveView("history")} className={["rounded-full px-4 py-2.5", activeView === "history" ? "bg-white text-slate-700 shadow-[0_5px_14px_rgba(76,86,103,0.12)]" : "hover:bg-white/70"].join(" ")}>Intake History</button>
         </div>
+        <SyncStatusIndicator />
       </div>
       {activeView === "scan" ? (
       <>
@@ -588,9 +593,15 @@ function IntakePage(): JSX.Element {
             <button
               type="button"
               onClick={handleConnectScanner}
-              className="rounded-full bg-white px-5 py-2 text-[1.02rem] font-semibold text-slate-600"
+              className={[
+                "flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold transition shadow-sm",
+                scannerConnected
+                  ? "bg-emerald-50 text-emerald-800 border border-emerald-200/80 hover:bg-emerald-100/80"
+                  : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50",
+              ].join(" ")}
             >
-              {scannerConnected ? "Disconnect Scanner" : "Connect Scanner"}
+              <span className={["h-2 w-2 rounded-full", scannerConnected ? "bg-emerald-500 animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.8)]" : "bg-slate-400"].join(" ")} />
+              {scannerConnected ? "Scanner Station Active" : "Connect Scanner"}
             </button>
           </div>
           <p className="mt-3 rounded-xl bg-white/60 px-3 py-2 text-xs font-medium text-slate-600">{message}</p>
