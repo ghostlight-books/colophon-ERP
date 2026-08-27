@@ -26,6 +26,31 @@ type InventoryRecord = {
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api";
 const PARTNER_AVAILABILITY_CACHE_MS = 30 * 60 * 1000;
 
+const GENRE_OPTIONS = [
+  "Fantasy",
+  "Science Fiction",
+  "Mystery & Thriller",
+  "Romance",
+  "Horror",
+  "Historical Fiction",
+  "Literary Fiction",
+  "Biography & Memoir",
+  "History",
+  "True Crime",
+  "Children's Books",
+  "Young Adult",
+  "Graphic Novels & Comics",
+  "Science & Nature",
+  "Philosophy & Religion",
+  "Self-Help & Psychology",
+  "Business & Economics",
+  "Cooking & Food",
+  "Art & Photography",
+  "Travel & Adventure",
+  "Poetry & Drama",
+  "Crafts & Hobbies",
+];
+
 const fallbackInventory: InventoryRecord[] = [
   {
     id: "demo-1",
@@ -37,10 +62,10 @@ const fallbackInventory: InventoryRecord[] = [
     listPrice: 13.19,
     condition: "Good",
     container: "Blue Bin",
-    category: "Religion",
-    subcategory: null,
+    category: "Print Books",
+    subcategory: "Philosophy & Religion",
     mediaType: "Book",
-    sku: "REL-GEN-HOP-0000",
+    sku: "PHI-REL-HOP-0000",
     quantityOnHand: 1,
     shopifyStatus: "Not connected",
     networkStatus: "Available to share",
@@ -62,6 +87,23 @@ function InventoryPage(): JSX.Element {
   const [mediaFilter, setMediaFilter] = useState("All");
   const [sortField, setSortField] = useState<SortField>("title");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+
+  // Bulk Selection & Edit States
+  const [selectedIsbns, setSelectedIsbns] = useState<Set<string>>(new Set());
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Bulk Form Fields
+  const [bulkCategory, setBulkCategory] = useState("Print Books");
+  const [bulkCategoryMode, setBulkCategoryMode] = useState<"unchanged" | "set">("set");
+  const [bulkGenre, setBulkGenre] = useState("Fantasy");
+  const [bulkGenreMode, setBulkGenreMode] = useState<"unchanged" | "preset" | "custom">("preset");
+  const [bulkCustomGenre, setBulkCustomGenre] = useState("");
+  const [bulkCondition, setBulkCondition] = useState<string>("unchanged");
+  const [bulkMediaType, setBulkMediaType] = useState<string>("unchanged");
+  const [bulkPriceMode, setBulkPriceMode] = useState<"unchanged" | "set">("unchanged");
+  const [bulkPriceValue, setBulkPriceValue] = useState("");
+  const [bulkSyncShopify, setBulkSyncShopify] = useState(true);
 
   const handleSort = (field: SortField): void => {
     if (sortField === field) {
@@ -148,6 +190,33 @@ function InventoryPage(): JSX.Element {
     });
   }, [availabilityFilter, connectedPartnerStores, items, mediaFilter, search, sortField, sortDirection]);
 
+  // Selection helpers
+  const isAllSelected = filteredItems.length > 0 && filteredItems.every((item) => selectedIsbns.has(item.isbn));
+
+  const toggleSelectAll = (): void => {
+    if (isAllSelected) {
+      setSelectedIsbns(new Set());
+    } else {
+      setSelectedIsbns(new Set(filteredItems.map((item) => item.isbn)));
+    }
+  };
+
+  const toggleSelectItem = (isbn: string): void => {
+    setSelectedIsbns((current) => {
+      const next = new Set(current);
+      if (next.has(isbn)) {
+        next.delete(isbn);
+      } else {
+        next.add(isbn);
+      }
+      return next;
+    });
+  };
+
+  const deselectAll = (): void => {
+    setSelectedIsbns(new Set());
+  };
+
   const totalUnits = items.reduce((sum, item) => sum + item.quantityOnHand, 0);
   const pricedItems = items.filter((item) => item.thriftbooksPrice !== null).length;
   const shareableItems = items.filter((item) => item.networkStatus === "Available to share").length;
@@ -177,12 +246,125 @@ function InventoryPage(): JSX.Element {
       const response = await fetch(`${API_BASE}/inventory/products/${encodeURIComponent(item.isbn)}`, { method: "DELETE" });
       if (!response.ok) throw new Error("Inventory item could not be removed.");
       setItems((current) => current.filter((record) => record.id !== item.id));
+      setSelectedIsbns((current) => {
+        const next = new Set(current);
+        next.delete(item.isbn);
+        return next;
+      });
       setMessage(`${item.title ?? item.isbn} was removed from active inventory.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Inventory item could not be removed."); }
   }
 
+  // Bulk Apply Handler
+  const handleApplyBulkEdit = async (): Promise<void> => {
+    if (selectedIsbns.size === 0) return;
+    setBulkBusy(true);
+    try {
+      const isbnsArray = Array.from(selectedIsbns);
+      const updates: Record<string, unknown> = {};
+
+      if (bulkCategoryMode === "set" && bulkCategory.trim()) {
+        updates.category = bulkCategory.trim();
+      }
+
+      if (bulkGenreMode === "preset" && bulkGenre.trim()) {
+        updates.subcategory = bulkGenre.trim();
+      } else if (bulkGenreMode === "custom" && bulkCustomGenre.trim()) {
+        updates.subcategory = bulkCustomGenre.trim();
+      }
+
+      if (bulkCondition !== "unchanged") {
+        updates.condition = bulkCondition;
+      }
+
+      if (bulkMediaType !== "unchanged") {
+        updates.mediaType = bulkMediaType;
+      }
+
+      if (bulkPriceMode === "set") {
+        const parsedPrice = parseFloat(bulkPriceValue);
+        if (!isNaN(parsedPrice) && parsedPrice >= 0) {
+          updates.listPrice = parsedPrice;
+        }
+      }
+
+      const response = await fetch(`${API_BASE}/inventory/bulk-update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          isbns: isbnsArray,
+          updates,
+          syncToShopify: bulkSyncShopify,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Bulk update failed.");
+      }
+
+      await loadInventory();
+      setIsBulkModalOpen(false);
+      setMessage(`Successfully updated ${isbnsArray.length} items${bulkSyncShopify ? " and synced to Shopify" : ""}.`);
+      deselectAll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to apply bulk updates.");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  // Bulk Shopify Sync Handler
+  const handleBulkSyncShopify = async (): Promise<void> => {
+    if (selectedIsbns.size === 0) return;
+    setBulkBusy(true);
+    try {
+      const isbnsArray = Array.from(selectedIsbns);
+      const response = await fetch(`${API_BASE}/inventory/bulk-update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          isbns: isbnsArray,
+          updates: {},
+          syncToShopify: true,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Bulk sync to Shopify failed.");
+      setMessage(`Triggered Shopify sync for ${isbnsArray.length} items.`);
+      await loadInventory();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to sync items to Shopify.");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  // Bulk Delete Handler
+  const handleBulkDelete = async (): Promise<void> => {
+    if (selectedIsbns.size === 0) return;
+    if (!window.confirm(`Are you sure you want to remove ${selectedIsbns.size} selected item(s) from inventory?`)) return;
+    setBulkBusy(true);
+    try {
+      const isbnsArray = Array.from(selectedIsbns);
+      const response = await fetch(`${API_BASE}/inventory/bulk-delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isbns: isbnsArray }),
+      });
+
+      if (!response.ok) throw new Error("Bulk delete failed.");
+      setItems((current) => current.filter((item) => !selectedIsbns.has(item.isbn)));
+      setMessage(`Removed ${isbnsArray.length} items from active inventory.`);
+      deselectAll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to remove selected items.");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   return (
-    <section className="grid gap-4">
+    <section className="grid gap-4 relative">
       <SurfaceCard className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -209,6 +391,54 @@ function InventoryPage(): JSX.Element {
         </div>
       </SurfaceCard>
 
+      {/* Floating / Sticky Bulk Actions Bar */}
+      {selectedIsbns.size > 0 && (
+        <div className="sticky top-4 z-40 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-700 bg-slate-900 px-5 py-3 text-white shadow-2xl animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-3">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-slate-950">
+              {selectedIsbns.size}
+            </span>
+            <div>
+              <p className="text-sm font-semibold">{selectedIsbns.size} item{selectedIsbns.size > 1 ? "s" : ""} selected</p>
+              <p className="text-xs text-slate-400">Bulk edit genres, categories, prices, or sync</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => setIsBulkModalOpen(true)}
+              className="rounded-xl bg-[#e9ff63] px-3.5 py-2 text-xs font-bold text-slate-900 transition hover:bg-[#d6ed48]"
+            >
+              Bulk Edit Genre & Category
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => void handleBulkSyncShopify()}
+              className="rounded-xl bg-slate-800 border border-slate-700 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-700"
+            >
+              Sync to Shopify
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => void handleBulkDelete()}
+              className="rounded-xl bg-rose-500/20 border border-rose-500/40 px-3.5 py-2 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/30"
+            >
+              Remove
+            </button>
+            <button
+              type="button"
+              onClick={deselectAll}
+              className="rounded-xl px-3 py-2 text-xs font-semibold text-slate-400 transition hover:text-white"
+            >
+              Deselect All
+            </button>
+          </div>
+        </div>
+      )}
+
       <SurfaceCard className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -223,18 +453,44 @@ function InventoryPage(): JSX.Element {
             className="h-10 min-w-64 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400"
           />
           <div className="flex flex-wrap gap-2">
-            {([['my-store', 'Available in My Store'], ['partner', 'Available in Partner Store']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setAvailabilityFilter(value)} className={["rounded-lg px-3 py-2 text-xs font-semibold", availabilityFilter === value ? "bg-slate-800 text-white" : "bg-white text-slate-600"].join(" ")}>{label}</button>)}
-            <select value={mediaFilter} onChange={(event) => setMediaFilter(event.target.value)} aria-label="Filter by media type" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">{mediaTypes.map((type) => <option key={type}>{type}</option>)}</select>
+            {([['my-store', 'Available in My Store'], ['partner', 'Available in Partner Store']] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setAvailabilityFilter(value)}
+                className={["rounded-lg px-3 py-2 text-xs font-semibold", availabilityFilter === value ? "bg-slate-800 text-white" : "bg-white text-slate-600"].join(" ")}
+              >
+                {label}
+              </button>
+            ))}
+            <select
+              value={mediaFilter}
+              onChange={(event) => setMediaFilter(event.target.value)}
+              aria-label="Filter by media type"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600"
+            >
+              {mediaTypes.map((type) => <option key={type}>{type}</option>)}
+            </select>
           </div>
         </div>
+
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[900px] border-separate border-spacing-y-2 text-left text-sm">
             <thead className="text-xs uppercase tracking-wide text-slate-400">
               <tr>
+                <th scope="col" className="w-10 px-3 py-2 text-center">
+                  <input
+                    type="checkbox"
+                    checked={isAllSelected}
+                    onChange={toggleSelectAll}
+                    aria-label="Select all items"
+                    className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 cursor-pointer"
+                  />
+                </th>
                 {[
                   { field: "title" as const, label: "Item" },
                   { field: "sku" as const, label: "SKU / Barcode" },
-                  { field: "category" as const, label: "Category" },
+                  { field: "category" as const, label: "Category & Genre" },
                   { field: "mediaType" as const, label: "Media type" },
                   { field: "listPrice" as const, label: "Price" },
                   { field: "shopifyStatus" as const, label: "Shopify" },
@@ -263,30 +519,300 @@ function InventoryPage(): JSX.Element {
                     </th>
                   );
                 })}
-                <th className="px-3 py-2">Actions</th>
+                <th className="px-3 py-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filteredItems.map((item) => (
-                <tr key={item.id} className="bg-white/75 text-slate-700">
-                  <td className="rounded-l-xl px-3 py-3">
-                    <button type="button" onClick={() => navigate(`/inventory/product/${encodeURIComponent(item.isbn)}`)} className="text-left font-semibold text-slate-800 hover:text-sky-700">{item.title ?? "Title unavailable"}</button>
-                    <p className="mt-1 text-xs text-slate-500">{item.author ?? "Author unavailable"} · Qty {item.quantityOnHand}</p>
-                  </td>
-                  <td className="px-3 py-3 text-xs"><p className="font-semibold">{item.sku}</p><p className="mt-1 text-slate-500">{item.isbn}</p></td>
-                  <td className="px-3 py-3"><p>{item.category ?? "Uncategorized"}</p><p className="mt-1 text-xs text-slate-500">{item.subcategory ?? "No secondary category"}</p></td>
-                  <td className="px-3 py-3 text-xs font-semibold">{item.mediaType}</td>
-                  <td className="px-3 py-3"><p className="font-semibold">{item.listPrice === null ? "Manual lookup" : `$${item.listPrice.toFixed(2)}`}</p><p className="mt-1 text-xs text-slate-500">{item.condition ?? "Condition pending"}</p></td>
-                  <td className="px-3 py-3"><StatusPill label={item.shopifyStatus} tone={item.shopifyStatus === "Published" ? "mint" : "slate"} /></td>
-                  <td className="px-3 py-3"><StatusPill label={item.networkStatus} tone={item.networkStatus === "Shared" ? "mint" : "violet"} /></td>
-                  <td className="rounded-r-xl px-3 py-3"><div className="flex flex-wrap gap-2">{connectedPartnerStores > 0 ? <><button type="button" onClick={() => checkPartnerAvailability(item)} className="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-xs font-semibold text-emerald-700">Partner availability</button><button type="button" onClick={() => navigate(`/open-network/order?partner=Riverlight%20Books&isbn=${encodeURIComponent(item.isbn)}&title=${encodeURIComponent(item.title ?? "")}&price=${item.listPrice ?? ""}&cover=${encodeURIComponent(item.coverUrl ?? "")}`)} className="rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-white">Order from Store</button></> : null}<button type="button" onClick={() => void removeItem(item)} className="rounded-lg bg-rose-100 px-2.5 py-1.5 text-xs font-semibold text-rose-700">Remove</button></div></td>
-                </tr>
-              ))}
+              {filteredItems.map((item) => {
+                const isSelected = selectedIsbns.has(item.isbn);
+                return (
+                  <tr
+                    key={item.id}
+                    className={[
+                      "transition-colors",
+                      isSelected ? "bg-amber-50/80 text-slate-800 shadow-sm" : "bg-white/75 text-slate-700 hover:bg-white",
+                    ].join(" ")}
+                  >
+                    <td className="rounded-l-xl px-3 py-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelectItem(item.isbn)}
+                        aria-label={`Select ${item.title ?? item.isbn}`}
+                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 cursor-pointer"
+                      />
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-3">
+                        {item.coverUrl ? (
+                          <img
+                            src={item.coverUrl}
+                            alt={item.title ?? "Book cover"}
+                            className="h-12 w-9 shrink-0 rounded border border-slate-200 bg-slate-100 object-cover shadow-sm"
+                            loading="lazy"
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                          />
+                        ) : (
+                          <div className="flex h-12 w-9 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-100 text-slate-400 text-sm shadow-sm">
+                            📖
+                          </div>
+                        )}
+                        <div>
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/inventory/product/${encodeURIComponent(item.isbn)}`)}
+                            className="text-left font-semibold text-slate-800 hover:text-sky-700 line-clamp-1"
+                          >
+                            {item.title ?? "Title unavailable"}
+                          </button>
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            {item.author ?? "Author unavailable"} · <span className="font-semibold text-slate-700">Qty {item.quantityOnHand}</span>
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-xs">
+                      <p className="font-semibold">{item.sku}</p>
+                      <p className="mt-0.5 text-slate-500">{item.isbn}</p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-800">
+                        {item.category ?? "Print Books"}
+                      </span>
+                      <p className="mt-1 text-xs font-medium text-sky-700">
+                        {item.subcategory ?? "Unassigned Genre"}
+                      </p>
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold">{item.mediaType}</td>
+                    <td className="px-3 py-3">
+                      <p className="font-semibold">{item.listPrice === null ? "Manual lookup" : `$${item.listPrice.toFixed(2)}`}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{item.condition ?? "Good"}</p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <StatusPill label={item.shopifyStatus} tone={item.shopifyStatus === "Published" ? "mint" : "slate"} />
+                    </td>
+                    <td className="px-3 py-3">
+                      <StatusPill label={item.networkStatus} tone={item.networkStatus === "Shared" ? "mint" : "violet"} />
+                    </td>
+                    <td className="rounded-r-xl px-3 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {connectedPartnerStores > 0 ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => checkPartnerAvailability(item)}
+                              className="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
+                            >
+                              Partner
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/open-network/order?partner=Riverlight%20Books&isbn=${encodeURIComponent(item.isbn)}&title=${encodeURIComponent(item.title ?? "")}&price=${item.listPrice ?? ""}&cover=${encodeURIComponent(item.coverUrl ?? "")}`)}
+                              className="rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-white"
+                            >
+                              Order
+                            </button>
+                          </>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => void removeItem(item)}
+                          className="rounded-lg bg-rose-100 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-200"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {!loading && filteredItems.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">No inventory matches this search.</p> : null}
         </div>
       </SurfaceCard>
+
+      {/* Bulk Edit Modal */}
+      {isBulkModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-lg rounded-3xl border border-white/80 bg-white p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="text-xl font-bold text-slate-800">Bulk Edit Inventory</h3>
+                <p className="mt-0.5 text-xs text-slate-500">Updating {selectedIsbns.size} selected item{selectedIsbns.size > 1 ? "s" : ""}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBulkModalOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4 text-sm">
+              {/* Category */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">Category</label>
+                <div className="mt-1 flex gap-2">
+                  <select
+                    value={bulkCategoryMode === "unchanged" ? "unchanged" : bulkCategory}
+                    onChange={(e) => {
+                      if (e.target.value === "unchanged") {
+                        setBulkCategoryMode("unchanged");
+                      } else {
+                        setBulkCategoryMode("set");
+                        setBulkCategory(e.target.value);
+                      }
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-400"
+                  >
+                    <option value="Print Books">Print Books (Recommended)</option>
+                    <option value="Rare Books">Rare Books</option>
+                    <option value="Used Books">Used Books</option>
+                    <option value="Audiobooks">Audiobooks</option>
+                    <option value="Merchandise">Merchandise</option>
+                    <option value="unchanged">Keep Current Categories</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Genre / Subcategory */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">Genre / Subcategory</label>
+                <div className="mt-1 space-y-2">
+                  <div className="flex gap-2">
+                    <select
+                      value={bulkGenreMode === "preset" ? bulkGenre : bulkGenreMode}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "unchanged" || val === "custom") {
+                          setBulkGenreMode(val);
+                        } else {
+                          setBulkGenreMode("preset");
+                          setBulkGenre(val);
+                        }
+                      }}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-400"
+                    >
+                      <option value="unchanged">Keep Current Genres</option>
+                      <option value="custom">Custom Genre (Type Below)...</option>
+                      <optgroup label="Standard Genres">
+                        {GENRE_OPTIONS.map((genre) => (
+                          <option key={genre} value={genre}>{genre}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+                  {bulkGenreMode === "custom" && (
+                    <input
+                      type="text"
+                      placeholder="Enter custom genre (e.g., Cyberpunk, Local Authors)"
+                      value={bulkCustomGenre}
+                      onChange={(e) => setBulkCustomGenre(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-400"
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Condition */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">Condition</label>
+                <select
+                  value={bulkCondition}
+                  onChange={(e) => setBulkCondition(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-400"
+                >
+                  <option value="unchanged">Keep Current Conditions</option>
+                  <option value="New">New</option>
+                  <option value="Like New">Like New</option>
+                  <option value="Very Good">Very Good</option>
+                  <option value="Good">Good</option>
+                  <option value="Acceptable">Acceptable</option>
+                </select>
+              </div>
+
+              {/* Media Type */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">Media Type</label>
+                <select
+                  value={bulkMediaType}
+                  onChange={(e) => setBulkMediaType(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-400"
+                >
+                  <option value="unchanged">Keep Current Media Types</option>
+                  <option value="Book">Book</option>
+                  <option value="Audio CD">Audio CD</option>
+                  <option value="Vinyl">Vinyl</option>
+                  <option value="DVD">DVD</option>
+                </select>
+              </div>
+
+              {/* Price Override */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">List Price</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <select
+                    value={bulkPriceMode}
+                    onChange={(e) => setBulkPriceMode(e.target.value as "unchanged" | "set")}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-400"
+                  >
+                    <option value="unchanged">Keep Current Prices</option>
+                    <option value="set">Set Fixed Price ($)</option>
+                  </select>
+                  {bulkPriceMode === "set" && (
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="14.99"
+                      value={bulkPriceValue}
+                      onChange={(e) => setBulkPriceValue(e.target.value)}
+                      className="w-32 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-400"
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Shopify Sync Toggle */}
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bulkSyncShopify}
+                    onChange={(e) => setBulkSyncShopify(e.target.checked)}
+                    className="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-400"
+                  />
+                  <div>
+                    <p className="text-xs font-semibold text-emerald-950">Sync changes to Shopify</p>
+                    <p className="text-[11px] text-emerald-700">Pushes updated category, genre, price, and tags to your Shopify store.</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => setIsBulkModalOpen(false)}
+                className="rounded-xl px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={() => void handleApplyBulkEdit()}
+                className="rounded-xl bg-slate-900 px-5 py-2.5 text-xs font-bold text-white shadow hover:bg-slate-800 disabled:opacity-50"
+              >
+                {bulkBusy ? "Applying Changes..." : `Apply to ${selectedIsbns.size} Item${selectedIsbns.size > 1 ? "s" : ""}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

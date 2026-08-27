@@ -988,6 +988,80 @@ export function createApp(): express.Express {
     } catch (error) { next(error); }
   });
 
+  app.post("/api/inventory/bulk-update", async (req, res, next) => {
+    try {
+      const { isbns, updates, syncToShopify } = req.body as {
+        isbns: string[];
+        updates: {
+          category?: string;
+          subcategory?: string;
+          condition?: string;
+          mediaType?: string;
+          listPrice?: number | null;
+        };
+        syncToShopify?: boolean;
+      };
+
+      if (!Array.isArray(isbns) || isbns.length === 0) {
+        res.status(400).json({ error: "isbns array is required." });
+        return;
+      }
+
+      const dataToUpdate: Record<string, unknown> = {};
+      if (typeof updates?.category === "string" && updates.category.trim()) {
+        dataToUpdate.category = updates.category.trim();
+      }
+      if (typeof updates?.subcategory === "string") {
+        dataToUpdate.subcategory = updates.subcategory.trim() || null;
+      }
+      if (typeof updates?.condition === "string" && updates.condition.trim()) {
+        dataToUpdate.condition = updates.condition.trim();
+      }
+      if (typeof updates?.mediaType === "string" && updates.mediaType.trim()) {
+        dataToUpdate.mediaType = updates.mediaType.trim();
+      }
+      if (typeof updates?.listPrice === "number" || updates?.listPrice === null) {
+        dataToUpdate.listPrice = updates.listPrice;
+      }
+
+      if (Object.keys(dataToUpdate).length > 0) {
+        await prisma.isbnLookupCache.updateMany({
+          where: { isbn: { in: isbns } },
+          data: dataToUpdate,
+        });
+      }
+
+      if (syncToShopify) {
+        for (const isbn of isbns) {
+          await syncInventoryItemByIsbn("ghostlight-demo", isbn).catch((err) => {
+            console.warn("Failed to sync item to Shopify during bulk update", isbn, err);
+          });
+        }
+      }
+
+      res.json({ success: true, updatedCount: isbns.length });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/inventory/bulk-delete", async (req, res, next) => {
+    try {
+      const { isbns } = req.body as { isbns: string[] };
+      if (!Array.isArray(isbns) || isbns.length === 0) {
+        res.status(400).json({ error: "isbns array is required." });
+        return;
+      }
+      await prisma.isbnLookupCache.updateMany({
+        where: { isbn: { in: isbns } },
+        data: { quantityOnHand: 0 },
+      });
+      res.json({ success: true, count: isbns.length });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/inventory/products/:isbn/pull-open-library", async (req, res, next) => {
     try {
       const metadata = await pullOpenLibraryMetadata(req.params.isbn);
