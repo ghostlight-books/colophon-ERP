@@ -41,3 +41,4 @@ test("calculateOpportunityScore: scores lower when competition is high and margi
   assert.ok(scoreData.opportunityScore < 40, `Expected score < 40, got ${scoreData.opportunityScore}`);
   assert.ok(scoreData.estimatedNetMargin < 0, `Expected negative margin after take rate, got ${scoreData.estimatedNetMargin}`);
 });
+

@@ -14,7 +14,7 @@ import { executeDropshipSettlement } from "./services/networkSettlement.service.
 import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service.js";
 import { checkStoreConnection, fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncInventoryItemByIsbn, syncStoreInventory, syncStoreInventoryCatalog, type EcommercePlatform } from "./services/ecommerce.service.js";
 import { completeShopifyInstall, createShopifyInstallUrl } from "./services/shopifyOAuth.service.js";
-import { createEbayAuthUrl, exchangeEbayCode } from "./services/ebay/ebayAuth.service.js";
+import { createEbayAuthUrl, exchangeEbayCode, saveDirectEbayToken } from "./services/ebay/ebayAuth.service.js";
 import { publishBookToEbay, withdrawOffer } from "./services/ebay/ebayInventory.service.js";
 import { scanInventoryOpportunities } from "./services/recommendations/ebayOpportunity.service.js";
 import { runRulesEvaluationForStore } from "./services/rules/ebayRules.service.js";
@@ -1532,12 +1532,35 @@ export function createApp(): express.Express {
   app.get("/api/auth/ebay/install", async (req, res, next) => {
     try {
       const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
-      const clientId = typeof req.query.clientId === "string" ? req.query.clientId : undefined;
-      const ruName = typeof req.query.ruName === "string" ? req.query.ruName : undefined;
+      const clientId = typeof req.query.clientId === "string" && req.query.clientId.trim() ? req.query.clientId.trim() : undefined;
+      const ruName = typeof req.query.ruName === "string" && req.query.ruName.trim() ? req.query.ruName.trim() : undefined;
       const environment = req.query.environment === "production" ? "production" : "sandbox";
 
       const auth = await createEbayAuthUrl(storeId, clientId, ruName, environment);
       res.json(auth);
+    } catch (error: any) {
+      res.status(400).json({
+        error: error.message || "Failed to generate eBay OAuth URL. Please ensure your App ID and RuName are entered.",
+      });
+    }
+  });
+
+  app.post("/api/ebay/save-token", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const { accessToken, refreshToken, environment } = req.body as {
+        accessToken?: string;
+        refreshToken?: string;
+        environment?: "sandbox" | "production";
+      };
+
+      if (!accessToken || !accessToken.trim()) {
+        res.status(400).json({ error: "Access Token is required." });
+        return;
+      }
+
+      const result = await saveDirectEbayToken(storeId, accessToken, refreshToken, environment);
+      res.json({ success: true, message: "eBay token saved successfully." });
     } catch (error) {
       next(error);
     }

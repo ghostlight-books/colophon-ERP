@@ -224,3 +224,4 @@ export async function scanInventoryOpportunities(
 
   return { scannedCount, updatedCount, opportunities: results };
 }
+

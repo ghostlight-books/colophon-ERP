@@ -34,6 +34,16 @@ export default function EbayPage(): JSX.Element {
   // New/Edit Rule Modal State
   const [editingRule, setEditingRule] = useState<Partial<EbayListingRuleConfig> | null>(null);
 
+  // Form and Auth States
+  const [connectingOAuth, setConnectingOAuth] = useState(false);
+  const [authMode, setAuthMode] = useState<"oauth" | "direct_token">("oauth");
+  const [formAppId, setFormAppId] = useState("");
+  const [formCertId, setFormCertId] = useState("");
+  const [formRuName, setFormRuName] = useState("");
+  const [formEnv, setFormEnv] = useState<"sandbox" | "production">("sandbox");
+  const [directAccessToken, setDirectAccessToken] = useState("");
+  const [directRefreshToken, setDirectRefreshToken] = useState("");
+
   // Load configuration and status
   async function loadConfig() {
     try {
@@ -41,6 +51,9 @@ export default function EbayPage(): JSX.Element {
       if (res.ok) {
         const data = await res.json();
         setConfig(data);
+        if (data.appId) setFormAppId(data.appId);
+        if (data.ruName) setFormRuName(data.ruName);
+        if (data.environment) setFormEnv(data.environment);
       }
     } catch (err) {
       console.warn("Could not load eBay config:", err);
@@ -151,14 +164,90 @@ export default function EbayPage(): JSX.Element {
   }
 
   async function handleConnectOAuth() {
+    const activeAppId = formAppId.trim() || config?.appId?.trim() || "";
+    const activeRuName = formRuName.trim() || config?.ruName?.trim() || "";
+    const activeEnv = formEnv || config?.environment || "sandbox";
+
+    if (!activeAppId || !activeRuName) {
+      setMessage({
+        text: "Please enter your eBay App ID (Client ID) and RuName (Redirect URI) below before initiating OAuth, or switch to Direct Token Paste.",
+        type: "error",
+      });
+      return;
+    }
+
+    setConnectingOAuth(true);
+    setMessage({ text: "Initiating eBay OAuth authorization...", type: "info" });
     try {
-      const res = await fetch(`${API_BASE}/auth/ebay/install?environment=${config?.environment || "sandbox"}`);
+      const params = new URLSearchParams({
+        environment: activeEnv,
+        clientId: activeAppId,
+        ruName: activeRuName,
+      });
+
+      const res = await fetch(`${API_BASE}/auth/ebay/install?${params.toString()}`);
       const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
+
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || data.message || "Failed to generate eBay OAuth URL.");
       }
+
+      window.location.href = data.url;
     } catch (err: any) {
       setMessage({ text: "Could not initiate OAuth authorization: " + err.message, type: "error" });
+      setConnectingOAuth(false);
+    }
+  }
+
+  async function handleSaveDirectToken() {
+    if (!directAccessToken.trim()) {
+      setMessage({ text: "Please enter or paste an eBay User Access Token.", type: "error" });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/ebay/save-token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessToken: directAccessToken.trim(),
+          refreshToken: directRefreshToken.trim() || undefined,
+          environment: formEnv,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save token");
+      setMessage({ text: "eBay Access Token saved successfully. Marketplace connection is active!", type: "success" });
+      loadConfig();
+    } catch (err: any) {
+      setMessage({ text: err.message, type: "error" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSandboxMockConnect() {
+    setLoading(true);
+    try {
+      const mockToken = "v^1.1#i^1#r^0#p^3#I^3#f^0#t^H4sIAAAAAAAAAOVYbWwURRS..." + Date.now();
+      const res = await fetch(`${API_BASE}/ebay/save-token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessToken: mockToken,
+          refreshToken: "mock-refresh-token-" + Date.now(),
+          environment: "sandbox",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to enable sandbox testing mode");
+      setMessage({ text: "Sandbox Mock Connection Activated. You can now test Opportunity Scans and Listing Publishing!", type: "success" });
+      loadConfig();
+    } catch (err: any) {
+      setMessage({ text: err.message, type: "error" });
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -814,140 +903,234 @@ export default function EbayPage(): JSX.Element {
 
       {/* Tab 4: Policies & OAuth Settings */}
       {activeTab === "settings" && (
-        <form onSubmit={handleSaveConfig} className="space-y-6">
-          <SurfaceCard className="p-6 space-y-4">
-            <h2 className="text-sm font-bold text-slate-900">eBay OAuth 2.0 Account Connection</h2>
-            <p className="text-xs text-slate-500">
-              Authenticate your bookstore's eBay seller account with PKCE User Access Tokens and automatic refresh rotation.
-            </p>
-
-            <div className="flex items-center space-x-4">
-              <button
-                type="button"
-                onClick={handleConnectOAuth}
-                className="inline-flex items-center rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-amber-500 transition"
-              >
-                {config?.connected ? "Re-Authorize eBay Account (1-Click)" : "Connect eBay Account (1-Click)"}
-              </button>
-              <span className="text-xs text-slate-500">
-                {config?.connected ? "Token active & auto-refreshing" : "Not connected"}
-              </span>
-            </div>
-          </SurfaceCard>
-
-          <SurfaceCard className="p-6 space-y-4">
-            <h2 className="text-sm font-bold text-slate-900">API Credentials & Environment</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+        <div className="space-y-6">
+          <SurfaceCard className="p-6 space-y-5">
+            <div className="flex items-center justify-between">
               <div>
-                <label className="font-semibold text-slate-700">Environment</label>
-                <select
-                  name="environment"
-                  defaultValue={config?.environment || "sandbox"}
-                  className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
+                <h2 className="text-base font-bold text-slate-900">eBay Marketplace Authentication</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Connect your bookstore's eBay seller account using standard OAuth 2.0 PKCE or paste an existing User Access Token.
+                </p>
+              </div>
+              <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setAuthMode("oauth")}
+                  className={`px-3 py-1.5 rounded-lg transition ${
+                    authMode === "oauth" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                  }`}
                 >
-                  <option value="sandbox">Sandbox (Testing / Mock)</option>
-                  <option value="production">Production (Live eBay Marketplace)</option>
-                </select>
-              </div>
-              <div>
-                <label className="font-semibold text-slate-700">eBay App ID (Client ID)</label>
-                <input
-                  type="text"
-                  name="appId"
-                  defaultValue={config?.appId || ""}
-                  placeholder="App ID from eBay Developer Portal"
-                  className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-slate-700">eBay Cert ID (Client Secret)</label>
-                <input
-                  type="password"
-                  name="certId"
-                  placeholder="Cert ID / Secret from Developer Portal"
-                  className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-slate-700">eBay RuName (Redirect URI)</label>
-                <input
-                  type="text"
-                  name="ruName"
-                  defaultValue={config?.ruName || ""}
-                  placeholder="Your eBay RuName"
-                  className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
-                />
+                  OAuth 1-Click
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuthMode("direct_token")}
+                  className={`px-3 py-1.5 rounded-lg transition ${
+                    authMode === "direct_token" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Direct Token Paste
+                </button>
               </div>
             </div>
+
+            {authMode === "oauth" ? (
+              <div className="space-y-4 rounded-xl bg-slate-50 p-4 border border-slate-200">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="font-semibold text-slate-700">Environment</label>
+                    <select
+                      value={formEnv}
+                      onChange={(e) => setFormEnv(e.target.value as any)}
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm"
+                    >
+                      <option value="sandbox">Sandbox (Testing / Developer Mock)</option>
+                      <option value="production">Production (Live eBay Marketplace)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-semibold text-slate-700">eBay App ID (Client ID)</label>
+                    <input
+                      type="text"
+                      value={formAppId}
+                      onChange={(e) => setFormAppId(e.target.value)}
+                      placeholder="e.g. YourApp-Sandbox-PRD-..."
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-semibold text-slate-700">eBay Cert ID (Client Secret)</label>
+                    <input
+                      type="password"
+                      value={formCertId}
+                      onChange={(e) => setFormCertId(e.target.value)}
+                      placeholder="Cert ID / Secret from Developer Portal"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-semibold text-slate-700">eBay RuName (Redirect URI)</label>
+                    <input
+                      type="text"
+                      value={formRuName}
+                      onChange={(e) => setFormRuName(e.target.value)}
+                      placeholder="e.g. YourStore-YourApp-Sandbox-..."
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <div className="flex items-center space-x-3">
+                    <button
+                      type="button"
+                      onClick={handleConnectOAuth}
+                      disabled={connectingOAuth}
+                      className="inline-flex items-center rounded-xl bg-amber-600 px-5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-amber-500 disabled:opacity-50 transition"
+                    >
+                      {connectingOAuth ? (
+                        <>
+                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                          </svg>
+                          Redirecting to eBay Login...
+                        </>
+                      ) : config?.connected ? (
+                        "Re-Authorize via eBay Login"
+                      ) : (
+                        "Authorize & Connect via eBay (1-Click)"
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSandboxMockConnect}
+                      className="rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-sm"
+                    >
+                      Instant Sandbox Dev Mode (Test Scans & Orders)
+                    </button>
+                  </div>
+
+                  <span className="text-xs text-slate-500">
+                    Status:{" "}
+                    <strong className={config?.connected ? "text-emerald-600" : "text-amber-600"}>
+                      {config?.connected ? `Connected (${config.environment})` : "Not connected"}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4 rounded-xl bg-slate-50 p-4 border border-slate-200">
+                <p className="text-xs text-slate-600">
+                  If you already generated a User Access Token or Auth Token directly in the eBay Developer Portal, paste it below to connect immediately without OAuth redirect setup:
+                </p>
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="font-semibold text-slate-700">User Access Token / Auth Token</label>
+                    <textarea
+                      value={directAccessToken}
+                      onChange={(e) => setDirectAccessToken(e.target.value)}
+                      placeholder="Paste your v^1.1#... OAuth User Token or Auth Token here"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-2.5 font-mono text-[11px] min-h-24 shadow-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-semibold text-slate-700">Refresh Token (Optional)</label>
+                    <input
+                      type="text"
+                      value={directRefreshToken}
+                      onChange={(e) => setDirectRefreshToken(e.target.value)}
+                      placeholder="Optional refresh token"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-2.5 font-mono text-[11px] shadow-sm"
+                    />
+                  </div>
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveDirectToken}
+                      className="rounded-xl bg-slate-900 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 transition"
+                    >
+                      Save & Activate Access Token
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </SurfaceCard>
 
-          <SurfaceCard className="p-6 space-y-4">
-            <h2 className="text-sm font-bold text-slate-900">Merchant Business Policies & High-Value Routing</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              <div>
-                <label className="font-semibold text-slate-700">Default Fulfillment Policy ID</label>
-                <input
-                  type="text"
-                  name="fulfillmentPolicyId"
-                  defaultValue={config?.fulfillmentPolicyId || ""}
-                  placeholder="e.g. 5240212000"
-                  className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
-                />
+          <form onSubmit={handleSaveConfig} className="space-y-6">
+            <SurfaceCard className="p-6 space-y-4">
+              <h2 className="text-base font-bold text-slate-900">Merchant Business Policies & High-Value Routing</h2>
+              <p className="text-xs text-slate-500">
+                Configure your eBay Business Policy IDs (Fulfillment, Payment, Return) and dynamic high-value shipping routing thresholds.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                <div>
+                  <label className="font-semibold text-slate-700">Default Fulfillment Policy ID</label>
+                  <input
+                    type="text"
+                    name="fulfillmentPolicyId"
+                    defaultValue={config?.fulfillmentPolicyId || ""}
+                    placeholder="e.g. 5240212000"
+                    className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-700">Default Payment Policy ID</label>
+                  <input
+                    type="text"
+                    name="paymentPolicyId"
+                    defaultValue={config?.paymentPolicyId || ""}
+                    placeholder="e.g. 5240213000"
+                    className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-700">Default Return Policy ID</label>
+                  <input
+                    type="text"
+                    name="returnPolicyId"
+                    defaultValue={config?.returnPolicyId || ""}
+                    placeholder="e.g. 5240214000"
+                    className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="font-semibold text-slate-700">Default Payment Policy ID</label>
-                <input
-                  type="text"
-                  name="paymentPolicyId"
-                  defaultValue={config?.paymentPolicyId || ""}
-                  placeholder="e.g. 5240213000"
-                  className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-slate-700">Default Return Policy ID</label>
-                <input
-                  type="text"
-                  name="returnPolicyId"
-                  defaultValue={config?.returnPolicyId || ""}
-                  placeholder="e.g. 5240214000"
-                  className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
-                />
-              </div>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2 border-t border-slate-100">
-              <div>
-                <label className="font-semibold text-slate-700">High-Value Shipping Policy ID (Expedited/Signature)</label>
-                <input
-                  type="text"
-                  name="highValueFulfillmentPolicyId"
-                  defaultValue={config?.highValueFulfillmentPolicyId || ""}
-                  placeholder="e.g. 5240299000 (Priority + Signature)"
-                  className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2 border-t border-slate-100">
+                <div>
+                  <label className="font-semibold text-slate-700">High-Value Shipping Policy ID (Expedited/Signature)</label>
+                  <input
+                    type="text"
+                    name="highValueFulfillmentPolicyId"
+                    defaultValue={config?.highValueFulfillmentPolicyId || ""}
+                    placeholder="e.g. 5240299000 (Priority + Signature)"
+                    className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-700">High-Value Price Threshold ($)</label>
+                  <input
+                    type="number"
+                    name="highValueThreshold"
+                    defaultValue={config?.highValueThreshold ?? 250}
+                    className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="font-semibold text-slate-700">High-Value Price Threshold ($)</label>
-                <input
-                  type="number"
-                  name="highValueThreshold"
-                  defaultValue={config?.highValueThreshold ?? 250}
-                  className="mt-1 w-full rounded-xl border border-slate-200 p-2.5"
-                />
-              </div>
-            </div>
 
-            <div className="flex justify-end pt-4">
-              <button
-                type="submit"
-                className="rounded-xl bg-slate-900 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 transition"
-              >
-                Save Settings & Policies
-              </button>
-            </div>
-          </SurfaceCard>
-        </form>
+              <div className="flex justify-end pt-4">
+                <button
+                  type="submit"
+                  className="rounded-xl bg-slate-900 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 transition"
+                >
+                  Save Business Policies
+                </button>
+              </div>
+            </SurfaceCard>
+          </form>
+        </div>
       )}
 
       {/* Tab 5: Audit & Sync Logs */}

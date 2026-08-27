@@ -83,3 +83,4 @@ test("evaluateBookAgainstRule: fails validation when missing cover image", () =>
   assert.equal(result.isComplete, false);
   assert.ok(result.missingFields.includes("Cover Image"));
 });
+

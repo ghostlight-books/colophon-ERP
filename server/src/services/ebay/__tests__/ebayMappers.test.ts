@@ -120,3 +120,4 @@ test("resolveEbayPolicies: routes high-value items ($250+) to expedited signatur
   assert.equal(rareItem.fulfillmentPolicyId, "EXPEDITED_SIGNATURE_REQUIRED");
   assert.equal(rareItem.isHighValueRouted, true);
 });
+

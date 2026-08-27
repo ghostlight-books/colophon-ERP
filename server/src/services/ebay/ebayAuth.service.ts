@@ -265,3 +265,43 @@ export async function getValidEbayAccessToken(storeId: string): Promise<{ token:
 
   return { token: tokenData.accessToken, environment: envMode };
 }
+
+export async function saveDirectEbayToken(
+  storeId: string,
+  accessToken: string,
+  refreshToken?: string,
+  environmentOverride?: "sandbox" | "production"
+): Promise<{ success: boolean; tokenData: EbayTokenData }> {
+  const store = await prisma.store.findFirst({
+    where: { OR: [{ id: storeId }, { slug: storeId }] },
+  });
+  const storePk = store?.id ?? storeId;
+  const envMode = environmentOverride || "sandbox";
+
+  const tokenData: EbayTokenData = {
+    accessToken: accessToken.trim(),
+    refreshToken: refreshToken?.trim() || undefined,
+    tokenExpiresAt: Date.now() + 7200 * 1000, // 2 hours default
+    tokenType: "User Access Token",
+  };
+
+  const encrypted = encryptSecret(JSON.stringify(tokenData));
+
+  await prisma.ebayIntegrationConfig.upsert({
+    where: { storeId: storePk },
+    create: {
+      storeId: storePk,
+      environment: envMode,
+      encryptedTokens: encrypted,
+      syncEnabled: true,
+    },
+    update: {
+      environment: envMode,
+      encryptedTokens: encrypted,
+    },
+  });
+
+  return { success: true, tokenData };
+}
+
+
