@@ -39,7 +39,35 @@ function extractText(html: string, pattern: RegExp): string | null {
   return match?.[1]?.replace(/<[^>]+>/g, "").trim() || null;
 }
 
+function isGenericSiteTitle(title: string | null): boolean {
+  if (!title) return true;
+  const clean = title.trim().toLowerCase();
+  if (clean.length < 2) return true;
+  const bad = ["featured", "home", "books", "best sellers", "customer favorites", "browse all", "thriftbooks", "customer reviews", "all books", "featured books"];
+  return bad.includes(clean) || clean.includes("0 results") || clean.includes("no results");
+}
+
 export function extractThriftbooksDetails(html: string): ThriftbooksDetails {
+  // Check for explicit zero-result pages
+  if (
+    html.includes("0 results for") ||
+    html.includes("0 results found") ||
+    html.includes("No results found") ||
+    html.includes("We couldn't find anything matching") ||
+    html.includes("did not match any books") ||
+    html.includes("Search-NoResults")
+  ) {
+    return {
+      price: null,
+      title: null,
+      author: null,
+      category: null,
+      subcategory: null,
+      offers: [],
+      conditionPrices: {},
+    };
+  }
+
   // 1. Structured JSON-LD extraction (Only inspect Book/Product/IndividualProduct schemas - never Reviews)
   const jsonLdBlocks = extractJsonLdBlocks(html);
   const structuredOffers = parseOffersFromJsonLd(jsonLdBlocks);
@@ -59,7 +87,10 @@ export function extractThriftbooksDetails(html: string): ThriftbooksDetails {
 
       if (type.includes("book") || type.includes("product") || type.includes("creativework")) {
         if (!jsonTitle && typeof obj.name === "string" && obj.name.trim().length > 0) {
-          jsonTitle = obj.name.trim();
+          const cand = obj.name.trim();
+          if (!isGenericSiteTitle(cand)) {
+            jsonTitle = cand;
+          }
         }
         if (!jsonAuthor) {
           if (typeof obj.author === "string" && obj.author.trim().length > 0) {
@@ -75,7 +106,7 @@ export function extractThriftbooksDetails(html: string): ThriftbooksDetails {
   // 2. HTML elements for search & product pages
   const htmlTitleMatch = html.match(/<[^>]*class=["'][^"']*(?:Search-Item-Title|product-title|All-Search-Item-Title|book-title)[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
   let htmlTitle = htmlTitleMatch ? htmlTitleMatch[1].replace(/<[^>]+>/g, "").trim() : null;
-  if (htmlTitle && (htmlTitle.length < 2 || htmlTitle.toLowerCase() === "featured" || htmlTitle.toLowerCase().includes("book overview"))) {
+  if (isGenericSiteTitle(htmlTitle)) {
     htmlTitle = null;
   }
 
