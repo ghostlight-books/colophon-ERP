@@ -199,8 +199,17 @@ function ShellRouteLayout(): JSX.Element {
       { key: "calendar", label: "Calendar", to: "/calendar", icon: <CalendarIcon />, module: "CALENDAR" },
       { key: "lists", label: "Lists", to: "/lists", icon: <ListsIcon />, module: "LISTS" },
       { key: "intake", label: "Intake", to: "/intake", icon: <BoxIcon />, module: "INTAKE" },
-      { key: "inventory", label: "Inventory", to: "/inventory", icon: <BoxIcon />, module: "INVENTORY" },
-      { key: "ebay", label: "eBay Hub", to: "/ebay", icon: <EbayIcon />, module: "INVENTORY" },
+      {
+        key: "inventory",
+        label: "Inventory",
+        to: "/inventory",
+        icon: <BoxIcon />,
+        module: "INVENTORY",
+        children: [
+          { key: "active-inventory", label: "Active Inventory", to: "/inventory" },
+          { key: "ebay", label: "eBay Hub", to: "/ebay", icon: <EbayIcon /> },
+        ],
+      },
       { key: "operations", label: "Operations", to: "/operations", icon: <OperationsIcon />, module: "DASHBOARD" },
       { key: "marketing", label: "Marketing", to: "/marketing", icon: <MarketingIcon />, module: "LISTS" },
       { key: "finance", label: "Accounting", to: "/finance", icon: <WalletIcon />, module: "ACCOUNTING" },
@@ -253,7 +262,8 @@ function ShellRouteLayout(): JSX.Element {
     },
   };
 
-  const activePath = navItems.find((item) => location.pathname.startsWith(item.to))?.to ?? "/dashboard";
+  const allNavLinks = navItems.flatMap((item) => [item, ...(item.children ?? [])]);
+  const activePath = allNavLinks.find((item) => item.to === location.pathname || (item.to !== "/dashboard" && location.pathname.startsWith(item.to)))?.to ?? "/dashboard";
   const meta = pageMeta[activePath] ?? pageMeta["/dashboard"];
 
   useEffect(() => {

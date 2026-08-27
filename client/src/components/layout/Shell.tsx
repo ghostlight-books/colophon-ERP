@@ -1,11 +1,19 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarDays, ChevronLeft, ChevronRight, Moon, Search, Sun, UserRound } from "lucide-react";
+import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Moon, Search, Sun, UserRound } from "lucide-react";
+
+export type ShellNavChild = {
+  key: string;
+  label: string;
+  to: string;
+  icon?: ReactNode;
+};
 
 export type ShellNavItem = {
   key: string;
   label: string;
   icon: ReactNode;
   to: string;
+  children?: ShellNavChild[];
 };
 
 export type LoggedInUser = {
@@ -75,6 +83,7 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
   const [manualNotificationTitle, setManualNotificationTitle] = useState("");
   const [profileDraft, setProfileDraft] = useState<LoggedInUser>(currentUser);
   const [isPosSidebarOpen, setIsPosSidebarOpen] = useState(false);
+  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
   const [serviceHealth, setServiceHealth] = useState<ServiceHealth[]>([]);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [reminders, setReminders] = useState<ReminderItem[]>(() => {
@@ -144,13 +153,22 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
 
   const searchableItems = useMemo<SearchResult[]>(
     () => [
-      ...navItems.map((item) => ({
-        id: `nav-${item.key}`,
-        title: item.label,
-        subtitle: "Open module",
-        category: "navigation" as const,
-        to: item.to,
-      })),
+      ...navItems.flatMap((item) => [
+        {
+          id: `nav-${item.key}`,
+          title: item.label,
+          subtitle: "Open module",
+          category: "navigation" as const,
+          to: item.to,
+        },
+        ...(item.children ?? []).map((child) => ({
+          id: `nav-${child.key}`,
+          title: `${item.label} > ${child.label}`,
+          subtitle: "Open sub-menu",
+          category: "navigation" as const,
+          to: child.to,
+        })),
+      ]),
       { id: "order-1", title: "Order #4529", subtitle: "Awaiting shipment", category: "orders", to: "/sales" },
       { id: "order-2", title: "Order #4518", subtitle: "Packed and ready", category: "orders", to: "/sales" },
       { id: "inv-1", title: "Piranesi", subtitle: "Low stock: 9 units", category: "inventory", to: "/inventory" },
@@ -343,39 +361,108 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
             isDark ? "bg-white/15" : "bg-white/70",
           ].join(" ")}></div>
 
-          <nav className="mt-1 flex flex-1 flex-col gap-2" aria-label="Primary">
+          <nav className="mt-1 flex flex-1 flex-col gap-1.5 overflow-y-auto pr-0.5" aria-label="Primary">
             {navItems.map((item) => {
-              const isActive = activePath.startsWith(item.to);
+              const hasChildren = Boolean(item.children && item.children.length > 0);
+              const isChildActive = hasChildren && (item.children?.some((child) => activePath === child.to || (child.to !== "/dashboard" && activePath.startsWith(child.to))) ?? false);
+              const isDirectActive = activePath === item.to || (!hasChildren && item.to !== "/dashboard" && activePath.startsWith(item.to));
+              const isParentActive = isDirectActive || isChildActive;
+              const isExpanded = expandedMenus[item.key] ?? isParentActive;
 
               return (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => onNavigate(item.to)}
-                  className={[
-                    "group flex items-center gap-3 rounded-full px-4 py-2.5 text-left text-[0.96rem] font-semibold transition",
-                    isActive
-                      ? "bg-[#e9ff63] text-slate-800 shadow-[inset_0_0_0_1px_rgba(201,224,86,0.48)]"
-                      : isDark
-                        ? "bg-white/8 text-slate-300 hover:bg-white/14 hover:text-white"
-                        : "bg-white/40 text-slate-600 hover:bg-white/72 hover:text-slate-800",
-                  ].join(" ")}
-                  aria-current={isActive ? "page" : undefined}
-                >
-                  <span
+                <div key={item.key} className="flex flex-col gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onNavigate(item.to);
+                      if (hasChildren) {
+                        setExpandedMenus((prev) => ({
+                          ...prev,
+                          [item.key]: !isExpanded,
+                        }));
+                      }
+                    }}
                     className={[
-                      "grid h-7 w-7 place-items-center rounded-full transition",
-                      isActive
-                        ? "bg-black/10 text-slate-700"
-                        : isDark
-                          ? "bg-white/15 text-slate-300 group-hover:bg-white/20"
-                          : "bg-white/80 text-slate-500 group-hover:bg-white",
+                      "group flex items-center justify-between rounded-full px-4 py-2.5 text-left text-[0.96rem] font-semibold transition",
+                      isDirectActive && !isChildActive
+                        ? "bg-[#e9ff63] text-slate-800 shadow-[inset_0_0_0_1px_rgba(201,224,86,0.48)]"
+                        : isParentActive
+                          ? isDark
+                            ? "bg-white/12 text-slate-100"
+                            : "bg-white/60 text-slate-800"
+                          : isDark
+                            ? "bg-white/8 text-slate-300 hover:bg-white/14 hover:text-white"
+                            : "bg-white/40 text-slate-600 hover:bg-white/72 hover:text-slate-800",
                     ].join(" ")}
+                    aria-current={isDirectActive && !isChildActive ? "page" : undefined}
                   >
-                    {item.icon}
-                  </span>
-                  <span>{item.label}</span>
-                </button>
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={[
+                          "grid h-7 w-7 place-items-center rounded-full transition",
+                          isDirectActive && !isChildActive
+                            ? "bg-black/10 text-slate-700"
+                            : isDark
+                              ? "bg-white/15 text-slate-300 group-hover:bg-white/20"
+                              : "bg-white/80 text-slate-500 group-hover:bg-white",
+                        ].join(" ")}
+                      >
+                        {item.icon}
+                      </span>
+                      <span>{item.label}</span>
+                    </div>
+                    {hasChildren ? (
+                      <ChevronDown
+                        size={15}
+                        className={[
+                          "transition-transform duration-200",
+                          isExpanded ? "rotate-180" : "",
+                          isDark ? "text-slate-400" : "text-slate-400",
+                        ].join(" ")}
+                      />
+                    ) : null}
+                  </button>
+
+                  {/* Sub-menu items */}
+                  {hasChildren && isExpanded ? (
+                    <div className={[
+                      "ml-5 flex flex-col gap-1 border-l-2 pl-3 py-1 my-0.5",
+                      isDark ? "border-white/15" : "border-slate-300/60",
+                    ].join(" ")}>
+                      {item.children!.map((child) => {
+                        const isThisChildActive = activePath === child.to || (child.to !== "/dashboard" && activePath.startsWith(child.to));
+                        return (
+                          <button
+                            key={child.key}
+                            type="button"
+                            onClick={() => onNavigate(child.to)}
+                            className={[
+                              "group flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-semibold transition",
+                              isThisChildActive
+                                ? "bg-[#e9ff63] text-slate-900 shadow-sm"
+                                : isDark
+                                  ? "text-slate-300 hover:bg-white/10 hover:text-white"
+                                  : "text-slate-600 hover:bg-white/70 hover:text-slate-900",
+                            ].join(" ")}
+                            aria-current={isThisChildActive ? "page" : undefined}
+                          >
+                            {child.icon ? (
+                              <span className="shrink-0 opacity-80 group-hover:opacity-100">{child.icon}</span>
+                            ) : (
+                              <span
+                                className={[
+                                  "h-1.5 w-1.5 shrink-0 rounded-full",
+                                  isThisChildActive ? "bg-slate-900" : isDark ? "bg-slate-500" : "bg-slate-400",
+                                ].join(" ")}
+                              />
+                            )}
+                            <span className="truncate">{child.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
               );
             })}
           </nav>
