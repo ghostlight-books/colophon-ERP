@@ -467,7 +467,7 @@ function IntakePage(): JSX.Element {
       {activeView === "scan" ? (
       <>
       {editionModalOpen ? (
-        <div className="fixed inset-0 z-40 grid place-items-center bg-slate-900/40 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[1000] grid place-items-center bg-slate-900/50 p-4 backdrop-blur-sm">
           <div className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-2xl border border-white/70 bg-[#f7f7f8] p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200/70 pb-3">
               <div>
@@ -534,7 +534,7 @@ function IntakePage(): JSX.Element {
       ) : null}
 
       {pendingBook ? (
-        <div className="fixed inset-0 z-40 grid place-items-center bg-slate-900/35 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[1000] grid place-items-center bg-slate-900/50 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-white/70 bg-[#f7f7f8] p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>

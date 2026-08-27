@@ -160,3 +160,4 @@ CREATE INDEX "InventoryReservationLock_storeId_isbn_idx" ON "InventoryReservatio
 
 -- CreateIndex
 CREATE INDEX "InventoryReservationLock_expiresAt_idx" ON "InventoryReservationLock"("expiresAt");
+

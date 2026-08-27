@@ -905,8 +905,8 @@ function CalendarPage(): JSX.Element {
       </div>
 
       {isCreateModalOpen ? (
-        <div className="fixed inset-0 z-[120] grid place-items-center bg-slate-900/35 p-4">
-          <div className="relative z-[121] w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
+        <div className="fixed inset-0 z-[1000] grid place-items-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <div className="relative z-[1001] w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-slate-800">New Event</h3>
@@ -1047,8 +1047,8 @@ function CalendarPage(): JSX.Element {
       ) : null}
 
       {editingSourceId ? (
-        <div className="fixed inset-0 z-[120] grid place-items-center bg-slate-900/35 p-4">
-          <div className="relative z-[121] w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
+        <div className="fixed inset-0 z-[1000] grid place-items-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <div className="relative z-[1001] w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-slate-800">Edit Event</h3>
               <button

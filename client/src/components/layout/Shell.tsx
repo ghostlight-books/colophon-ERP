@@ -626,7 +626,7 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
               {menu !== "none" ? (
                 <div
                   className={[
-                    "absolute right-0 top-[52px] z-[160] w-80 rounded-2xl border p-3 shadow-[0_14px_40px_rgba(20,28,40,0.24)]",
+                    "absolute right-0 top-[52px] z-[1000] w-80 rounded-2xl border p-3 shadow-[0_14px_40px_rgba(20,28,40,0.24)]",
                     isDark ? "border-white/12 bg-[#1f2430] text-slate-100" : "border-white/70 bg-white text-slate-700",
                   ].join(" ")}
                   role="dialog"
