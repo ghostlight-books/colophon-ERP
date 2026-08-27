@@ -57,6 +57,7 @@ type ServiceHealth = {
   label: string;
   detail: string;
   status: "green" | "yellow" | "red";
+  path?: string;
 };
 
 function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUser, onCurrentUserChange, children }: ShellProps): JSX.Element {
@@ -113,7 +114,9 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
     let cancelled = false;
     const loadHealth = async (): Promise<void> => {
       try {
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api"}/health/services?updatedAt=${Date.now()}`);
+        const rawBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+        const apiBase = rawBase.replace(/\/$/, "").replace(/\/api$/, "") + "/api";
+        const response = await fetch(`${apiBase}/health/services?storeId=ghostlight-demo&updatedAt=${Date.now()}`);
         if (!response.ok) {
           return;
         }
@@ -383,16 +386,58 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
               isDark ? "bg-white/8 text-slate-300" : "bg-white/50 text-slate-600",
             ].join(" ")}
           >
-            <p className={[
-              "font-semibold transition-colors duration-300",
-              isDark ? "text-slate-100" : "text-slate-700",
-            ].join(" ")}>Store Health</p>
-            <div className="mt-2 space-y-1.5">
-              {serviceHealth.length === 0 ? <p>Checking connected services...</p> : serviceHealth.map((service) => (
-                <div key={service.key} className="flex items-center gap-2" title={service.detail}>
-                  <span className={["h-2.5 w-2.5 shrink-0 rounded-full", service.status === "green" ? "bg-emerald-500" : service.status === "yellow" ? "bg-amber-400" : "bg-red-500"].join(" ")} aria-label={`${service.label}: ${service.status}`} />
-                  <span className="truncate">{service.label}</span>
-                </div>
+            <div className="flex items-center justify-between">
+              <p className={[
+                "font-semibold transition-colors duration-300",
+                isDark ? "text-slate-100" : "text-slate-700",
+              ].join(" ")}>Store Health</p>
+              <span className="text-[10px] font-medium text-slate-400">Live</span>
+            </div>
+            <div className="mt-2 space-y-1">
+              {serviceHealth.length === 0 ? <p className="py-1 text-slate-400">Checking services...</p> : serviceHealth.map((service) => (
+                <button
+                  key={service.key}
+                  type="button"
+                  onClick={() => {
+                    if (service.path) onNavigate(service.path);
+                    else if (service.key === "ecommerce") onNavigate("/shopify");
+                    else if (service.key === "payments") onNavigate("/payments");
+                    else if (service.key === "network") onNavigate("/network");
+                    else if (service.key === "marketing") onNavigate("/marketing");
+                  }}
+                  className={[
+                    "group flex w-full items-center justify-between gap-2 rounded-xl px-2 py-1.5 text-left transition",
+                    isDark ? "hover:bg-white/10" : "hover:bg-white/80",
+                  ].join(" ")}
+                  title={`${service.label}: ${service.detail}`}
+                >
+                  <div className="flex items-center gap-2 truncate">
+                    <span
+                      className={[
+                        "h-2 w-2 shrink-0 rounded-full transition-all",
+                        service.status === "green"
+                          ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)]"
+                          : service.status === "yellow"
+                            ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]"
+                            : "bg-rose-500",
+                      ].join(" ")}
+                      aria-label={`${service.label}: ${service.status}`}
+                    />
+                    <span className="truncate font-medium">{service.label}</span>
+                  </div>
+                  <span
+                    className={[
+                      "text-[10px] font-semibold shrink-0",
+                      service.status === "green"
+                        ? "text-emerald-700"
+                        : service.status === "yellow"
+                          ? "text-amber-700"
+                          : "text-slate-400",
+                    ].join(" ")}
+                  >
+                    {service.status === "green" ? "Active" : service.status === "yellow" ? "Check" : "Off"}
+                  </span>
+                </button>
               ))}
             </div>
           </div>

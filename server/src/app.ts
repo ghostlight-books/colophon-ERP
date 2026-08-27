@@ -807,23 +807,75 @@ export function createApp(): express.Express {
     }
   });
   
-  app.get("/api/health/services", (_req, res) => {
-    const marketingConnected = marketingStore.connections.filter((connection) => connection.connected).length;
-    const marketingTotal = marketingStore.connections.length;
-    const marketingStatus = marketingConnected === 0
-      ? "red"
-      : marketingConnected < marketingTotal
-        ? "yellow"
-        : "green";
+  app.get("/api/health/services", async (req, res) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const store = await prisma.store.findFirst({ where: { OR: [{ id: storeId }, { slug: storeId }] } });
+      const storePk = store?.id ?? storeId;
 
-    res.json({
-      services: [
-        { key: "ecommerce", label: "Ecommerce site", detail: "Shopify or connected storefront", status: "red" },
-        { key: "payments", label: "Payment processor", detail: isSquareConfigured() ? "Square connected" : "No processor connected", status: isSquareConfigured() ? "green" : "red" },
-        { key: "network", label: "Open Network", detail: "Shared inventory sync", status: "green" },
-        { key: "marketing", label: "Marketing", detail: `${marketingConnected}/${marketingTotal} accounts connected`, status: marketingStatus },
-      ],
-    });
+      // 1. Live Ecommerce Integration Status
+      const ecomIntegrations = await prisma.storeEcommerceIntegration.findMany({ where: { storeId: storePk } }).catch(() => []);
+      const shopifyIntegration = ecomIntegrations.find((i) => i.platform === "shopify");
+      let ecomStatus: "green" | "yellow" | "red" = "red";
+      let ecomDetail = "Not connected (Click to connect Shopify)";
+
+      if (shopifyIntegration) {
+        try {
+          const statusResult = await checkStoreConnection(storePk, "shopify");
+          if (statusResult.connected) {
+            ecomStatus = "green";
+            ecomDetail = `Shopify connected (${shopifyIntegration.storeUrl.replace(/^https?:\/\//, "")})`;
+          } else {
+            ecomStatus = "yellow";
+            ecomDetail = `Shopify configured (${shopifyIntegration.storeUrl.replace(/^https?:\/\//, "")})`;
+          }
+        } catch {
+          ecomStatus = "yellow";
+          ecomDetail = `Shopify configured (${shopifyIntegration.storeUrl.replace(/^https?:\/\//, "")})`;
+        }
+      } else if (ecomIntegrations.length > 0) {
+        ecomStatus = "green";
+        ecomDetail = `${ecomIntegrations[0].platform} connected`;
+      }
+
+      // 2. Payments Status
+      const paymentsConfigured = isSquareConfigured();
+      const paymentsStatus: "green" | "yellow" | "red" = paymentsConfigured ? "green" : "red";
+      const paymentsDetail = paymentsConfigured ? "Square payment processor connected" : "No payment processor connected";
+
+      // 3. Open Network Status
+      const peerCount = await prisma.networkPeer.count().catch(() => 0);
+      const networkStatus: "green" | "yellow" | "red" = "green";
+      const networkDetail = peerCount > 0 ? `Open Network active (${peerCount} peer nodes)` : "Open Network ready for shared sync";
+
+      // 4. Marketing Status
+      const marketingConnected = marketingStore.connections.filter((connection) => connection.connected).length;
+      const marketingTotal = marketingStore.connections.length;
+      const marketingStatus = marketingConnected === 0
+        ? "red"
+        : marketingConnected < marketingTotal
+          ? "yellow"
+          : "green";
+      const marketingDetail = `${marketingConnected}/${marketingTotal} marketing channels connected`;
+
+      res.json({
+        services: [
+          { key: "ecommerce", label: "Ecommerce site", detail: ecomDetail, status: ecomStatus, path: "/shopify" },
+          { key: "payments", label: "Payment processor", detail: paymentsDetail, status: paymentsStatus, path: "/payments" },
+          { key: "network", label: "Open Network", detail: networkDetail, status: networkStatus, path: "/network" },
+          { key: "marketing", label: "Marketing", detail: marketingDetail, status: marketingStatus, path: "/marketing" },
+        ],
+      });
+    } catch (error) {
+      res.json({
+        services: [
+          { key: "ecommerce", label: "Ecommerce site", detail: "Checking status...", status: "yellow", path: "/shopify" },
+          { key: "payments", label: "Payment processor", detail: isSquareConfigured() ? "Square connected" : "No processor", status: isSquareConfigured() ? "green" : "red", path: "/payments" },
+          { key: "network", label: "Open Network", detail: "Shared sync", status: "green", path: "/network" },
+          { key: "marketing", label: "Marketing", detail: "Checking channels...", status: "yellow", path: "/marketing" },
+        ],
+      });
+    }
   });
 
   async function syncInventoryLookupCache(): Promise<void> {
