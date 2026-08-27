@@ -23,7 +23,7 @@ export type InventorySyncProgress = {
 interface EcommerceAdapter {
   updateInventoryLevel(sku: string, quantity: number): Promise<{ success: boolean; message?: string }>;
   updateInventoryLevelByBarcode(sku: string, barcode: string, quantity: number): Promise<{ success: boolean; message?: string }>;
-  syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number }): Promise<{ success: boolean; message?: string }>;
+  syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number; weight?: number | null }): Promise<{ success: boolean; message?: string }>;
   fetchRecentOrders(): Promise<unknown[]>;
   checkConnection(): Promise<{ connected: boolean; message: string }>;
 }
@@ -123,7 +123,7 @@ class ShopifyAdapter implements EcommerceAdapter {
     return { success: true };
   }
 
-  async syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number }): Promise<{ success: boolean; message?: string }> {
+  async syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number; weight?: number | null }): Promise<{ success: boolean; message?: string }> {
     if (this.isLocalDevConnector()) return { success: true };
     const products = await parseResponse<{ products?: Array<{ id?: number; variants?: Array<{ id?: number; sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.baseUrl}/admin/api/2024-01/products.json?limit=250`, { headers: this.headers }));
     const matchedProduct = products.products?.find((product) => product.variants?.some((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode)));
@@ -161,8 +161,12 @@ class ShopifyAdapter implements EcommerceAdapter {
               sku: item.sku,
               barcode: item.barcode,
               price: item.price > 0 ? item.price.toFixed(2) : "14.99",
+              weight: item.weight ?? 16,
+              weight_unit: "oz",
               inventory_management: "shopify",
               inventory_policy: "deny",
+              fulfillment_service: "manual",
+              requires_shipping: true,
             },
           }),
         }));
@@ -180,6 +184,8 @@ class ShopifyAdapter implements EcommerceAdapter {
                   sku: item.sku,
                   barcode: item.barcode,
                   price: item.price > 0 ? item.price.toFixed(2) : "14.99",
+                  weight: item.weight ?? 16,
+                  weight_unit: "oz",
                   inventory_management: "shopify",
                   inventory_policy: "deny",
                   fulfillment_service: "manual",
@@ -263,7 +269,7 @@ class WooCommerceAdapter implements EcommerceAdapter {
     return this.updateInventoryLevel(sku, quantity);
   }
 
-  async syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number }): Promise<{ success: boolean; message?: string }> {
+  async syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number; weight?: number | null }): Promise<{ success: boolean; message?: string }> {
     return this.updateInventoryLevel(item.sku, item.quantity);
   }
 
@@ -356,6 +362,7 @@ type InventorySyncRecord = {
   mediaType: string;
   listPrice: number | null;
   quantityOnHand: number;
+  weight?: number | null;
 };
 
 function mapInventoryRecord(item: InventorySyncRecord) {
@@ -377,11 +384,12 @@ function mapInventoryRecord(item: InventorySyncRecord) {
     category: "Print Books",
     price: item.listPrice && item.listPrice > 0 ? item.listPrice : 14.99,
     quantity: Math.max(1, item.quantityOnHand),
+    weight: item.weight ?? 16,
   };
 }
 
 export async function syncInventoryItemByIsbn(storeId: string, isbn: string): Promise<{ success: boolean; message?: string }> {
-  const item = await prisma.isbnLookupCache.findUnique({ where: { isbn }, select: { sku: true, isbn: true, title: true, author: true, description: true, coverUrl: true, seoTitle: true, seoDescription: true, seoKeywords: true, catalogTags: true, category: true, subcategory: true, mediaType: true, listPrice: true, quantityOnHand: true } });
+  const item = await prisma.isbnLookupCache.findUnique({ where: { isbn }, select: { sku: true, isbn: true, title: true, author: true, description: true, coverUrl: true, seoTitle: true, seoDescription: true, seoKeywords: true, catalogTags: true, category: true, subcategory: true, mediaType: true, listPrice: true, quantityOnHand: true, weight: true } });
   if (!item) return { success: false, message: `Inventory record for ${isbn} was not found.` };
   const { adapter, integration } = await getAdapter(storeId, "shopify");
   if (!integration.syncInventory) return { success: false, message: "Shopify inventory sync is disabled for this store." };
@@ -403,7 +411,7 @@ export async function fetchStoreOrders(storeId: string, platform: EcommercePlatf
 }
 
 export async function syncStoreInventoryCatalog(storeId: string, platform: EcommercePlatform, onProgress?: (progress: InventorySyncProgress) => void): Promise<{ success: boolean; message: string; synced: number; skipped: number }> {
-  const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, isbn: true, title: true, author: true, description: true, coverUrl: true, seoTitle: true, seoDescription: true, seoKeywords: true, catalogTags: true, category: true, subcategory: true, mediaType: true, listPrice: true, quantityOnHand: true } });
+  const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, isbn: true, title: true, author: true, description: true, coverUrl: true, seoTitle: true, seoDescription: true, seoKeywords: true, catalogTags: true, category: true, subcategory: true, mediaType: true, listPrice: true, quantityOnHand: true, weight: true } });
   let synced = 0;
   let skipped = 0;
   for (const item of items) {

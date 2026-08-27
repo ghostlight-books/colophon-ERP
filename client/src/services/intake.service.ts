@@ -18,6 +18,28 @@ export type BookLookup = {
   subcategory: string | null;
   mediaType: string;
   sku: string;
+  // Dimensions & Weight
+  weightOz?: number | null;
+  weightLbs?: number | null;
+  lengthInches?: number | null;
+  widthInches?: number | null;
+  thicknessInches?: number | null;
+  pageCount?: number | null;
+  bindingFormat?: string | null;
+  packageType?: string | null;
+  // Shipping & Rates
+  suggestedShippingService?: string | null;
+  estimatedShippingCost?: number | null;
+  shippingQuotes?: Array<{
+    serviceId: string;
+    carrier: string;
+    serviceName: string;
+    rate: number;
+    estimatedDeliveryDays: string;
+    description: string;
+    isRecommended: boolean;
+    recommendationReason?: string;
+  }>;
   label: {
     sku: string;
     barcode: string;
@@ -25,8 +47,10 @@ export type BookLookup = {
     category: string | null;
     subcategory: string | null;
     price: number | null;
+    weightOz?: number | null;
+    shippingService?: string | null;
   };
-  source: "Open Library" | "ISBNdb";
+  source: "Open Library" | "ISBNdb" | "Thriftbooks";
 };
 
 export type BookSearchResult = {

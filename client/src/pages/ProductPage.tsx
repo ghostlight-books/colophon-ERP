@@ -22,6 +22,15 @@ type Product = {
   seoTitle: string | null;
   seoDescription: string | null;
   quantityOnHand: number;
+  weight?: number | null;
+  length?: number | null;
+  width?: number | null;
+  thickness?: number | null;
+  pageCount?: number | null;
+  bindingFormat?: string | null;
+  packageType?: string | null;
+  suggestedShippingService?: string | null;
+  estimatedShippingCost?: number | null;
 };
 
 type ProductResponse = { product: Product; similar: Product[]; partnerAvailability: string };
@@ -162,6 +171,166 @@ function ProductPage(): JSX.Element {
           >
             Delist
           </button>
+        </div>
+      </div>
+    </SurfaceCard>
+
+    {/* Physical Dimensions & USPS Shipping Integration Card */}
+    <SurfaceCard className="p-5 border-l-4 border-l-emerald-600 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center space-x-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-800 font-bold text-lg">
+            📦
+          </div>
+          <div>
+            <div className="flex items-center space-x-2">
+              <h3 className="text-base font-bold text-slate-900">Physical Dimensions & USPS Shipping Integration</h3>
+              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                Auto-Rate Selector
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">
+              Live USPS postage estimation, package sizing, Media Mail qualification, and high-value signature routing.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={async () => {
+            setMessage("Calculating USPS shipping rates...");
+            try {
+              const res = await fetch(`${API_BASE}/shipping/calculate-rates`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  isbn,
+                  weightOz: typeof draft.weight === "number" ? draft.weight : 16,
+                  length: typeof draft.length === "number" ? draft.length : 9.0,
+                  width: typeof draft.width === "number" ? draft.width : 6.0,
+                  thickness: typeof draft.thickness === "number" ? draft.thickness : 1.2,
+                  itemPrice: draft.listPrice ?? product.listPrice ?? 14.99,
+                  packageType: draft.packageType,
+                }),
+              });
+              if (!res.ok) throw new Error("Failed to calculate shipping rates");
+              const data = await res.json();
+              if (data.selectedRate) {
+                setDraft((curr) => ({
+                  ...curr,
+                  suggestedShippingService: data.selectedRate.serviceName,
+                  estimatedShippingCost: data.selectedRate.rate,
+                }));
+                setMessage(`Optimal Rate: ${data.selectedRate.serviceName} ($${data.selectedRate.rate.toFixed(2)}) — ${data.selectedRate.recommendationReason || ""}`);
+              }
+            } catch (err: any) {
+              setMessage(err.message);
+            }
+          }}
+          className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-600 transition"
+        >
+          Recalculate USPS Rates
+        </button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4 pt-2">
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          Weight (oz)
+          <input
+            type="number"
+            step="0.1"
+            value={draft.weight ?? ""}
+            onChange={(e) => updateField("weight", e.target.value as any)}
+            placeholder="16.0"
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 font-mono text-sm"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          Length (in)
+          <input
+            type="number"
+            step="0.1"
+            value={draft.length ?? ""}
+            onChange={(e) => updateField("length", e.target.value as any)}
+            placeholder="9.0"
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 font-mono text-sm"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          Width (in)
+          <input
+            type="number"
+            step="0.1"
+            value={draft.width ?? ""}
+            onChange={(e) => updateField("width", e.target.value as any)}
+            placeholder="6.0"
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 font-mono text-sm"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          Thickness (in)
+          <input
+            type="number"
+            step="0.1"
+            value={draft.thickness ?? ""}
+            onChange={(e) => updateField("thickness", e.target.value as any)}
+            placeholder="1.2"
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 font-mono text-sm"
+          />
+        </label>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3 pt-1">
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          Binding Format
+          <input
+            value={draft.bindingFormat ?? ""}
+            onChange={(e) => updateField("bindingFormat", e.target.value)}
+            placeholder="Hardcover, Paperback, Mass Market"
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          Package Type
+          <select
+            value={draft.packageType ?? "Package/Thick Envelope"}
+            onChange={(e) => updateField("packageType", e.target.value)}
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"
+          >
+            <option value="Package/Thick Envelope">Package / Thick Envelope</option>
+            <option value="Flat Rate Envelope">Priority Mail Padded Flat Rate</option>
+            <option value="Medium Flat Rate Box">Priority Mail Medium Box</option>
+            <option value="Large Flat Rate Box">Priority Mail Large Box</option>
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs font-semibold text-slate-600">
+          Suggested Service
+          <input
+            value={draft.suggestedShippingService ?? "USPS Media Mail"}
+            readOnly
+            className="h-10 rounded-xl border border-emerald-200 bg-emerald-50 px-3 font-semibold text-emerald-900 text-sm"
+          />
+        </label>
+      </div>
+
+      <div className="rounded-xl bg-slate-50 p-3.5 text-xs text-slate-600 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <span className="font-semibold text-slate-800">Postage Base Rate:</span>{" "}
+          <span className="text-emerald-700 font-bold text-sm">
+            {draft.estimatedShippingCost ? `$${Number(draft.estimatedShippingCost).toFixed(2)}` : "$4.63"}
+          </span>
+          <span className="ml-2 text-slate-500">
+            ({draft.suggestedShippingService ?? "USPS Media Mail"} · weight: {draft.weight ?? 16} oz)
+          </span>
+        </div>
+        <div className="text-slate-500">
+          {Number(draft.listPrice ?? product.listPrice ?? 0) >= 250 ? (
+            <span className="rounded-md bg-amber-100 px-2 py-1 font-semibold text-amber-800">
+              🔒 High-Value Signature Confirmation Active ($250+ item)
+            </span>
+          ) : (
+            <span className="text-emerald-700">✓ USPS Media Mail eligible (Books & Printed Matter)</span>
+          )}
         </div>
       </div>
     </SurfaceCard>

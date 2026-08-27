@@ -93,13 +93,13 @@ export async function createOrReplaceInventoryItem(
     },
     packageWeightAndSize: {
       weight: {
-        value: 1.2,
+        value: book.weight ? Math.round((book.weight / 16) * 100) / 100 : 1.2,
         unit: "POUND",
       },
       dimensions: {
-        length: 9,
-        width: 6,
-        height: 1.5,
+        length: book.length ?? 9.0,
+        width: book.width ?? 6.0,
+        height: book.thickness ?? 1.2,
         unit: "INCH",
       },
     },

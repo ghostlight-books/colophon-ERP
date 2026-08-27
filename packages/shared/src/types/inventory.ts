@@ -99,3 +99,58 @@ export interface EbayStoreConfigSummary {
   autoPublishEnabled: boolean;
 }
 
+export type UspsShippingService =
+  | "USPS_MEDIA_MAIL"
+  | "USPS_GROUND_ADVANTAGE"
+  | "USPS_PRIORITY_MAIL"
+  | "USPS_PRIORITY_MAIL_PADDED_FLAT_RATE"
+  | "USPS_PRIORITY_MAIL_MEDIUM_FLAT_RATE";
+
+export type PackageType =
+  | "Letter"
+  | "Large Envelope / Flat"
+  | "Package/Thick Envelope"
+  | "Flat Rate Envelope"
+  | "Medium Flat Rate Box"
+  | "Large Flat Rate Box";
+
+export interface BookPhysicalDimensions {
+  weightOz: number;
+  weightLbs: number;
+  lengthInches: number;
+  widthInches: number;
+  thicknessInches: number;
+  pageCount?: number | null;
+  bindingFormat?: string | null;
+  packageType: PackageType;
+}
+
+export interface ShippingRateQuote {
+  serviceId: UspsShippingService;
+  carrier: "USPS";
+  serviceName: string;
+  rate: number;
+  estimatedDeliveryDays: string;
+  description: string;
+  isCompliantMediaMail: boolean;
+  requiresSignature: boolean;
+  insuranceIncluded: number;
+  isRecommended: boolean;
+  recommendationReason?: string;
+}
+
+export interface ShippingRateSelectionResult {
+  isbn: string;
+  weightOz: number;
+  dimensions: {
+    length: number;
+    width: number;
+    thickness: number;
+  };
+  packageType: PackageType;
+  selectedRate: ShippingRateQuote;
+  availableRates: ShippingRateQuote[];
+  isHighValueRouted: boolean;
+}
+
+

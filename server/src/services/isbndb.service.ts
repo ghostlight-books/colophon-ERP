@@ -13,6 +13,12 @@ export interface IsbndbBookData {
   subcategory: string | null;
   subjects: string[];
   tags: string[];
+  dimensionsRaw?: string | null;
+  weightRaw?: string | number | null;
+  dimensionsStructured?: any;
+  pages?: number | null;
+  binding?: string | null;
+  format?: string | null;
 }
 
 const GENRE_RULES: Array<[string, string[]]> = [
@@ -124,6 +130,12 @@ export async function lookupIsbndb(isbn: string): Promise<IsbndbBookData | null>
         image?: string;
         subjects?: string[];
         msrp?: number | string;
+        dimensions?: string;
+        dimensions_structured?: any;
+        weight?: string | number;
+        pages?: number | string;
+        binding?: string;
+        format?: string;
       };
     };
 
@@ -141,6 +153,14 @@ export async function lookupIsbndb(isbn: string): Promise<IsbndbBookData | null>
       if (!isNaN(parsed) && parsed > 0) price = parsed;
     }
 
+    let parsedPages: number | null = null;
+    if (typeof book.pages === "number" && book.pages > 0) {
+      parsedPages = book.pages;
+    } else if (typeof book.pages === "string") {
+      const p = parseInt(book.pages.replace(/[^0-9]/g, ""), 10);
+      if (!isNaN(p) && p > 0) parsedPages = p;
+    }
+
     return {
       isbn: cleanIsbn,
       title: book.title_long || book.title || null,
@@ -154,6 +174,12 @@ export async function lookupIsbndb(isbn: string): Promise<IsbndbBookData | null>
       subcategory: classification.subcategory,
       subjects,
       tags: classification.tags,
+      dimensionsRaw: book.dimensions || null,
+      weightRaw: book.weight ?? null,
+      dimensionsStructured: book.dimensions_structured || null,
+      pages: parsedPages,
+      binding: book.binding || null,
+      format: book.format || null,
     };
   } catch (error) {
     console.warn("ISBNdb API lookup failed for " + isbn, error);

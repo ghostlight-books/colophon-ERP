@@ -44,6 +44,17 @@ model IsbnLookupCache {
   labelTitle       String?
   source           String
   mediaType        String   @default("Book")
+  weight           Float?
+  weightUnit       String?  @default("oz")
+  length           Float?
+  width            Float?
+  thickness        Float?
+  dimensionUnit    String?  @default("in")
+  pageCount        Int?
+  bindingFormat    String?
+  packageType      String?  @default("Package/Thick Envelope")
+  suggestedShippingService String?
+  estimatedShippingCost   Float?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   scanEvents       ScanEvent[]

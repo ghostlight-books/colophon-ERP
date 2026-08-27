@@ -20,6 +20,8 @@ import { scanInventoryOpportunities } from "./services/recommendations/ebayOppor
 import { runRulesEvaluationForStore } from "./services/rules/ebayRules.service.js";
 import { processEbayWebhookEvent, handleEbayWebhookChallenge } from "./services/ebay/ebayWebhook.service.js";
 import { acquireReservationLock, releaseReservationLock, handleLocalSaleAndSync } from "./services/inventory/concurrency.service.js";
+import { autoSelectShippingRate, quoteAllShippingRates } from "./services/shipping/shippingRate.service.js";
+import { resolveBookDimensions } from "./services/isbn/dimensions.service.js";
 
 type OpsConnector = {
   key: string;
@@ -812,6 +814,93 @@ export function createApp(): express.Express {
       next(error);
     }
   });
+
+  app.post("/api/shipping/calculate-rates", (req, res, next) => {
+    try {
+      const {
+        isbn = "manual-package",
+        weightOz = 16,
+        length = 9.0,
+        width = 6.0,
+        thickness = 1.0,
+        itemPrice = 0,
+        packageType,
+        requireSignature,
+      } = req.body as {
+        isbn?: string;
+        weightOz?: number;
+        length?: number;
+        width?: number;
+        thickness?: number;
+        itemPrice?: number;
+        packageType?: any;
+        requireSignature?: boolean;
+      };
+
+      const dimensions = resolveBookDimensions({
+        weightRaw: weightOz,
+        dimensionsStructured: {
+          length: { value: length },
+          width: { value: width },
+          height: { value: thickness },
+        },
+      });
+
+      const result = autoSelectShippingRate({
+        isbn,
+        weightOz: typeof weightOz === "number" ? weightOz : dimensions.weightOz,
+        length: typeof length === "number" ? length : dimensions.lengthInches,
+        width: typeof width === "number" ? width : dimensions.widthInches,
+        thickness: typeof thickness === "number" ? thickness : dimensions.thicknessInches,
+        itemPrice: typeof itemPrice === "number" ? itemPrice : 0,
+        isBookMedia: true,
+        packageTypeOverride: packageType,
+        requireSignatureOverride: requireSignature,
+      }, dimensions);
+
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/shipping/rates/:isbn", async (req, res, next) => {
+    try {
+      const product = await prisma.isbnLookupCache.findUnique({ where: { isbn: req.params.isbn } });
+      if (!product) {
+        res.status(404).json({ error: "Book not found." });
+        return;
+      }
+
+      const dimensions = resolveBookDimensions({
+        weightRaw: product.weight,
+        dimensionsStructured: product.length && product.width ? {
+          length: { value: product.length },
+          width: { value: product.width },
+          height: { value: product.thickness ?? 1.0 },
+        } : null,
+        pages: product.pageCount,
+        binding: product.bindingFormat,
+        title: product.title,
+        description: product.description,
+      });
+
+      const result = autoSelectShippingRate({
+        isbn: product.isbn,
+        weightOz: dimensions.weightOz,
+        length: dimensions.lengthInches,
+        width: dimensions.widthInches,
+        thickness: dimensions.thicknessInches,
+        itemPrice: product.listPrice ?? product.thriftbooksPrice ?? 0,
+        isBookMedia: true,
+      }, dimensions);
+
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   
   app.get("/api/health/services", async (req, res) => {
     try {
@@ -978,11 +1067,54 @@ export function createApp(): express.Express {
 
   app.patch("/api/inventory/products/:isbn", async (req, res, next) => {
     try {
-      const input = req.body as { title?: string; author?: string; publisher?: string; description?: string; category?: string; subcategory?: string; mediaType?: string; seoKeywords?: string; seoTitle?: string; seoDescription?: string; catalogTags?: string };
-      const product = await prisma.isbnLookupCache.update({ where: { isbn: req.params.isbn }, data: {
-        title: input.title?.trim() || null, author: input.author?.trim() || null, publisher: input.publisher?.trim() || null, description: input.description?.trim() || null,
-        category: input.category?.trim() || null, subcategory: input.subcategory?.trim() || null, mediaType: input.mediaType?.trim() || "Book", seoKeywords: input.seoKeywords?.trim() || null, seoTitle: input.seoTitle?.trim() || null, seoDescription: input.seoDescription?.trim() || null, catalogTags: input.catalogTags?.trim() || null,
-      } });
+      const input = req.body as {
+        title?: string;
+        author?: string;
+        publisher?: string;
+        description?: string;
+        category?: string;
+        subcategory?: string;
+        mediaType?: string;
+        seoKeywords?: string;
+        seoTitle?: string;
+        seoDescription?: string;
+        catalogTags?: string;
+        weight?: number;
+        length?: number;
+        width?: number;
+        thickness?: number;
+        pageCount?: number;
+        bindingFormat?: string;
+        packageType?: string;
+        suggestedShippingService?: string;
+        estimatedShippingCost?: number;
+      };
+
+      const product = await prisma.isbnLookupCache.update({
+        where: { isbn: req.params.isbn },
+        data: {
+          title: input.title !== undefined ? (input.title?.trim() || null) : undefined,
+          author: input.author !== undefined ? (input.author?.trim() || null) : undefined,
+          publisher: input.publisher !== undefined ? (input.publisher?.trim() || null) : undefined,
+          description: input.description !== undefined ? (input.description?.trim() || null) : undefined,
+          category: input.category !== undefined ? (input.category?.trim() || null) : undefined,
+          subcategory: input.subcategory !== undefined ? (input.subcategory?.trim() || null) : undefined,
+          mediaType: input.mediaType !== undefined ? (input.mediaType?.trim() || "Book") : undefined,
+          seoKeywords: input.seoKeywords !== undefined ? (input.seoKeywords?.trim() || null) : undefined,
+          seoTitle: input.seoTitle !== undefined ? (input.seoTitle?.trim() || null) : undefined,
+          seoDescription: input.seoDescription !== undefined ? (input.seoDescription?.trim() || null) : undefined,
+          catalogTags: input.catalogTags !== undefined ? (input.catalogTags?.trim() || null) : undefined,
+          weight: typeof input.weight === "number" ? input.weight : undefined,
+          length: typeof input.length === "number" ? input.length : undefined,
+          width: typeof input.width === "number" ? input.width : undefined,
+          thickness: typeof input.thickness === "number" ? input.thickness : undefined,
+          pageCount: typeof input.pageCount === "number" ? input.pageCount : undefined,
+          bindingFormat: input.bindingFormat !== undefined ? (input.bindingFormat?.trim() || null) : undefined,
+          packageType: input.packageType !== undefined ? (input.packageType?.trim() || null) : undefined,
+          suggestedShippingService: input.suggestedShippingService !== undefined ? (input.suggestedShippingService?.trim() || null) : undefined,
+          estimatedShippingCost: typeof input.estimatedShippingCost === "number" ? input.estimatedShippingCost : undefined,
+        },
+      });
       res.json(product);
     } catch (error) { next(error); }
   });

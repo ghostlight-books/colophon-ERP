@@ -533,21 +533,46 @@ function IntakePage(): JSX.Element {
           <div className="w-full max-w-md rounded-2xl border border-white/70 bg-[#f7f7f8] p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-600">Condition check</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-600">Condition & Shipping Check</p>
                 <h2 className="mt-1 text-xl font-semibold text-slate-800">{pendingBook.title ?? "Scanned book"}</h2>
                 <p className="mt-1 text-sm text-slate-500">{pendingBook.author ?? "Author unavailable"} · {pendingBook.isbn}</p>
               </div>
               <button type="button" onClick={() => { setPendingBook(null); setBarcode(""); }} className="rounded-lg px-2 py-1 text-sm text-slate-500 hover:bg-white" aria-label="Cancel condition selection">Close</button>
             </div>
-            <p className="mt-4 rounded-xl bg-white/70 px-3 py-2 text-sm text-slate-600">
+            
+            {/* Physical Dimensions & Shipping Rate Summary */}
+            <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/80 p-3 text-xs text-slate-700">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-sky-900">Physical Dimensions & Weight:</span>
+                <span className="font-mono font-medium text-slate-800">
+                  {pendingBook.weightOz ? `${pendingBook.weightOz} oz (${((pendingBook.weightOz ?? 16) / 16).toFixed(2)} lbs)` : "16.0 oz"}
+                </span>
+              </div>
+              <div className="mt-1 flex items-center justify-between text-slate-600">
+                <span>Size & Binding:</span>
+                <span>
+                  {pendingBook.lengthInches ? `${pendingBook.lengthInches}" × ${pendingBook.widthInches}" × ${pendingBook.thicknessInches}"` : '9.0" × 6.0" × 1.0"'}
+                  {pendingBook.bindingFormat ? ` · ${pendingBook.bindingFormat}` : ""}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center justify-between border-t border-sky-200/60 pt-2">
+                <span className="font-semibold text-emerald-800">Auto-Selected Shipping:</span>
+                <span className="rounded-md bg-emerald-600 px-2 py-0.5 font-semibold text-white">
+                  {pendingBook.suggestedShippingService ?? "USPS Media Mail"}
+                  {pendingBook.estimatedShippingCost ? ` · $${pendingBook.estimatedShippingCost.toFixed(2)}` : " · $4.63"}
+                </span>
+              </div>
+            </div>
+
+            <p className="mt-3 rounded-xl bg-white/70 px-3 py-2 text-sm text-slate-600">
               Resale Value: {pendingBook.thriftbooksPrice === null ? "No value" : `$${pendingBook.thriftbooksPrice.toFixed(2)}`}. Select a condition to set the list price and bin.
             </p>
-            <div className="mt-4 grid gap-2">
+            <div className="mt-3 grid gap-2">
               {conditionOptions.map((option) => {
                 const listPrice = pendingBook.thriftbooksPrice === null ? null : Number((pendingBook.thriftbooksPrice * (1 - option.discount)).toFixed(2));
                 const container = getIntakeContainer(listPrice);
                 return (
-                  <button key={option.value} type="button" onClick={() => void handleConditionSelected(option.value)} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 text-left transition hover:border-sky-400 hover:bg-sky-50">
+                  <button key={option.value} type="button" onClick={() => void handleConditionSelected(option.value)} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left transition hover:border-sky-400 hover:bg-sky-50">
                     <span><span className="font-semibold text-slate-800">{option.value}</span><span className="ml-2 text-xs text-slate-500">{option.discount === 0 ? "Full price" : `${option.discount * 100}% off`}</span></span>
                     <span className="text-right text-sm font-semibold text-slate-700">{listPrice === null ? "No price" : `$${listPrice.toFixed(2)}`}<span className="block text-xs font-normal text-slate-400">{container}</span></span>
                   </button>
@@ -770,8 +795,18 @@ function IntakePage(): JSX.Element {
                       <dd className="text-right font-medium text-slate-700">{book.category ?? "Uncategorized"}</dd>
                       <dt>Subcategory</dt>
                       <dd className="text-right font-medium text-slate-700">{book.subcategory ?? "None"}</dd>
+                      <dt>Dimensions & Wt</dt>
+                      <dd className="text-right font-medium text-slate-700">
+                        {book.weightOz ? `${book.weightOz} oz` : "16 oz"}
+                        {book.lengthInches ? ` · ${book.lengthInches}"×${book.widthInches}"` : ""}
+                      </dd>
+                      <dt>Est. Shipping</dt>
+                      <dd className="text-right font-semibold text-emerald-700">
+                        {book.suggestedShippingService ? `${book.suggestedShippingService.replace("USPS ", "")}` : "Media Mail"}
+                        {book.estimatedShippingCost ? ` ($${book.estimatedShippingCost.toFixed(2)})` : " ($4.63)"}
+                      </dd>
                     </dl>
-                    <p className="mt-2 text-[11px] text-slate-400">Source: {book.source}</p>
+                    <p className="mt-2 text-[11px] text-slate-400">Source: {book.source}{book.bindingFormat ? ` · ${book.bindingFormat}` : ""}</p>
                     <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white/70 p-2.5 text-xs text-slate-600">
                       <p className="font-semibold text-slate-700">Inventory Label</p>
                       <p className="mt-1">SKU: {book.label.sku}</p>

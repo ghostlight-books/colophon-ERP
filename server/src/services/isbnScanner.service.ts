@@ -2,6 +2,9 @@ import { prisma } from "../config/database.js";
 import { lookupAbeBooksPrice } from "./abebooksScraper.service.js";
 import { lookupThriftbooksDetails } from "./thriftbooksScraper.service.js";
 import { lookupIsbndb, extractGenreAndCategory } from "./isbndb.service.js";
+import { resolveBookDimensions, queryGoogleBooksDimensions } from "./isbn/dimensions.service.js";
+import { autoSelectShippingRate, quoteAllShippingRates } from "./shipping/shippingRate.service.js";
+import type { PackageType, ShippingRateQuote, UspsShippingService } from "@colophon/shared";
 
 const PROVIDER_TIMEOUT_MS = 10000;
 const skuSequences = new Map<string, number>();
@@ -32,6 +35,19 @@ export interface BookLookup {
   subcategory: string | null;
   mediaType: string;
   sku: string;
+  // Dimensions & Physical Weight
+  weightOz?: number | null;
+  weightLbs?: number | null;
+  lengthInches?: number | null;
+  widthInches?: number | null;
+  thicknessInches?: number | null;
+  pageCount?: number | null;
+  bindingFormat?: string | null;
+  packageType?: PackageType;
+  // Shipping Rates & Services
+  suggestedShippingService?: string | null;
+  estimatedShippingCost?: number | null;
+  shippingQuotes?: ShippingRateQuote[];
   label: {
     sku: string;
     barcode: string;
@@ -39,6 +55,8 @@ export interface BookLookup {
     category: string | null;
     subcategory: string | null;
     price: number | null;
+    weightOz?: number | null;
+    shippingService?: string | null;
   };
   source: "ISBNdb" | "Open Library" | "Thriftbooks";
 }
@@ -87,6 +105,7 @@ function fromCache(record: {
   coverUrl: string | null;
   quantityOnHand: number;
   thriftbooksPrice: number | null;
+  listPrice?: number | null;
   category: string | null;
   subcategory: string | null;
   sku: string;
@@ -99,7 +118,51 @@ function fromCache(record: {
   seoTitle: string | null;
   seoDescription: string | null;
   catalogTags: string | null;
+  weight?: number | null;
+  weightUnit?: string | null;
+  length?: number | null;
+  width?: number | null;
+  thickness?: number | null;
+  dimensionUnit?: string | null;
+  pageCount?: number | null;
+  bindingFormat?: string | null;
+  packageType?: string | null;
+  suggestedShippingService?: string | null;
+  estimatedShippingCost?: number | null;
 }): BookLookup {
+  const physical = resolveBookDimensions({
+    weightRaw: record.weight,
+    dimensionsStructured: record.length && record.width ? {
+      length: { value: record.length },
+      width: { value: record.width },
+      height: { value: record.thickness ?? 1.0 },
+    } : null,
+    pages: record.pageCount,
+    binding: record.bindingFormat,
+    title: record.title,
+    description: record.description,
+  });
+
+  const quotes = quoteAllShippingRates({
+    isbn: record.isbn,
+    weightOz: physical.weightOz,
+    length: physical.lengthInches,
+    width: physical.widthInches,
+    thickness: physical.thicknessInches,
+    itemPrice: record.listPrice ?? record.thriftbooksPrice,
+    isBookMedia: true,
+  });
+
+  const selectedRate = autoSelectShippingRate({
+    isbn: record.isbn,
+    weightOz: physical.weightOz,
+    length: physical.lengthInches,
+    width: physical.widthInches,
+    thickness: physical.thicknessInches,
+    itemPrice: record.listPrice ?? record.thriftbooksPrice,
+    isBookMedia: true,
+  }, physical);
+
   const result: Omit<BookLookup, "label"> = {
     isbn: record.isbn,
     title: record.title ?? record.labelTitle,
@@ -117,13 +180,26 @@ function fromCache(record: {
     subcategory: record.subcategory,
     mediaType: record.mediaType,
     sku: record.sku,
-    source: "Open Library",
+    source: (record.source as any) || "Open Library",
+    weightOz: physical.weightOz,
+    weightLbs: physical.weightLbs,
+    lengthInches: physical.lengthInches,
+    widthInches: physical.widthInches,
+    thicknessInches: physical.thicknessInches,
+    pageCount: physical.pageCount,
+    bindingFormat: physical.bindingFormat,
+    packageType: (record.packageType as PackageType) || physical.packageType,
+    suggestedShippingService: record.suggestedShippingService || selectedRate.selectedRate?.serviceName,
+    estimatedShippingCost: record.estimatedShippingCost || selectedRate.selectedRate?.rate,
+    shippingQuotes: quotes,
   };
   return {
     ...result,
     label: {
       ...createLabel(result),
       title: record.labelTitle ?? record.title,
+      weightOz: physical.weightOz,
+      shippingService: selectedRate.selectedRate?.serviceName,
     },
   };
 }
@@ -150,6 +226,17 @@ async function saveToCache(book: BookLookup): Promise<void> {
       sku: book.sku,
       labelTitle: book.label.title,
       source: book.source,
+      weight: book.weightOz ?? null,
+      weightUnit: "oz",
+      length: book.lengthInches ?? null,
+      width: book.widthInches ?? null,
+      thickness: book.thicknessInches ?? null,
+      dimensionUnit: "in",
+      pageCount: book.pageCount ?? null,
+      bindingFormat: book.bindingFormat ?? null,
+      packageType: book.packageType ?? "Package/Thick Envelope",
+      suggestedShippingService: book.suggestedShippingService ?? null,
+      estimatedShippingCost: book.estimatedShippingCost ?? null,
     },
     update: {
       title: book.title,
@@ -169,6 +256,15 @@ async function saveToCache(book: BookLookup): Promise<void> {
       sku: book.sku,
       labelTitle: book.label.title,
       source: book.source,
+      weight: book.weightOz ?? null,
+      length: book.lengthInches ?? null,
+      width: book.widthInches ?? null,
+      thickness: book.thicknessInches ?? null,
+      pageCount: book.pageCount ?? null,
+      bindingFormat: book.bindingFormat ?? null,
+      packageType: book.packageType ?? "Package/Thick Envelope",
+      suggestedShippingService: book.suggestedShippingService ?? null,
+      estimatedShippingCost: book.estimatedShippingCost ?? null,
     },
   });
 }
@@ -382,6 +478,37 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
         price = tb?.price ?? await lookupAbeBooksPrice(normalized);
       }
 
+      const physical = resolveBookDimensions({
+        dimensionsRaw: isbndbData.dimensionsRaw,
+        dimensionsStructured: isbndbData.dimensionsStructured,
+        weightRaw: isbndbData.weightRaw,
+        pages: isbndbData.pages,
+        binding: isbndbData.binding,
+        format: isbndbData.format,
+        title: isbndbData.title,
+        description: isbndbData.description,
+      });
+
+      const quotes = quoteAllShippingRates({
+        isbn: normalized,
+        weightOz: physical.weightOz,
+        length: physical.lengthInches,
+        width: physical.widthInches,
+        thickness: physical.thicknessInches,
+        itemPrice: price,
+        isBookMedia: true,
+      });
+
+      const selectedRate = autoSelectShippingRate({
+        isbn: normalized,
+        weightOz: physical.weightOz,
+        length: physical.lengthInches,
+        width: physical.widthInches,
+        thickness: physical.thicknessInches,
+        itemPrice: price,
+        isBookMedia: true,
+      }, physical);
+
       const seo = generateCatalogContent(isbndbData.title, isbndbData.author, isbndbData.category, isbndbData.genre || isbndbData.subcategory, isbndbData.subjects);
       const sku = createSku(isbndbData.category, isbndbData.genre || isbndbData.subcategory, isbndbData.author);
       const bookLookup: BookLookup = {
@@ -399,6 +526,17 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
         subcategory: isbndbData.genre || isbndbData.subcategory,
         mediaType: "Book",
         sku,
+        weightOz: physical.weightOz,
+        weightLbs: physical.weightLbs,
+        lengthInches: physical.lengthInches,
+        widthInches: physical.widthInches,
+        thicknessInches: physical.thicknessInches,
+        pageCount: physical.pageCount,
+        bindingFormat: physical.bindingFormat,
+        packageType: physical.packageType,
+        suggestedShippingService: selectedRate.selectedRate?.serviceName,
+        estimatedShippingCost: selectedRate.selectedRate?.rate,
+        shippingQuotes: quotes,
         label: {
           sku,
           barcode: normalized,
@@ -406,6 +544,8 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
           category: isbndbData.category,
           subcategory: isbndbData.genre || isbndbData.subcategory,
           price,
+          weightOz: physical.weightOz,
+          shippingService: selectedRate.selectedRate?.serviceName,
         },
         source: "ISBNdb",
       };
@@ -426,6 +566,28 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
       }
       const classification = extractGenreAndCategory([], thriftbooksDetails?.category);
       const sku = createSku(classification.category, classification.genre || classification.subcategory, null);
+      const physical = resolveBookDimensions({
+        title: thriftbooksDetails?.title,
+      });
+      const quotes = quoteAllShippingRates({
+        isbn: normalized,
+        weightOz: physical.weightOz,
+        length: physical.lengthInches,
+        width: physical.widthInches,
+        thickness: physical.thicknessInches,
+        itemPrice: fallbackPrice,
+        isBookMedia: true,
+      });
+      const selectedRate = autoSelectShippingRate({
+        isbn: normalized,
+        weightOz: physical.weightOz,
+        length: physical.lengthInches,
+        width: physical.widthInches,
+        thickness: physical.thicknessInches,
+        itemPrice: fallbackPrice,
+        isBookMedia: true,
+      }, physical);
+
       const partial: BookLookup = {
         isbn: normalized,
         title: thriftbooksDetails?.title ?? null,
@@ -440,7 +602,27 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
         category: classification.category, // "Print Books"
         subcategory: classification.genre || classification.subcategory,
         sku,
-        label: { sku, barcode: normalized, title: thriftbooksDetails?.title ?? null, category: classification.category, subcategory: classification.genre || classification.subcategory, price: fallbackPrice },
+        weightOz: physical.weightOz,
+        weightLbs: physical.weightLbs,
+        lengthInches: physical.lengthInches,
+        widthInches: physical.widthInches,
+        thicknessInches: physical.thicknessInches,
+        pageCount: physical.pageCount,
+        bindingFormat: physical.bindingFormat,
+        packageType: physical.packageType,
+        suggestedShippingService: selectedRate.selectedRate?.serviceName,
+        estimatedShippingCost: selectedRate.selectedRate?.rate,
+        shippingQuotes: quotes,
+        label: {
+          sku,
+          barcode: normalized,
+          title: thriftbooksDetails?.title ?? null,
+          category: classification.category,
+          subcategory: classification.genre || classification.subcategory,
+          price: fallbackPrice,
+          weightOz: physical.weightOz,
+          shippingService: selectedRate.selectedRate?.serviceName,
+        },
         source: "Thriftbooks",
         mediaType: "Book",
       };
@@ -449,16 +631,53 @@ export async function lookupBookByIsbn(input: string): Promise<BookLookup | null
     }
 
     const classification = extractGenreAndCategory([], thriftbooksDetails?.category || book.subcategory);
+    const resolvedPriceFinal = fallbackPrice ?? book.thriftbooksPrice;
+    const physical = resolveBookDimensions({
+      title: book.title,
+      description: book.description,
+    });
+    const quotes = quoteAllShippingRates({
+      isbn: normalized,
+      weightOz: physical.weightOz,
+      length: physical.lengthInches,
+      width: physical.widthInches,
+      thickness: physical.thicknessInches,
+      itemPrice: resolvedPriceFinal,
+      isBookMedia: true,
+    });
+    const selectedRate = autoSelectShippingRate({
+      isbn: normalized,
+      weightOz: physical.weightOz,
+      length: physical.lengthInches,
+      width: physical.widthInches,
+      thickness: physical.thicknessInches,
+      itemPrice: resolvedPriceFinal,
+      isBookMedia: true,
+    }, physical);
+
     const result: BookLookup = {
       ...book,
-      thriftbooksPrice: fallbackPrice ?? book.thriftbooksPrice,
+      thriftbooksPrice: resolvedPriceFinal,
       category: "Print Books",
       subcategory: book.subcategory ?? classification.genre ?? classification.subcategory,
+      weightOz: physical.weightOz,
+      weightLbs: physical.weightLbs,
+      lengthInches: physical.lengthInches,
+      widthInches: physical.widthInches,
+      thicknessInches: physical.thicknessInches,
+      pageCount: physical.pageCount,
+      bindingFormat: physical.bindingFormat,
+      packageType: physical.packageType,
+      suggestedShippingService: selectedRate.selectedRate?.serviceName,
+      estimatedShippingCost: selectedRate.selectedRate?.rate,
+      shippingQuotes: quotes,
       label: {
         ...book.label,
         category: "Print Books",
         subcategory: book.subcategory ?? classification.genre ?? classification.subcategory,
-        price: fallbackPrice ?? book.thriftbooksPrice,
+        price: resolvedPriceFinal,
+        weightOz: physical.weightOz,
+        shippingService: selectedRate.selectedRate?.serviceName,
       },
     };
     await saveToCache(result);
