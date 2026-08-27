@@ -457,7 +457,7 @@ function IntakePage(): JSX.Element {
 
   return (
     <section className="grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/55 p-2 backdrop-blur-md">
+      <div className="relative z-30 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/55 p-2 backdrop-blur-md">
         <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-500">
           <button type="button" onClick={() => setActiveView("scan")} className={["rounded-full px-4 py-2.5", activeView === "scan" ? "bg-white text-slate-700 shadow-[0_5px_14px_rgba(76,86,103,0.12)]" : "hover:bg-white/70"].join(" ")}>Scan Session</button>
           <button type="button" onClick={() => setActiveView("history")} className={["rounded-full px-4 py-2.5", activeView === "history" ? "bg-white text-slate-700 shadow-[0_5px_14px_rgba(76,86,103,0.12)]" : "hover:bg-white/70"].join(" ")}>Intake History</button>

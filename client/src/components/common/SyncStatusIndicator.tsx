@@ -59,7 +59,7 @@ export default function SyncStatusIndicator({ className = "", showDetailsByDefau
   };
 
   return (
-    <div className={["relative inline-block text-left", className].join(" ")}>
+    <div className={["relative inline-block text-left", expanded ? "z-50" : "z-10", className].join(" ")}>
       <div className="flex flex-wrap items-center gap-2">
         {/* Main Sync Status Badge Button */}
         <button
@@ -140,23 +140,29 @@ export default function SyncStatusIndicator({ className = "", showDetailsByDefau
         )}
       </div>
 
-      {/* Expanded Sync Details Popover */}
+      {/* Expanded Sync Details Popover with Backdrop */}
       {expanded ? (
-        <div className="absolute left-0 top-full z-50 mt-2 w-80 rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-xl backdrop-blur-lg sm:w-96">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">System Sync Engine</p>
-              <h4 className="text-sm font-bold text-slate-800">Live Integration & Scraper Status</h4>
+        <>
+          <div
+            className="fixed inset-0 z-[90] bg-slate-900/15 backdrop-blur-[1px]"
+            onClick={() => setExpanded(false)}
+            aria-hidden="true"
+          />
+          <div className="absolute right-0 top-full z-[100] mt-2 w-80 rounded-2xl border border-slate-200/90 bg-white p-4 shadow-2xl backdrop-blur-xl sm:w-96">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">System Sync Engine</p>
+                <h4 className="text-sm font-bold text-slate-800">Live Integration & Scraper Status</h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpanded(false)}
+                className="rounded-lg p-1 text-xs text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Close sync status popover"
+              >
+                ✕
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setExpanded(false)}
-              className="rounded-lg p-1 text-xs text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-              aria-label="Close sync status popover"
-            >
-              ✕
-            </button>
-          </div>
 
           {/* Feedback banner */}
           {refreshFeedback ? (
@@ -323,6 +329,7 @@ export default function SyncStatusIndicator({ className = "", showDetailsByDefau
             </button>
           </div>
         </div>
+      </>
       ) : null}
     </div>
   );
