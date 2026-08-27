@@ -631,12 +631,12 @@ export function createApp(): express.Express {
         return;
       }
       const { storeUrl, config, syncInventory, syncOrders } = req.body as { storeUrl?: string; config?: Record<string, string>; syncInventory?: boolean; syncOrders?: boolean };
-      if (!storeUrl || !config) {
-        res.status(400).json({ error: "storeUrl and platform credentials are required." });
+      if (!storeUrl) {
+        res.status(400).json({ error: "storeUrl is required." });
         return;
       }
       await saveEcommerceIntegration(req.params.storeId, platform, storeUrl, config, syncInventory, syncOrders);
-      res.status(204).send();
+      res.json({ success: true });
     } catch (error) {
       next(error);
     }

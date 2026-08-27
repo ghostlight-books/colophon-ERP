@@ -37,28 +37,49 @@ function escapeHtml(value: string): string {
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
-  const body = (await response.json().catch(() => ({}))) as { message?: string; error?: string } & T;
+  const text = await response.text();
+  let body: any = {};
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = { message: text };
+  }
   if (!response.ok) {
-    throw new Error(body.message ?? body.error ?? `E-commerce request failed (${response.status})`);
+    const errDetail = body.errors
+      ? (typeof body.errors === "string" ? body.errors : JSON.stringify(body.errors))
+      : (body.message ?? body.error ?? `Request failed (${response.status})`);
+    throw new Error(errDetail);
   }
   return body;
 }
 
 class ShopifyAdapter implements EcommerceAdapter {
-  constructor(private readonly storeUrl: string, private readonly token: string) {}
+  private readonly baseUrl: string;
+
+  constructor(private readonly storeUrl: string, private readonly token: string) {
+    let url = storeUrl.trim().replace(/\/$/, "");
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      url = `https://${url}`;
+    }
+    this.baseUrl = url;
+  }
 
   private isLocalDevConnector(): boolean {
-    const normalized = this.storeUrl.trim().toLowerCase();
-    return normalized.includes("example-store") || normalized.includes("localhost") || normalized === "" || !this.token.trim();
+    const normalized = this.baseUrl.toLowerCase();
+    return normalized.includes("example-store") || normalized.includes("localhost") || !this.token.trim();
   }
 
   private async assignToCollection(productId: number, category: string | null): Promise<void> {
     if (!category) return;
     const headers = { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" };
-    const collections = await parseResponse<{ custom_collections?: Array<{ id?: number; title?: string }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/custom_collections.json?limit=250`, { headers }));
-    const existing = collections.custom_collections?.find((collection) => collection.title?.trim().toLowerCase() === category.trim().toLowerCase());
-    const collectionId = existing?.id ?? (await parseResponse<{ custom_collection?: { id?: number } }>(await fetch(`${this.storeUrl}/admin/api/2026-01/custom_collections.json`, { method: "POST", headers, body: JSON.stringify({ custom_collection: { title: category.trim(), published: true } }) }))).custom_collection?.id;
-    if (collectionId) await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/collects.json`, { method: "POST", headers, body: JSON.stringify({ collect: { product_id: productId, collection_id: collectionId } }) }));
+    try {
+      const collections = await parseResponse<{ custom_collections?: Array<{ id?: number; title?: string }> }>(await fetch(`${this.baseUrl}/admin/api/2024-01/custom_collections.json?limit=250`, { headers }));
+      const existing = collections.custom_collections?.find((collection) => collection.title?.trim().toLowerCase() === category.trim().toLowerCase());
+      const collectionId = existing?.id ?? (await parseResponse<{ custom_collection?: { id?: number } }>(await fetch(`${this.baseUrl}/admin/api/2024-01/custom_collections.json`, { method: "POST", headers, body: JSON.stringify({ custom_collection: { title: category.trim(), published: true } }) }))).custom_collection?.id;
+      if (collectionId) await parseResponse(await fetch(`${this.baseUrl}/admin/api/2024-01/collects.json`, { method: "POST", headers, body: JSON.stringify({ collect: { product_id: productId, collection_id: collectionId } }) }));
+    } catch {
+      // Collection assignment is optional
+    }
   }
 
   async updateInventoryLevel(sku: string, quantity: number): Promise<{ success: boolean; message?: string }> {
@@ -73,36 +94,36 @@ class ShopifyAdapter implements EcommerceAdapter {
       };
     }
 
-    const products = await parseResponse<{ products?: Array<{ variants?: Array<{ sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json?limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
+    const products = await parseResponse<{ products?: Array<{ variants?: Array<{ sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.baseUrl}/admin/api/2024-01/products.json?limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
     const variant = products.products?.flatMap((product) => product.variants ?? []).find((candidate) => candidate.sku === sku || (barcode && candidate.barcode === barcode));
     if (!variant?.inventory_item_id) {
       return { success: false, message: `Shopify SKU or barcode for ${sku} was not found.` };
     }
-    const locations = await parseResponse<{ locations?: Array<{ id?: number }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/locations.json`, { headers: { "X-Shopify-Access-Token": this.token } }));
+    const locations = await parseResponse<{ locations?: Array<{ id?: number }> }>(await fetch(`${this.baseUrl}/admin/api/2024-01/locations.json`, { headers: { "X-Shopify-Access-Token": this.token } }));
     const locationId = locations.locations?.find((location) => location.id)?.id;
     if (!locationId) return { success: false, message: "Shopify has no active inventory location." };
-    await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/inventory_levels/set.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ location_id: locationId, inventory_item_id: variant.inventory_item_id, available: Math.max(0, Math.floor(quantity)) }) }));
+    await parseResponse(await fetch(`${this.baseUrl}/admin/api/2024-01/inventory_levels/set.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ location_id: locationId, inventory_item_id: variant.inventory_item_id, available: Math.max(0, Math.floor(quantity)) }) }));
     return { success: true };
   }
 
   async syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number }): Promise<{ success: boolean; message?: string }> {
     if (this.isLocalDevConnector()) return { success: true };
-    const products = await parseResponse<{ products?: Array<{ id?: number; variants?: Array<{ sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json?limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
+    const products = await parseResponse<{ products?: Array<{ id?: number; variants?: Array<{ sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.baseUrl}/admin/api/2024-01/products.json?limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
     const matchedProduct = products.products?.find((product) => product.variants?.some((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode)));
     const variant = matchedProduct?.variants?.find((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode));
     const visibleDescription = [item.author ? `<p><strong>Author:</strong> ${escapeHtml(item.author)}</p>` : "", item.description ? `<p>${escapeHtml(item.description)}</p>` : ""].filter(Boolean).join("");
     const productPayload = { title: item.title, body_html: visibleDescription, vendor: item.author ?? "", product_type: item.category ?? "Book", tags: item.tags.join(", "), metafields: [{ namespace: "custom", key: "author", type: "single_line_text_field", value: item.author ?? "" }, { namespace: "global", key: "title_tag", type: "single_line_text_field", value: item.seoTitle ?? item.title }, { namespace: "global", key: "description_tag", type: "multi_line_text_field", value: item.seoDescription ?? item.description ?? item.title }], ...(item.coverUrl ? { images: [{ src: item.coverUrl }] } : {}) };
     if (matchedProduct?.id) {
-      await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/products/${matchedProduct.id}.json`, { method: "PUT", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ product: productPayload }) }));
+      await parseResponse(await fetch(`${this.baseUrl}/admin/api/2024-01/products/${matchedProduct.id}.json`, { method: "PUT", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ product: productPayload }) }));
     }
-    const created = variant?.inventory_item_id ? { product: { id: matchedProduct?.id, variants: [{ inventory_item_id: variant.inventory_item_id }] } } : await parseResponse<{ product?: { id?: number; variants?: Array<{ inventory_item_id?: number }> } }>(await fetch(`${this.storeUrl}/admin/api/2026-01/products.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ product: { ...productPayload, status: "active", variants: [{ sku: item.sku, barcode: item.barcode, price: item.price.toFixed(2), inventory_management: "shopify" }] } }) }));
+    const created = variant?.inventory_item_id ? { product: { id: matchedProduct?.id, variants: [{ inventory_item_id: variant.inventory_item_id }] } } : await parseResponse<{ product?: { id?: number; variants?: Array<{ inventory_item_id?: number }> } }>(await fetch(`${this.baseUrl}/admin/api/2024-01/products.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ product: { ...productPayload, status: "active", variants: [{ sku: item.sku, barcode: item.barcode, price: item.price.toFixed(2), inventory_management: "shopify" }] } }) }));
     if (created.product?.id) await this.assignToCollection(created.product.id, item.category);
     const createdInventoryItemId = created.product?.variants?.[0]?.inventory_item_id;
     if (!createdInventoryItemId) return { success: false, message: `Shopify product could not be created for ${item.sku}.` };
-    const locations = await parseResponse<{ locations?: Array<{ id?: number }> }>(await fetch(`${this.storeUrl}/admin/api/2026-01/locations.json`, { headers: { "X-Shopify-Access-Token": this.token } }));
+    const locations = await parseResponse<{ locations?: Array<{ id?: number }> }>(await fetch(`${this.baseUrl}/admin/api/2024-01/locations.json`, { headers: { "X-Shopify-Access-Token": this.token } }));
     const locationId = locations.locations?.find((location) => location.id)?.id;
     if (!locationId) return { success: false, message: "Shopify has no active inventory location." };
-    await parseResponse(await fetch(`${this.storeUrl}/admin/api/2026-01/inventory_levels/set.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ location_id: locationId, inventory_item_id: createdInventoryItemId, available: Math.max(0, Math.floor(item.quantity)) }) }));
+    await parseResponse(await fetch(`${this.baseUrl}/admin/api/2024-01/inventory_levels/set.json`, { method: "POST", headers: { "X-Shopify-Access-Token": this.token, "Content-Type": "application/json" }, body: JSON.stringify({ location_id: locationId, inventory_item_id: createdInventoryItemId, available: Math.max(0, Math.floor(item.quantity)) }) }));
     return { success: true };
   }
 
@@ -111,23 +132,27 @@ class ShopifyAdapter implements EcommerceAdapter {
       return [];
     }
 
-    const result = await parseResponse<{ orders?: unknown[] }>(await fetch(`${this.storeUrl}/admin/api/2026-01/orders.json?status=any&limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
+    const result = await parseResponse<{ orders?: unknown[] }>(await fetch(`${this.baseUrl}/admin/api/2024-01/orders.json?status=any&limit=250`, { headers: { "X-Shopify-Access-Token": this.token } }));
     return result.orders ?? [];
   }
 
   async checkConnection(): Promise<{ connected: boolean; message: string }> {
     try {
-      const response = await fetch(`${this.storeUrl}/admin/api/2026-01/shop.json`, {
+      const response = await fetch(`${this.baseUrl}/admin/api/2024-01/shop.json`, {
         headers: { "X-Shopify-Access-Token": this.token },
       });
       if (!response.ok) {
+        const text = await response.text();
+        let body: any = {};
+        try { body = JSON.parse(text); } catch { body = { message: text }; }
+        const reason = body.errors ? (typeof body.errors === "string" ? body.errors : JSON.stringify(body.errors)) : `HTTP ${response.status} (${response.statusText})`;
         return {
           connected: false,
-          message: `Shopify returned HTTP ${response.status} (${response.statusText}). Check your Admin API Access Token and permissions.`,
+          message: `Shopify check failed: ${reason}. Verify your domain and Admin API Access Token.`,
         };
       }
       const data = (await response.json()) as { shop?: { name?: string; myshopify_domain?: string } };
-      const storeName = data.shop?.name ?? data.shop?.myshopify_domain ?? this.storeUrl;
+      const storeName = data.shop?.name ?? data.shop?.myshopify_domain ?? this.baseUrl;
       return { connected: true, message: `Connected to Shopify store: ${storeName}` };
     } catch (error) {
       return { connected: false, message: error instanceof Error ? error.message : "Shopify authorization could not be verified." };
@@ -169,26 +194,40 @@ class WooCommerceAdapter implements EcommerceAdapter {
   }
 }
 
-export async function saveEcommerceIntegration(storeId: string, platform: EcommercePlatform, storeUrl: string, config: IntegrationConfig, syncInventory = true, syncOrders = true): Promise<void> {
-  if (platform === "shopify" && !config.accessToken) {
-    throw new Error("Shopify access token is required.");
-  }
-  if (platform === "woocommerce" && (!config.consumerKey || !config.consumerSecret)) {
-    throw new Error("WooCommerce consumer key and secret are required.");
-  }
-
+export async function saveEcommerceIntegration(storeId: string, platform: EcommercePlatform, storeUrl: string, config?: IntegrationConfig, syncInventory = true, syncOrders = true): Promise<void> {
   const store = await prisma.store.upsert({
     where: { slug: storeId },
     update: {},
     create: { slug: storeId, storeName: "Ghostlight Books", ownerEmail: "owner@ghostlightbooks.com" },
   });
 
+  const existing = await prisma.storeEcommerceIntegration.findUnique({
+    where: { storeId_platform: { storeId: store.id, platform } },
+  });
+
+  let credentialsToStore = existing?.encryptedCredentials;
+
+  if (config && Object.keys(config).length > 0) {
+    if (config.accessToken || (config.consumerKey && config.consumerSecret)) {
+      credentialsToStore = encryptSecret(JSON.stringify(config));
+    }
+  }
+
+  if (!credentialsToStore) {
+    if (platform === "shopify") {
+      throw new Error("Shopify Admin API access token (starts with shpat_) is required.");
+    }
+    if (platform === "woocommerce") {
+      throw new Error("WooCommerce consumer key and secret are required.");
+    }
+  }
+
   const formattedUrl = normalizeUrl(storeUrl.startsWith("http") ? storeUrl : `https://${storeUrl}`);
 
   await prisma.storeEcommerceIntegration.upsert({
     where: { storeId_platform: { storeId: store.id, platform } },
-    create: { storeId: store.id, platform, storeUrl: formattedUrl, encryptedCredentials: encryptSecret(JSON.stringify(config)), syncInventory, syncOrders },
-    update: { storeUrl: formattedUrl, encryptedCredentials: encryptSecret(JSON.stringify(config)), syncInventory, syncOrders },
+    create: { storeId: store.id, platform, storeUrl: formattedUrl, encryptedCredentials: credentialsToStore!, syncInventory, syncOrders },
+    update: { storeUrl: formattedUrl, encryptedCredentials: credentialsToStore!, syncInventory, syncOrders },
   });
 }
 

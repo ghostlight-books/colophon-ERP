@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api";
+const rawApiBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+const API_ROOT = rawApiBase.replace(/\/$/, "").replace(/\/api$/, "");
+const API_BASE = `${API_ROOT}/api`;
 
 type ShopifyConnection = {
   platform: "shopify";
