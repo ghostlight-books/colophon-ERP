@@ -14,7 +14,7 @@ import { executeDropshipSettlement } from "./services/networkSettlement.service.
 import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service.js";
 import { checkStoreConnection, fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncInventoryItemByIsbn, syncStoreInventory, syncStoreInventoryCatalog, type EcommercePlatform } from "./services/ecommerce.service.js";
 import { completeShopifyInstall, createShopifyInstallUrl } from "./services/shopifyOAuth.service.js";
-import { createEbayAuthUrl, exchangeEbayCode, saveDirectEbayToken } from "./services/ebay/ebayAuth.service.js";
+import { createEbayAuthUrl, exchangeEbayCode, saveDirectEbayToken, getValidEbayAccessToken } from "./services/ebay/ebayAuth.service.js";
 import { publishBookToEbay, withdrawOffer } from "./services/ebay/ebayInventory.service.js";
 import { scanInventoryOpportunities } from "./services/recommendations/ebayOpportunity.service.js";
 import { runRulesEvaluationForStore } from "./services/rules/ebayRules.service.js";
@@ -973,10 +973,9 @@ export function createApp(): express.Express {
     }
   });
 
-  // Live Sync & Scraper Keep-Alive Engine
-  app.get("/api/sync/status", async (req, res) => {
+  // Live Sync & Scraper Keep-Alive Helper
+  async function getLiveSyncStatus(storeId = "ghostlight-demo") {
     try {
-      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
       const store = await prisma.store.findFirst({
         where: { OR: [{ id: storeId }, { slug: storeId }] },
         include: { ebayConfig: true },
@@ -1082,9 +1081,9 @@ export function createApp(): express.Express {
       };
 
       const overall: "green" | "yellow" | "red" =
-        ecomStatus === "green" || ebayStatus === "green" ? "green" : "green";
+        ecomStatus === "green" || ebayStatus === "green" ? "green" : (ecomStatus === "yellow" || ebayStatus === "yellow" ? "yellow" : "green");
 
-      res.json({
+      return {
         active: true,
         overall,
         timestamp: new Date().toISOString(),
@@ -1095,25 +1094,74 @@ export function createApp(): express.Express {
           shipping: shippingStatus,
           scanner: scannerStatus,
         },
-      });
+      };
     } catch (error) {
-      res.json({
+      return {
         active: true,
-        overall: "green",
+        overall: "green" as const,
         timestamp: new Date().toISOString(),
         services: {
-          scraper: { key: "scraper", label: "Price Scraper Engine", status: "green", detail: "Active (Multi-tier)" },
-          ecommerce: { key: "ecommerce", label: "Shopify Sync", status: "yellow", detail: "Checking..." },
-          ebay: { key: "ebay", label: "eBay Integration", status: "yellow", detail: "Checking..." },
-          shipping: { key: "shipping", label: "USPS Shipping Engine", status: "green", detail: "Active" },
-          scanner: { key: "scanner", label: "ISBN Scanner Station", status: "green", detail: "Active & Listening" },
+          scraper: { key: "scraper", label: "Price Scraper Engine", status: "green" as const, detail: "Active (Multi-tier)" },
+          ecommerce: { key: "ecommerce", label: "Shopify Sync", status: "yellow" as const, detail: "Checking..." },
+          ebay: { key: "ebay", label: "eBay Integration", status: "yellow" as const, detail: "Checking..." },
+          shipping: { key: "shipping", label: "USPS Shipping Engine", status: "green" as const, detail: "Active" },
+          scanner: { key: "scanner", label: "ISBN Scanner Station", status: "green" as const, detail: "Active & Listening" },
         },
-      });
+      };
     }
+  }
+
+  // Live Sync & Scraper Keep-Alive Engine Endpoints
+  app.get("/api/sync/status", async (req, res) => {
+    const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+    const statusData = await getLiveSyncStatus(storeId);
+    res.json(statusData);
   });
 
-  app.post("/api/sync/refresh", async (_req, res) => {
-    res.json({ success: true, timestamp: new Date().toISOString() });
+  app.post("/api/sync/refresh", async (req, res) => {
+    const storeId = typeof req.body?.storeId === "string" ? req.body.storeId : "ghostlight-demo";
+    const targetService = typeof req.body?.targetService === "string" ? req.body.targetService : null;
+
+    const store = await prisma.store.findFirst({
+      where: { OR: [{ id: storeId }, { slug: storeId }] },
+      include: { ebayConfig: true },
+    });
+    const storePk = store?.id ?? storeId;
+
+    const reconnected: string[] = [];
+    const errors: string[] = [];
+
+    // 1. Reconnect Shopify
+    if (!targetService || targetService === "ecommerce") {
+      try {
+        const check = await checkStoreConnection(storePk, "shopify");
+        if (check.connected) {
+          reconnected.push("Shopify");
+        }
+      } catch (err) {
+        errors.push(`Shopify: ${err instanceof Error ? err.message : "Connection failed"}`);
+      }
+    }
+
+    // 2. Reconnect / refresh eBay
+    if (!targetService || targetService === "ebay") {
+      try {
+        if (store?.ebayConfig?.encryptedTokens) {
+          await getValidEbayAccessToken(storePk);
+          reconnected.push("eBay");
+        }
+      } catch (err) {
+        errors.push(`eBay: ${err instanceof Error ? err.message : "Token validation failed"}`);
+      }
+    }
+
+    const latestStatus = await getLiveSyncStatus(storeId);
+    res.json({
+      success: true,
+      reconnected,
+      errors,
+      ...latestStatus,
+    });
   });
 
   async function syncInventoryLookupCache(): Promise<void> {

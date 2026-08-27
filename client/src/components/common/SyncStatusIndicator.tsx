@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useSyncStatus } from "../../services/syncStatus.service";
+import { useSyncStatus, type SyncRefreshResult } from "../../services/syncStatus.service";
 
 interface SyncStatusIndicatorProps {
   className?: string;
@@ -10,6 +10,8 @@ interface SyncStatusIndicatorProps {
 export default function SyncStatusIndicator({ className = "", showDetailsByDefault = false }: SyncStatusIndicatorProps): JSX.Element {
   const { status, loading, lastRefreshed, refreshNow } = useSyncStatus(12000);
   const [expanded, setExpanded] = useState(showDetailsByDefault);
+  const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null);
+  const [refreshingService, setRefreshingService] = useState<string | null>(null);
 
   const overall = status?.overall ?? "green";
   const services = status?.services;
@@ -22,6 +24,8 @@ export default function SyncStatusIndicator({ className = "", showDetailsByDefau
   const activeCount = services
     ? Object.values(services).filter((s) => s.status === "green").length
     : 4;
+
+  const isDegradedOrInactive = overall !== "green" || (services && Object.values(services).some((s) => s.status !== "green"));
 
   const dotColor =
     overall === "green"
@@ -37,9 +41,26 @@ export default function SyncStatusIndicator({ className = "", showDetailsByDefau
         ? "border-amber-300/80"
         : "border-rose-300/80";
 
+  const handleRefreshClick = async (targetService?: string) => {
+    if (targetService) setRefreshingService(targetService);
+    try {
+      const result: SyncRefreshResult = await refreshNow(targetService);
+      if (result.reconnected && result.reconnected.length > 0) {
+        setRefreshFeedback(`✓ Reconnected: ${result.reconnected.join(", ")}`);
+      } else if (result.errors && result.errors.length > 0) {
+        setRefreshFeedback(`⚠️ ${result.errors[0]}`);
+      } else {
+        setRefreshFeedback("✓ Connection check completed");
+      }
+      setTimeout(() => setRefreshFeedback(null), 4000);
+    } finally {
+      setRefreshingService(null);
+    }
+  };
+
   return (
     <div className={["relative inline-block text-left", className].join(" ")}>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {/* Main Sync Status Badge Button */}
         <button
           type="button"
@@ -88,19 +109,35 @@ export default function SyncStatusIndicator({ className = "", showDetailsByDefau
           </span>
         </button>
 
-        {/* Quick Refresh / Reconnect Button */}
-        <button
-          type="button"
-          onClick={() => void refreshNow()}
-          disabled={loading}
-          className="grid h-8 w-8 place-items-center rounded-full border border-slate-200/80 bg-white/90 text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-white hover:text-slate-900 disabled:opacity-50"
-          title="Force refresh live sync connections"
-          aria-label="Refresh sync status"
-        >
-          <span className={["inline-block text-xs transition-transform duration-500", loading ? "animate-spin" : ""].join(" ")}>
-            🔄
-          </span>
-        </button>
+        {/* Dedicated Highlighted "Refresh Connection" button if not fully active */}
+        {isDegradedOrInactive ? (
+          <button
+            type="button"
+            onClick={() => void handleRefreshClick()}
+            disabled={loading}
+            className="flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-500 px-3 py-1.5 text-xs font-bold text-white shadow-[0_2px_8px_rgba(245,158,11,0.35)] transition hover:bg-amber-600 active:scale-95 disabled:opacity-50"
+            title="Click to refresh and re-test all inactive connections"
+          >
+            <span className={["inline-block text-xs transition-transform duration-500", loading ? "animate-spin" : ""].join(" ")}>
+              🔄
+            </span>
+            <span>{loading ? "Reconnecting..." : "Refresh Connection"}</span>
+          </button>
+        ) : (
+          /* Standard Quick Refresh Button */
+          <button
+            type="button"
+            onClick={() => void handleRefreshClick()}
+            disabled={loading}
+            className="grid h-8 w-8 place-items-center rounded-full border border-slate-200/80 bg-white/90 text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-white hover:text-slate-900 disabled:opacity-50"
+            title="Force refresh live sync connections"
+            aria-label="Refresh sync status"
+          >
+            <span className={["inline-block text-xs transition-transform duration-500", loading ? "animate-spin" : ""].join(" ")}>
+              🔄
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Expanded Sync Details Popover */}
@@ -120,6 +157,13 @@ export default function SyncStatusIndicator({ className = "", showDetailsByDefau
               ✕
             </button>
           </div>
+
+          {/* Feedback banner */}
+          {refreshFeedback ? (
+            <div className="mt-2.5 rounded-lg bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-800 border border-sky-200">
+              {refreshFeedback}
+            </div>
+          ) : null}
 
           <div className="mt-3 space-y-2.5 text-xs">
             {/* 1. Price Scraper Stack */}
@@ -170,11 +214,21 @@ export default function SyncStatusIndicator({ className = "", showDetailsByDefau
                   </span>
                 </div>
                 <p className="mt-0.5 text-slate-600">{services?.ecommerce.detail ?? "Shopify channel sync"}</p>
-                {services?.ecommerce.path ? (
-                  <Link to={services.ecommerce.path} className="mt-1 inline-block font-semibold text-sky-600 hover:underline">
-                    Manage Shopify →
-                  </Link>
-                ) : null}
+                <div className="mt-1.5 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleRefreshClick("ecommerce")}
+                    disabled={loading}
+                    className="font-semibold text-sky-600 hover:text-sky-800 hover:underline disabled:opacity-50"
+                  >
+                    {refreshingService === "ecommerce" ? "Reconnecting..." : "⚡ Reconnect Shopify"}
+                  </button>
+                  {services?.ecommerce.path ? (
+                    <Link to={services.ecommerce.path} className="font-semibold text-slate-500 hover:text-slate-800 hover:underline">
+                      Settings →
+                    </Link>
+                  ) : null}
+                </div>
               </div>
             </div>
 
@@ -207,11 +261,21 @@ export default function SyncStatusIndicator({ className = "", showDetailsByDefau
                   </span>
                 </div>
                 <p className="mt-0.5 text-slate-600">{services?.ebay.detail ?? "eBay catalog & inventory publishing"}</p>
-                {services?.ebay.path ? (
-                  <Link to={services.ebay.path} className="mt-1 inline-block font-semibold text-sky-600 hover:underline">
-                    Open eBay Hub →
-                  </Link>
-                ) : null}
+                <div className="mt-1.5 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleRefreshClick("ebay")}
+                    disabled={loading}
+                    className="font-semibold text-sky-600 hover:text-sky-800 hover:underline disabled:opacity-50"
+                  >
+                    {refreshingService === "ebay" ? "Refreshing Token..." : "⚡ Refresh eBay Token"}
+                  </button>
+                  {services?.ebay.path ? (
+                    <Link to={services.ebay.path} className="font-semibold text-slate-500 hover:text-slate-800 hover:underline">
+                      eBay Hub →
+                    </Link>
+                  ) : null}
+                </div>
               </div>
             </div>
 
@@ -251,11 +315,11 @@ export default function SyncStatusIndicator({ className = "", showDetailsByDefau
             </span>
             <button
               type="button"
-              onClick={() => void refreshNow()}
+              onClick={() => void handleRefreshClick()}
               disabled={loading}
               className="font-bold text-sky-600 hover:text-sky-800 disabled:opacity-50"
             >
-              {loading ? "Refreshing..." : "Sync Now"}
+              {loading ? "Refreshing All..." : "Refresh All Connections"}
             </button>
           </div>
         </div>

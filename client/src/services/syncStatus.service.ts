@@ -41,16 +41,28 @@ export async function fetchSyncStatus(storeId = "ghostlight-demo"): Promise<Sync
   }
 }
 
-export async function triggerSyncRefresh(): Promise<boolean> {
+export type SyncRefreshResult = {
+  success: boolean;
+  reconnected: string[];
+  errors: string[];
+} & Partial<SyncStatusResponse>;
+
+export async function triggerSyncRefresh(targetService?: string, storeId = "ghostlight-demo"): Promise<SyncRefreshResult> {
   try {
     const res = await fetch(`${API_BASE}/api/sync/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(6000),
+      body: JSON.stringify({ targetService, storeId }),
+      signal: AbortSignal.timeout(10000),
     });
-    return res.ok;
-  } catch {
-    return false;
+    if (!res.ok) return { success: false, reconnected: [], errors: ["Refresh request failed"] };
+    return (await res.json()) as SyncRefreshResult;
+  } catch (err) {
+    return {
+      success: false,
+      reconnected: [],
+      errors: [err instanceof Error ? err.message : "Connection timeout"],
+    };
   }
 }
 
@@ -58,6 +70,7 @@ export function useSyncStatus(pollIntervalMs = 12000) {
   const [status, setStatus] = useState<SyncStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  const [lastActionResult, setLastActionResult] = useState<SyncRefreshResult | null>(null);
   const isMountedRef = useRef(true);
 
   const loadStatus = useCallback(async (showLoading = false) => {
@@ -75,11 +88,20 @@ export function useSyncStatus(pollIntervalMs = 12000) {
     }
   }, []);
 
-  const refreshNow = useCallback(async () => {
+  const refreshNow = useCallback(async (targetService?: string) => {
     setLoading(true);
-    await triggerSyncRefresh();
-    await loadStatus(false);
-    if (isMountedRef.current) setLoading(false);
+    const result = await triggerSyncRefresh(targetService);
+    if (isMountedRef.current) {
+      setLastActionResult(result);
+      if (result.services && result.overall) {
+        setStatus(result as SyncStatusResponse);
+        setLastRefreshed(new Date());
+      } else {
+        await loadStatus(false);
+      }
+      setLoading(false);
+    }
+    return result;
   }, [loadStatus]);
 
   useEffect(() => {
@@ -114,3 +136,4 @@ export function useSyncStatus(pollIntervalMs = 12000) {
     refreshNow,
   };
 }
+
