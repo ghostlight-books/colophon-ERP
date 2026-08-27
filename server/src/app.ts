@@ -435,10 +435,12 @@ export function createApp(): express.Express {
 
   app.get("/api/auth/shopify/install", async (req, res, next) => {
     try {
-      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "";
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
       const shop = typeof req.query.shop === "string" ? req.query.shop : "";
+      const clientId = typeof req.query.clientId === "string" ? req.query.clientId : undefined;
+      const clientSecret = typeof req.query.clientSecret === "string" ? req.query.clientSecret : undefined;
       if (!storeId || !shop) { res.status(400).json({ error: "storeId and shop are required." }); return; }
-      res.redirect(await createShopifyInstallUrl(storeId, shop));
+      res.redirect(await createShopifyInstallUrl(storeId, shop, clientId, clientSecret));
     } catch (error) { next(error); }
   });
 

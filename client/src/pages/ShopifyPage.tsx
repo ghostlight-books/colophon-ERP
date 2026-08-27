@@ -31,8 +31,11 @@ type ShopifyProductRow = {
 };
 
 function ShopifyPage(): JSX.Element {
-  const [storeUrl, setStoreUrl] = useState("");
+  const [storeUrl, setStoreUrl] = useState("https://auz45h-aw.myshopify.com");
+  const [authMethod, setAuthMethod] = useState<"keys" | "token">("keys");
   const [accessToken, setAccessToken] = useState("");
+  const [apiKey, setApiKey] = useState("71873a83f3e3525349a17c3b941cf0cf");
+  const [apiSecret, setApiSecret] = useState("");
   const [syncInventory, setSyncInventory] = useState(true);
   const [syncOrders, setSyncOrders] = useState(true);
   const [message, setMessage] = useState("Loading Shopify connection...");
@@ -48,7 +51,7 @@ function ShopifyPage(): JSX.Element {
         headers: { "X-Dev-Subdomain": "admin" },
       });
       if (!response.ok) {
-        setMessage("Enter your Shopify store URL and Admin API Access Token to connect.");
+        setMessage("Enter your Shopify store URL and API credentials to connect.");
         return;
       }
 
@@ -64,7 +67,7 @@ function ShopifyPage(): JSX.Element {
         setConnectionDetails({ connected: Boolean(status.connected), message: status.message ?? "Connected to Shopify." });
         setMessage(status.message ?? `Connected to ${shopify.storeUrl}`);
       } else {
-        setMessage("Enter your Shopify store URL and Admin API Access Token to connect.");
+        setMessage("Enter your Shopify store URL and API credentials to connect.");
       }
     } catch {
       setMessage("Shopify connection metadata is unavailable.");
@@ -75,14 +78,40 @@ function ShopifyPage(): JSX.Element {
     void loadConnection();
   }, []);
 
-  const saveConnection = async (): Promise<void> => {
+  const startOAuthAuthorize = (): void => {
     if (!storeUrl.trim()) {
-      setMessage("Enter your Shopify store URL (e.g. ghostlight-books.myshopify.com).");
+      setMessage("Enter your Shopify store URL.");
       return;
     }
-    if (!accessToken.trim() && !connection) {
-      setMessage("Enter your Shopify Admin API Access Token (starts with shpat_).");
+    const cleanShop = storeUrl.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
+    const installUrl = `${API_BASE}/auth/shopify/install?storeId=ghostlight-demo&shop=${encodeURIComponent(cleanShop)}&clientId=${encodeURIComponent(apiKey.trim())}&clientSecret=${encodeURIComponent(apiSecret.trim())}`;
+    window.location.href = installUrl;
+  };
+
+  const saveConnection = async (): Promise<void> => {
+    if (!storeUrl.trim()) {
+      setMessage("Enter your Shopify store URL (e.g. your-store.myshopify.com).");
       return;
+    }
+
+    let configPayload: { accessToken?: string; clientId?: string; clientSecret?: string } | undefined;
+
+    if (authMethod === "token") {
+      if (!accessToken.trim() && !connection) {
+        setMessage("Enter your Shopify Admin API Access Token (starts with shpat_).");
+        return;
+      }
+      if (accessToken.trim()) {
+        configPayload = { accessToken: accessToken.trim() };
+      }
+    } else {
+      if ((!apiKey.trim() || !apiSecret.trim()) && !connection) {
+        setMessage("Enter both your Shopify Client ID and Secret.");
+        return;
+      }
+      if (apiKey.trim() && apiSecret.trim()) {
+        configPayload = { clientId: apiKey.trim(), clientSecret: apiSecret.trim() };
+      }
     }
 
     setLoading(true);
@@ -94,7 +123,7 @@ function ShopifyPage(): JSX.Element {
         headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" },
         body: JSON.stringify({
           storeUrl: formattedUrl,
-          config: accessToken.trim() ? { accessToken: accessToken.trim() } : undefined,
+          config: configPayload,
           syncInventory,
           syncOrders,
         }),
@@ -114,6 +143,7 @@ function ShopifyPage(): JSX.Element {
       };
       setConnection(nextConnection);
       setAccessToken("");
+      setApiSecret("");
 
       // Test live status immediately
       const statusResponse = await fetch(`${API_BASE}/stores/ghostlight-demo/ecommerce/shopify/status`, { headers: { "X-Dev-Subdomain": "admin" } });
@@ -218,10 +248,30 @@ function ShopifyPage(): JSX.Element {
 
       <section className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-800">Shopify Admin API Connection</h2>
-          <p className="mt-1 text-xs text-slate-500">Connect your Shopify store using a Custom App Access Token to enable instant scan-to-Shopify product publishing.</p>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-800">Shopify Store Credentials</h2>
+              <p className="mt-0.5 text-xs text-slate-500">Connect your Shopify store to enable instant automatic product publishing upon barcode scan.</p>
+            </div>
+            <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-semibold text-slate-600">
+              <button
+                type="button"
+                onClick={() => setAuthMethod("keys")}
+                className={["rounded-lg px-3 py-1.5 transition", authMethod === "keys" ? "bg-white text-slate-900 shadow-sm" : "hover:text-slate-900"].join(" ")}
+              >
+                Client ID & Secret
+              </button>
+              <button
+                type="button"
+                onClick={() => setAuthMethod("token")}
+                className={["rounded-lg px-3 py-1.5 transition", authMethod === "token" ? "bg-white text-slate-900 shadow-sm" : "hover:text-slate-900"].join(" ")}
+              >
+                Access Token (shpat_)
+              </button>
+            </div>
+          </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid gap-3">
             <label className="grid gap-1 text-sm font-semibold text-slate-700">
               Shopify Store Domain / URL
               <input
@@ -231,16 +281,41 @@ function ShopifyPage(): JSX.Element {
                 placeholder="your-store.myshopify.com"
               />
             </label>
-            <label className="grid gap-1 text-sm font-semibold text-slate-700">
-              Admin API Access Token
-              <input
-                type="password"
-                value={accessToken}
-                onChange={(event) => setAccessToken(event.target.value)}
-                className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-sky-500"
-                placeholder={connection ? "•••••••••••••••• (Leave blank to keep current)" : "shpat_..."}
-              />
-            </label>
+
+            {authMethod === "keys" ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                  Client ID (API Key)
+                  <input
+                    value={apiKey}
+                    onChange={(event) => setApiKey(event.target.value)}
+                    className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-sky-500"
+                    placeholder="e.g. 71873a83f3e3525349a17c3b941cf0cf"
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                  Secret (Client Secret)
+                  <input
+                    type="password"
+                    value={apiSecret}
+                    onChange={(event) => setApiSecret(event.target.value)}
+                    className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-sky-500"
+                    placeholder={connection ? "•••••••••••••••• (Leave blank to keep current)" : "Paste your Secret here"}
+                  />
+                </label>
+              </div>
+            ) : (
+              <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                Admin API Access Token
+                <input
+                  type="password"
+                  value={accessToken}
+                  onChange={(event) => setAccessToken(event.target.value)}
+                  className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800 outline-none focus:border-sky-500"
+                  placeholder={connection ? "•••••••••••••••• (Leave blank to keep current)" : "shpat_..."}
+                />
+              </label>
+            )}
           </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-4">
@@ -265,26 +340,35 @@ function ShopifyPage(): JSX.Element {
               </label>
             </div>
 
-            <button
-              type="button"
-              onClick={() => void saveConnection()}
-              disabled={loading}
-              className="h-11 rounded-xl bg-sky-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-50"
-            >
-              {loading ? "Connecting..." : "Save & Test Connection"}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {authMethod === "keys" && (
+                <button
+                  type="button"
+                  onClick={() => startOAuthAuthorize()}
+                  disabled={loading}
+                  className="h-11 rounded-xl border border-sky-300 bg-sky-50 px-4 text-sm font-semibold text-sky-700 shadow-sm transition hover:bg-sky-100 disabled:opacity-50"
+                >
+                  Authorize with Shopify
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => void saveConnection()}
+                disabled={loading}
+                className="h-11 rounded-xl bg-sky-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-50"
+              >
+                {loading ? "Connecting..." : "Save & Test Connection"}
+              </button>
+            </div>
           </div>
 
           <div className="mt-5 rounded-2xl border border-sky-100 bg-sky-50/60 p-4 text-xs text-slate-600">
-            <p className="font-semibold text-sky-800">How to get your Shopify Access Token (1-minute setup):</p>
-            <ol className="mt-2 list-decimal space-y-1 pl-4 leading-relaxed">
-              <li>In your Shopify Admin, go to: <strong>Settings → Apps and sales channels → Develop apps</strong>.</li>
-              <li>Click <strong>Create an app</strong> (Name it <em>Colophon ERP</em>).</li>
-              <li>Under <strong>Configure Admin API scopes</strong>, enable:
-                <span className="font-mono text-[11px] text-sky-900 block mt-0.5">read_products, write_products, read_inventory, write_inventory, read_orders, read_locations</span>
-              </li>
-              <li>Click <strong>Install app</strong> and reveal the <strong>Admin API access token</strong> (starts with <code className="rounded bg-sky-100 px-1 py-0.5 font-mono">shpat_</code>).</li>
-              <li>Paste it into the field above and click <strong>Save & Test Connection</strong>.</li>
+            <p className="font-semibold text-sky-800">Shopify Partner App Connection Instructions:</p>
+            <ol className="mt-2 list-decimal space-y-1.5 pl-4 leading-relaxed">
+              <li>In your Shopify App setup, set <strong>App URL</strong> to: <code className="rounded bg-sky-100 px-1 py-0.5 font-mono">https://colophon-api.onrender.com</code></li>
+              <li>Set <strong>Allowed redirection URL(s)</strong> to: <code className="rounded bg-sky-100 px-1 py-0.5 font-mono">https://colophon-api.onrender.com/api/auth/shopify/callback</code></li>
+              <li>Paste your <strong>Secret</strong> from the dashboard into the Secret field above.</li>
+              <li>Click <strong>Authorize with Shopify</strong> to install and link your store in 1 click!</li>
             </ol>
           </div>
         </div>
