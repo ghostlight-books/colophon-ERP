@@ -14,6 +14,12 @@ import { executeDropshipSettlement } from "./services/networkSettlement.service.
 import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service.js";
 import { checkStoreConnection, fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncInventoryItemByIsbn, syncStoreInventory, syncStoreInventoryCatalog, type EcommercePlatform } from "./services/ecommerce.service.js";
 import { completeShopifyInstall, createShopifyInstallUrl } from "./services/shopifyOAuth.service.js";
+import { createEbayAuthUrl, exchangeEbayCode } from "./services/ebay/ebayAuth.service.js";
+import { publishBookToEbay, withdrawOffer } from "./services/ebay/ebayInventory.service.js";
+import { scanInventoryOpportunities } from "./services/recommendations/ebayOpportunity.service.js";
+import { runRulesEvaluationForStore } from "./services/rules/ebayRules.service.js";
+import { processEbayWebhookEvent, handleEbayWebhookChallenge } from "./services/ebay/ebayWebhook.service.js";
+import { acquireReservationLock, releaseReservationLock, handleLocalSaleAndSync } from "./services/inventory/concurrency.service.js";
 
 type OpsConnector = {
   key: string;
@@ -988,80 +994,6 @@ export function createApp(): express.Express {
     } catch (error) { next(error); }
   });
 
-  app.post("/api/inventory/bulk-update", async (req, res, next) => {
-    try {
-      const { isbns, updates, syncToShopify } = req.body as {
-        isbns: string[];
-        updates: {
-          category?: string;
-          subcategory?: string;
-          condition?: string;
-          mediaType?: string;
-          listPrice?: number | null;
-        };
-        syncToShopify?: boolean;
-      };
-
-      if (!Array.isArray(isbns) || isbns.length === 0) {
-        res.status(400).json({ error: "isbns array is required." });
-        return;
-      }
-
-      const dataToUpdate: Record<string, unknown> = {};
-      if (typeof updates?.category === "string" && updates.category.trim()) {
-        dataToUpdate.category = updates.category.trim();
-      }
-      if (typeof updates?.subcategory === "string") {
-        dataToUpdate.subcategory = updates.subcategory.trim() || null;
-      }
-      if (typeof updates?.condition === "string" && updates.condition.trim()) {
-        dataToUpdate.condition = updates.condition.trim();
-      }
-      if (typeof updates?.mediaType === "string" && updates.mediaType.trim()) {
-        dataToUpdate.mediaType = updates.mediaType.trim();
-      }
-      if (typeof updates?.listPrice === "number" || updates?.listPrice === null) {
-        dataToUpdate.listPrice = updates.listPrice;
-      }
-
-      if (Object.keys(dataToUpdate).length > 0) {
-        await prisma.isbnLookupCache.updateMany({
-          where: { isbn: { in: isbns } },
-          data: dataToUpdate,
-        });
-      }
-
-      if (syncToShopify) {
-        for (const isbn of isbns) {
-          await syncInventoryItemByIsbn("ghostlight-demo", isbn).catch((err) => {
-            console.warn("Failed to sync item to Shopify during bulk update", isbn, err);
-          });
-        }
-      }
-
-      res.json({ success: true, updatedCount: isbns.length });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.post("/api/inventory/bulk-delete", async (req, res, next) => {
-    try {
-      const { isbns } = req.body as { isbns: string[] };
-      if (!Array.isArray(isbns) || isbns.length === 0) {
-        res.status(400).json({ error: "isbns array is required." });
-        return;
-      }
-      await prisma.isbnLookupCache.updateMany({
-        where: { isbn: { in: isbns } },
-        data: { quantityOnHand: 0 },
-      });
-      res.json({ success: true, count: isbns.length });
-    } catch (error) {
-      next(error);
-    }
-  });
-
   app.post("/api/inventory/products/:isbn/pull-open-library", async (req, res, next) => {
     try {
       const metadata = await pullOpenLibraryMetadata(req.params.isbn);
@@ -1591,6 +1523,555 @@ export function createApp(): express.Express {
       environment: process.env.SQUARE_ENVIRONMENT ?? "sandbox",
       missing,
     });
+  });
+
+  // ==========================================
+  // eBay Two-Way Integration & Concurrency API
+  // ==========================================
+
+  app.get("/api/auth/ebay/install", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const clientId = typeof req.query.clientId === "string" ? req.query.clientId : undefined;
+      const ruName = typeof req.query.ruName === "string" ? req.query.ruName : undefined;
+      const environment = req.query.environment === "production" ? "production" : "sandbox";
+
+      const auth = await createEbayAuthUrl(storeId, clientId, ruName, environment);
+      res.json(auth);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/auth/ebay/callback", async (req, res, next) => {
+    try {
+      const code = typeof req.query.code === "string" ? req.query.code : null;
+      const stateParam = typeof req.query.state === "string" ? req.query.state : "";
+
+      if (!code) {
+        res.status(400).send("Missing authorization code from eBay.");
+        return;
+      }
+
+      // Format: ebay_{storeId}_{stateHex}
+      const parts = stateParam.split("_");
+      const storeId = parts.length >= 3 ? parts[1] : "ghostlight-demo";
+
+      await exchangeEbayCode(code, storeId);
+      const clientUrl = env.CLIENT_APP_URL || "http://localhost:5173";
+      res.redirect(`${clientUrl}/ebay?connected=true`);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/ebay/status", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const store = await prisma.store.findFirst({
+        where: { OR: [{ id: storeId }, { slug: storeId }] },
+        include: { ebayConfig: true },
+      });
+
+      const config = store?.ebayConfig;
+      res.json({
+        connected: Boolean(config?.encryptedTokens),
+        environment: config?.environment || env.EBAY_ENVIRONMENT || "sandbox",
+        appId: config?.appId || env.EBAY_APP_ID || null,
+        ruName: config?.ruName || env.EBAY_REDIRECT_URI || null,
+        fulfillmentPolicyId: config?.fulfillmentPolicyId || env.EBAY_DEFAULT_FULFILLMENT_POLICY_ID || null,
+        paymentPolicyId: config?.paymentPolicyId || env.EBAY_DEFAULT_PAYMENT_POLICY_ID || null,
+        returnPolicyId: config?.returnPolicyId || env.EBAY_DEFAULT_RETURN_POLICY_ID || null,
+        highValueFulfillmentPolicyId: config?.highValueFulfillmentPolicyId || env.EBAY_HIGH_VALUE_FULFILLMENT_POLICY_ID || null,
+        highValueThreshold: config?.highValueThreshold ?? env.EBAY_HIGH_VALUE_THRESHOLD ?? 250,
+        merchantLocationKey: config?.merchantLocationKey || "STORE_MAIN",
+        dailyRateLimitLimit: config?.dailyRateLimitLimit || 5000,
+        dailyRateLimitRemaining: config?.dailyRateLimitRemaining || 5000,
+        syncEnabled: config?.syncEnabled ?? true,
+        autoPublishEnabled: config?.autoPublishEnabled ?? false,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/ebay/config", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const store = await prisma.store.findFirst({
+        where: { OR: [{ id: storeId }, { slug: storeId }] },
+        select: { id: true },
+      });
+      const storePk = store?.id ?? storeId;
+
+      const {
+        environment,
+        appId,
+        certId,
+        ruName,
+        fulfillmentPolicyId,
+        paymentPolicyId,
+        returnPolicyId,
+        highValueFulfillmentPolicyId,
+        highValueThreshold,
+        merchantLocationKey,
+        syncEnabled,
+        autoPublishEnabled,
+      } = req.body as {
+        environment?: string;
+        appId?: string;
+        certId?: string;
+        ruName?: string;
+        fulfillmentPolicyId?: string;
+        paymentPolicyId?: string;
+        returnPolicyId?: string;
+        highValueFulfillmentPolicyId?: string;
+        highValueThreshold?: number;
+        merchantLocationKey?: string;
+        syncEnabled?: boolean;
+        autoPublishEnabled?: boolean;
+      };
+
+      const updated = await prisma.ebayIntegrationConfig.upsert({
+        where: { storeId: storePk },
+        create: {
+          storeId: storePk,
+          environment: environment === "production" ? "production" : "sandbox",
+          appId: appId?.trim() || null,
+          certId: certId?.trim() || null,
+          ruName: ruName?.trim() || null,
+          fulfillmentPolicyId: fulfillmentPolicyId?.trim() || null,
+          paymentPolicyId: paymentPolicyId?.trim() || null,
+          returnPolicyId: returnPolicyId?.trim() || null,
+          highValueFulfillmentPolicyId: highValueFulfillmentPolicyId?.trim() || null,
+          highValueThreshold: typeof highValueThreshold === "number" ? highValueThreshold : 250,
+          merchantLocationKey: merchantLocationKey?.trim() || "STORE_MAIN",
+          syncEnabled: syncEnabled ?? true,
+          autoPublishEnabled: autoPublishEnabled ?? false,
+        },
+        update: {
+          environment: environment === "production" ? "production" : "sandbox",
+          ...(appId !== undefined ? { appId: appId.trim() || null } : {}),
+          ...(certId !== undefined ? { certId: certId.trim() || null } : {}),
+          ...(ruName !== undefined ? { ruName: ruName.trim() || null } : {}),
+          ...(fulfillmentPolicyId !== undefined ? { fulfillmentPolicyId: fulfillmentPolicyId.trim() || null } : {}),
+          ...(paymentPolicyId !== undefined ? { paymentPolicyId: paymentPolicyId.trim() || null } : {}),
+          ...(returnPolicyId !== undefined ? { returnPolicyId: returnPolicyId.trim() || null } : {}),
+          ...(highValueFulfillmentPolicyId !== undefined ? { highValueFulfillmentPolicyId: highValueFulfillmentPolicyId.trim() || null } : {}),
+          ...(typeof highValueThreshold === "number" ? { highValueThreshold } : {}),
+          ...(merchantLocationKey !== undefined ? { merchantLocationKey: merchantLocationKey.trim() || "STORE_MAIN" } : {}),
+          ...(syncEnabled !== undefined ? { syncEnabled } : {}),
+          ...(autoPublishEnabled !== undefined ? { autoPublishEnabled } : {}),
+        },
+      });
+
+      res.json({ success: true, config: updated });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/ebay/listings", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const store = await prisma.store.findFirst({
+        where: { OR: [{ id: storeId }, { slug: storeId }] },
+        select: { id: true },
+      });
+      const storePk = store?.id ?? storeId;
+
+      const [listings, catalog] = await Promise.all([
+        prisma.ebayListing.findMany({ where: { storeId: storePk }, orderBy: { updatedAt: "desc" } }),
+        prisma.isbnLookupCache.findMany({ select: { isbn: true, title: true, author: true, coverUrl: true, quantityOnHand: true, listPrice: true } }),
+      ]);
+
+      const catalogMap = new Map(catalog.map((c) => [c.isbn, c]));
+
+      const results = listings.map((listing) => {
+        const item = catalogMap.get(listing.isbn);
+        return {
+          id: listing.id,
+          isbn: listing.isbn,
+          sku: listing.sku,
+          title: item?.title || "Book Title",
+          author: item?.author || "Author",
+          coverUrl: item?.coverUrl || null,
+          quantityOnHand: item?.quantityOnHand ?? 0,
+          price: listing.price || item?.listPrice || 0,
+          listingStatus: listing.listingStatus,
+          ebayItemId: listing.ebayItemId,
+          ebayOfferId: listing.ebayOfferId,
+          ebayUrl: listing.ebayUrl,
+          lastSyncedAt: listing.lastSyncedAt?.toISOString() || null,
+          lastError: listing.lastError,
+          autoListExcluded: listing.autoListExcluded,
+        };
+      });
+
+      res.json({ listings: results });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/ebay/publish/:isbn", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const { priceOverride } = req.body as { priceOverride?: number };
+
+      const result = await publishBookToEbay(storeId, req.params.isbn, priceOverride);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/ebay/bulk-publish", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const { isbns } = req.body as { isbns: string[] };
+
+      if (!Array.isArray(isbns) || isbns.length === 0) {
+        res.status(400).json({ error: "isbns array is required." });
+        return;
+      }
+
+      let published = 0;
+      let failed = 0;
+      const details: any[] = [];
+
+      for (const isbn of isbns) {
+        try {
+          const pub = await publishBookToEbay(storeId, isbn);
+          published++;
+          details.push({ isbn, status: "SUCCESS", listingId: pub.listingId });
+        } catch (err: any) {
+          failed++;
+          details.push({ isbn, status: "FAILURE", error: err.message });
+        }
+      }
+
+      res.json({ success: true, published, failed, details });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/ebay/delist/:isbn", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const result = await withdrawOffer(storeId, req.params.isbn);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/ebay/toggle-exclude/:isbn", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const store = await prisma.store.findFirst({
+        where: { OR: [{ id: storeId }, { slug: storeId }] },
+        select: { id: true },
+      });
+      const storePk = store?.id ?? storeId;
+
+      const listing = await prisma.ebayListing.findUnique({
+        where: { storeId_isbn: { storeId: storePk, isbn: req.params.isbn } },
+      });
+
+      const nextExcluded = listing ? !listing.autoListExcluded : true;
+
+      const updated = await prisma.ebayListing.upsert({
+        where: { storeId_isbn: { storeId: storePk, isbn: req.params.isbn } },
+        create: {
+          storeId: storePk,
+          isbn: req.params.isbn,
+          sku: `BK-${req.params.isbn}`,
+          price: 0,
+          autoListExcluded: nextExcluded,
+        },
+        update: {
+          autoListExcluded: nextExcluded,
+        },
+      });
+
+      res.json({ success: true, isbn: req.params.isbn, autoListExcluded: updated.autoListExcluded });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/ebay/opportunities", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const store = await prisma.store.findFirst({
+        where: { OR: [{ id: storeId }, { slug: storeId }] },
+        select: { id: true },
+      });
+      const storePk = store?.id ?? storeId;
+
+      const [opportunities, listings, catalog] = await Promise.all([
+        prisma.ebayOpportunity.findMany({
+          where: { storeId: storePk },
+          orderBy: { opportunityScore: "desc" },
+        }),
+        prisma.ebayListing.findMany({
+          where: { storeId: storePk },
+          select: { isbn: true, listingStatus: true },
+        }),
+        prisma.isbnLookupCache.findMany({
+          select: { isbn: true, coverUrl: true, quantityOnHand: true },
+        }),
+      ]);
+
+      const listingStatusMap = new Map(listings.map((l) => [l.isbn, l.listingStatus]));
+      const coverMap = new Map(catalog.map((c) => [c.isbn, c.coverUrl]));
+
+      const results = opportunities.map((opp) => ({
+        ...opp,
+        coverUrl: coverMap.get(opp.isbn) || null,
+        listingStatus: listingStatusMap.get(opp.isbn) || "UNLISTED",
+      }));
+
+      res.json({ opportunities: results });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/ebay/opportunities/scan", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const force = req.body?.force === true;
+
+      const scanResult = await scanInventoryOpportunities(storeId, force);
+      res.json(scanResult);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/ebay/rules", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const store = await prisma.store.findFirst({
+        where: { OR: [{ id: storeId }, { slug: storeId }] },
+        select: { id: true },
+      });
+      const storePk = store?.id ?? storeId;
+
+      const rules = await prisma.ebayListingRule.findMany({
+        where: { storeId: storePk },
+        orderBy: { createdAt: "desc" },
+      });
+
+      res.json({ rules });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/ebay/rules", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const store = await prisma.store.findFirst({
+        where: { OR: [{ id: storeId }, { slug: storeId }] },
+        select: { id: true },
+      });
+      const storePk = store?.id ?? storeId;
+
+      const body = req.body as {
+        id?: string;
+        name: string;
+        enabled?: boolean;
+        minPrice?: number | null;
+        maxPrice?: number | null;
+        minDaysInInventory?: number | null;
+        requiredCondition?: string | null;
+        mustHaveCoverImage?: boolean;
+        includeKeywords?: string | null;
+        excludeKeywords?: string | null;
+        onlyFirstEditionOrSigned?: boolean;
+        autoPublish?: boolean;
+      };
+
+      if (!body.name?.trim()) {
+        res.status(400).json({ error: "Rule name is required." });
+        return;
+      }
+
+      if (body.id) {
+        const updated = await prisma.ebayListingRule.update({
+          where: { id: body.id },
+          data: {
+            name: body.name.trim(),
+            enabled: body.enabled ?? true,
+            minPrice: body.minPrice,
+            maxPrice: body.maxPrice,
+            minDaysInInventory: body.minDaysInInventory,
+            requiredCondition: body.requiredCondition?.trim() || null,
+            mustHaveCoverImage: body.mustHaveCoverImage ?? true,
+            includeKeywords: body.includeKeywords?.trim() || null,
+            excludeKeywords: body.excludeKeywords?.trim() || null,
+            onlyFirstEditionOrSigned: body.onlyFirstEditionOrSigned ?? false,
+            autoPublish: body.autoPublish ?? false,
+          },
+        });
+        res.json({ rule: updated });
+        return;
+      }
+
+      const created = await prisma.ebayListingRule.create({
+        data: {
+          storeId: storePk,
+          name: body.name.trim(),
+          enabled: body.enabled ?? true,
+          minPrice: body.minPrice,
+          maxPrice: body.maxPrice,
+          minDaysInInventory: body.minDaysInInventory,
+          requiredCondition: body.requiredCondition?.trim() || null,
+          mustHaveCoverImage: body.mustHaveCoverImage ?? true,
+          includeKeywords: body.includeKeywords?.trim() || null,
+          excludeKeywords: body.excludeKeywords?.trim() || null,
+          onlyFirstEditionOrSigned: body.onlyFirstEditionOrSigned ?? false,
+          autoPublish: body.autoPublish ?? false,
+        },
+      });
+
+      res.status(201).json({ rule: created });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/ebay/rules/:id", async (req, res, next) => {
+    try {
+      await prisma.ebayListingRule.delete({ where: { id: req.params.id } });
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/ebay/rules/evaluate", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const dryRun = req.body?.dryRun !== false;
+
+      const evalResult = await runRulesEvaluationForStore(storeId, dryRun);
+      res.json(evalResult);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/ebay/logs", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const store = await prisma.store.findFirst({
+        where: { OR: [{ id: storeId }, { slug: storeId }] },
+        select: { id: true },
+      });
+      const storePk = store?.id ?? storeId;
+
+      const logs = await prisma.ebaySyncLog.findMany({
+        where: { storeId: storePk },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      });
+
+      res.json({ logs });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // eBay Webhook Handler
+  app.get("/api/webhooks/ebay", (req, res) => {
+    const challengeCode = typeof req.query.challenge_code === "string" ? req.query.challenge_code : "";
+    const verificationToken = env.EBAY_DEV_ID || "colophon-verification-token";
+    const endpointUrl = `${env.SHOPIFY_APP_URL || "https://colophon-api.onrender.com"}/api/webhooks/ebay`;
+
+    if (!challengeCode) {
+      res.status(400).send("Missing challenge_code");
+      return;
+    }
+
+    const responseHash = handleEbayWebhookChallenge(challengeCode, verificationToken, endpointUrl);
+    res.setHeader("Content-Type", "application/json");
+    res.status(200).json({ challengeResponse: responseHash });
+  });
+
+  app.post("/api/webhooks/ebay", async (req, res, next) => {
+    try {
+      const storeId = "ghostlight-demo";
+      const result = await processEbayWebhookEvent(storeId, req.body);
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Concurrency Reservation Locks API
+  app.post("/api/inventory/locks/acquire", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const { isbn, sku, source, ttlMinutes } = req.body as {
+        isbn: string;
+        sku: string;
+        source: "POS_CHECKOUT" | "WEB_CART" | "EBAY_ORDER" | "SHOPIFY_ORDER";
+        ttlMinutes?: number;
+      };
+
+      if (!isbn || !sku || !source) {
+        res.status(400).json({ error: "isbn, sku, and source are required." });
+        return;
+      }
+
+      const result = await acquireReservationLock(storeId, isbn, sku, source, ttlMinutes);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/inventory/locks/release", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const { isbn, source } = req.body as { isbn: string; source?: string };
+
+      if (!isbn) {
+        res.status(400).json({ error: "isbn is required." });
+        return;
+      }
+
+      await releaseReservationLock(storeId, isbn, source);
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/inventory/sale", async (req, res, next) => {
+    try {
+      const storeId = typeof req.query.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const { isbn, quantitySold, source } = req.body as {
+        isbn: string;
+        quantitySold?: number;
+        source?: "POS" | "WEB";
+      };
+
+      if (!isbn) {
+        res.status(400).json({ error: "isbn is required." });
+        return;
+      }
+
+      const result = await handleLocalSaleAndSync(storeId, isbn, quantitySold ?? 1, source ?? "POS");
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.use(errorMiddleware);

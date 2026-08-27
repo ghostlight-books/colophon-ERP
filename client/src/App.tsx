@@ -17,7 +17,17 @@ import OperationsPage from "./pages/OperationsPage";
 import PosRegisterPage from "./pages/PosRegisterPage";
 import ProductPage from "./pages/ProductPage";
 import ShopifyPage from "./pages/ShopifyPage";
+import EbayPage from "./pages/EbayPage";
 import { hasModuleAccess, normalizeRole, type SystemModule } from "@colophon/shared";
+
+function EbayIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+      <path d="M4 8h16M4 12h16M4 16h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="18" cy="16" r="2.5" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
 
 function GridIcon(): JSX.Element {
   return (
@@ -135,6 +145,7 @@ function App(): JSX.Element {
           <Route path="inventory/product/:isbn" element={<ProductPage />} />
           <Route path="finance" element={<FinancePage />} />
           <Route path="shopify" element={<ShopifyPage />} />
+          <Route path="ebay" element={<EbayPage />} />
           <Route path="open-network" element={<OpenNetworkPage />} />
           <Route path="open-network/order" element={<NetworkOrderRequestPage />} />
         </Route>
@@ -189,6 +200,7 @@ function ShellRouteLayout(): JSX.Element {
       { key: "lists", label: "Lists", to: "/lists", icon: <ListsIcon />, module: "LISTS" },
       { key: "intake", label: "Intake", to: "/intake", icon: <BoxIcon />, module: "INTAKE" },
       { key: "inventory", label: "Inventory", to: "/inventory", icon: <BoxIcon />, module: "INVENTORY" },
+      { key: "ebay", label: "eBay Hub", to: "/ebay", icon: <EbayIcon />, module: "INVENTORY" },
       { key: "operations", label: "Operations", to: "/operations", icon: <OperationsIcon />, module: "DASHBOARD" },
       { key: "marketing", label: "Marketing", to: "/marketing", icon: <MarketingIcon />, module: "LISTS" },
       { key: "finance", label: "Accounting", to: "/finance", icon: <WalletIcon />, module: "ACCOUNTING" },
@@ -197,7 +209,7 @@ function ShellRouteLayout(): JSX.Element {
     return items.filter((item) => hasModuleAccess(normalizeRole(currentUser.role), item.module));
   }, [currentUser.role]);
 
-  const routeModules: Record<string, SystemModule> = { "/dashboard": "DASHBOARD", "/pos-register": "POS", "/calendar": "CALENDAR", "/lists": "LISTS", "/intake": "INTAKE", "/inventory": "INVENTORY", "/finance": "ACCOUNTING", "/operations": "DASHBOARD", "/marketing": "LISTS", "/shopify": "INVENTORY", "/open-network": "INVENTORY" };
+  const routeModules: Record<string, SystemModule> = { "/dashboard": "DASHBOARD", "/pos-register": "POS", "/calendar": "CALENDAR", "/lists": "LISTS", "/intake": "INTAKE", "/inventory": "INVENTORY", "/ebay": "INVENTORY", "/finance": "ACCOUNTING", "/operations": "DASHBOARD", "/marketing": "LISTS", "/shopify": "INVENTORY", "/open-network": "INVENTORY" };
 
   const pageMeta: Record<string, { subtitle: string }> = {
     "/dashboard": {
@@ -226,6 +238,9 @@ function ShellRouteLayout(): JSX.Element {
     },
     "/inventory": {
       subtitle: "Monitor stock levels, low-quantity alerts, and replenishment workflow.",
+    },
+    "/ebay": {
+      subtitle: "Two-way inventory sync, opportunity scoring, criteria push rules, and single-copy protection.",
     },
     "/finance": {
       subtitle: "Accounting pulse and due bills at a glance.",

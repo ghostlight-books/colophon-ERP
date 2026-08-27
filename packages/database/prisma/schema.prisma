@@ -158,6 +158,11 @@ model Store {
   bankConnections    BankConnection[]
   disputesAsBuyer    NetworkDispute[]    @relation("DisputeBuyer")
   disputesAsSeller   NetworkDispute[]    @relation("DisputeSeller")
+  ebayConfig         EbayIntegrationConfig?
+  ebayListings       EbayListing[]
+  ebayOpportunities  EbayOpportunity[]
+  ebayRules          EbayListingRule[]
+  ebayLogs           EbaySyncLog[]
 
   @@index([ownerEmail])
 }
@@ -436,3 +441,128 @@ model BankConnection {
 
   @@index([storeId, active])
 }
+
+model EbayIntegrationConfig {
+  id                          String    @id @default(uuid())
+  storeId                     String    @unique
+  environment                 String    @default("sandbox") // "sandbox" | "production"
+  appId                       String?
+  certId                      String?
+  devId                       String?
+  ruName                      String?
+  encryptedTokens             String?   // JSON with accessToken, refreshToken, tokenExpiresAt
+  fulfillmentPolicyId         String?
+  paymentPolicyId             String?
+  returnPolicyId              String?
+  highValueFulfillmentPolicyId String?
+  highValueThreshold          Float     @default(250.0)
+  merchantLocationKey         String?   @default("STORE_MAIN")
+  dailyRateLimitLimit         Int       @default(5000)
+  dailyRateLimitRemaining     Int       @default(5000)
+  rateLimitResetAt            DateTime?
+  syncEnabled                 Boolean   @default(true)
+  autoPublishEnabled          Boolean   @default(false)
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+  store                       Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+}
+
+model EbayListing {
+  id               String    @id @default(uuid())
+  storeId          String
+  isbn             String
+  sku              String
+  ebayItemId       String?
+  ebayOfferId      String?
+  listingStatus    String    @default("UNLISTED") // "UNLISTED" | "ACTIVE" | "ENDED" | "SOLD" | "ERROR"
+  price            Float
+  ebayCategoryId   String?
+  lastSyncedAt     DateTime?
+  lastError        String?
+  ebayUrl          String?
+  autoListExcluded Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  store            Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, isbn])
+  @@index([storeId, listingStatus])
+  @@index([sku])
+}
+
+model EbayOpportunity {
+  id                 String    @id @default(uuid())
+  storeId            String
+  isbn               String
+  sku                String
+  title              String?
+  author             String?
+  localPrice         Float
+  opportunityScore   Int       // 0 to 100
+  marketLowestPrice  Float?
+  marketMedianPrice  Float?
+  marketHighestPrice Float?
+  competitorCount    Int       @default(0)
+  suggestedPrice     Float?
+  estimatedNetMargin Float?
+  scannedAt          DateTime  @default(now())
+  store              Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, isbn])
+  @@index([storeId, opportunityScore])
+  @@index([scannedAt])
+}
+
+model EbayListingRule {
+  id                       String    @id @default(uuid())
+  storeId                  String
+  name                     String
+  enabled                  Boolean   @default(true)
+  minPrice                 Float?
+  maxPrice                 Float?
+  minDaysInInventory       Int?
+  requiredCondition        String?   // comma-separated list of acceptable conditions
+  mustHaveCoverImage       Boolean   @default(true)
+  includeKeywords          String?   // comma-separated list
+  excludeKeywords          String?   // comma-separated list
+  onlyFirstEditionOrSigned Boolean   @default(false)
+  autoPublish              Boolean   @default(false)
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  store                    Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, enabled])
+}
+
+model EbaySyncLog {
+  id           String    @id @default(uuid())
+  storeId      String
+  direction    String    // "OUTBOUND" | "INBOUND"
+  eventType    String    // "INVENTORY_PUSH" | "OFFER_PUBLISH" | "OFFER_WITHDRAW" | "ORDER_WEBHOOK" | "PRICE_SYNC" | "MARKET_SCAN"
+  isbn         String?
+  sku          String?
+  status       String    // "SUCCESS" | "FAILURE" | "WARNING"
+  payload      String?   // JSON text
+  response     String?   // JSON text
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  store        Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, eventType])
+  @@index([storeId, createdAt])
+}
+
+model InventoryReservationLock {
+  id          String    @id @default(uuid())
+  storeId     String
+  isbn        String
+  sku         String
+  source      String    // "POS_CHECKOUT" | "WEB_CART" | "EBAY_ORDER" | "SHOPIFY_ORDER"
+  lockedUnits Int       @default(1)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([storeId, isbn])
+  @@index([expiresAt])
+}
+
