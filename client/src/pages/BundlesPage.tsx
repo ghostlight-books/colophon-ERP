@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useLocation } from "react-router-dom";
 import SurfaceCard from "../components/ui/SurfaceCard";
 import SyncStatusIndicator from "../components/common/SyncStatusIndicator";
 import {
@@ -52,8 +53,22 @@ export default function BundlesPage(): JSX.Element {
   const [searchResults, setSearchResults] = useState<AvailableBundleItem[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
 
+  const location = useLocation();
+
   // Selected items in bundle draft
-  const [selectedItems, setSelectedItems] = useState<AvailableBundleItem[]>([]);
+  const [selectedItems, setSelectedItems] = useState<AvailableBundleItem[]>(() => {
+    const preloaded = (location.state as { preselectedItems?: AvailableBundleItem[] } | null)?.preselectedItems;
+    return Array.isArray(preloaded) && preloaded.length > 0 ? preloaded : [];
+  });
+
+  // Also listen to location state changes if navigating again
+  useEffect(() => {
+    const preloaded = (location.state as { preselectedItems?: AvailableBundleItem[] } | null)?.preselectedItems;
+    if (Array.isArray(preloaded) && preloaded.length > 0) {
+      setSelectedItems(preloaded);
+      setActiveTab("builder");
+    }
+  }, [location.state]);
 
   // Bundle metadata & pricing draft
   const [bundleTitle, setBundleTitle] = useState("");

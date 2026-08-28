@@ -363,6 +363,28 @@ function InventoryPage(): JSX.Element {
     }
   };
 
+  // Navigate to Bundle Studio with Selected Items
+  const handleCreateBundleFromSelected = (): void => {
+    if (selectedIsbns.size < 2) return;
+    const selectedItemsList = items.filter((i) => selectedIsbns.has(i.isbn));
+    navigate("/bundles", {
+      state: {
+        preselectedItems: selectedItemsList.map((i) => ({
+          isbn: i.isbn,
+          sku: i.sku,
+          title: i.title || "Untitled Book",
+          author: i.author,
+          coverUrl: i.coverUrl,
+          condition: i.condition,
+          listPrice: i.listPrice || 9.99,
+          category: i.category,
+          subcategory: i.subcategory,
+          quantityOnHand: i.quantityOnHand,
+        })),
+      },
+    });
+  };
+
   return (
     <section className="grid gap-4 relative">
       <SurfaceCard className="p-5">
@@ -400,10 +422,29 @@ function InventoryPage(): JSX.Element {
             </span>
             <div>
               <p className="text-sm font-semibold">{selectedIsbns.size} item{selectedIsbns.size > 1 ? "s" : ""} selected</p>
-              <p className="text-xs text-slate-400">Bulk edit genres, categories, prices, or sync</p>
+              <p className="text-xs text-slate-400">Bulk edit genres, bundle items, prices, or sync</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {selectedIsbns.size >= 2 ? (
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={handleCreateBundleFromSelected}
+                className="flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 px-3.5 py-2 text-xs font-bold text-slate-950 transition shadow-sm active:scale-[0.98]"
+              >
+                <span>📦 Create Bundle ({selectedIsbns.size})</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setMessage("Please select at least 2 books to create a bundle.")}
+                className="flex items-center gap-1.5 rounded-xl bg-slate-800 border border-slate-700 px-3.5 py-2 text-xs font-semibold text-slate-400 transition hover:text-slate-200"
+                title="Select at least 2 items to bundle"
+              >
+                <span>📦 Create Bundle (Select 2+)</span>
+              </button>
+            )}
             <button
               type="button"
               disabled={bulkBusy}
