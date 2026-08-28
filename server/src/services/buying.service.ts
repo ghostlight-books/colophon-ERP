@@ -18,15 +18,15 @@ async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Resp
 export function getConditionDiscount(condition: BookBuyingCondition): number {
   switch (condition) {
     case "Fine":
-      return 0;
+      return 0.0;
     case "Very Good":
       return 0.1;
     case "Good":
       return 0.2;
     case "Fair":
-      return 0.3;
+      return 0.35;
     case "Poor":
-      return 0.4;
+      return 0.5;
     default:
       return 0.2;
   }
@@ -104,7 +104,7 @@ export async function searchBuyingEditions(params: BookBuyingSearchParams): Prom
         const foundIsbn = doc.isbn?.find((v) => v.length === 13) ?? doc.isbn?.find((v) => v.length === 10);
         if (foundIsbn && doc.title && !seenIsbns.has(foundIsbn)) {
           seenIsbns.add(foundIsbn);
-          const estimatedResale = 12.99;
+          const estimatedResale = 14.99;
           const offer = Number((estimatedResale * 0.60).toFixed(2));
           results.push({
             isbn: foundIsbn,
@@ -159,7 +159,7 @@ export async function searchBuyingEditions(params: BookBuyingSearchParams): Prom
             const pubYear = vol.publishedDate ? parseInt(vol.publishedDate.slice(0, 4), 10) : null;
             if (!params.year || !pubYear || Math.abs(pubYear - params.year) <= 2) {
               seenIsbns.add(isbnFound);
-              const listAmount = item.saleInfo?.listPrice?.amount || item.saleInfo?.retailPrice?.amount || 14.99;
+              const listAmount = item.saleInfo?.listPrice?.amount || item.saleInfo?.retailPrice?.amount || 16.99;
               const offer = Number((listAmount * 0.60).toFixed(2));
               results.push({
                 isbn: isbnFound,
@@ -197,7 +197,7 @@ export async function searchBuyingEditions(params: BookBuyingSearchParams): Prom
     for (const item of localMatches) {
       if (!seenIsbns.has(item.isbn)) {
         seenIsbns.add(item.isbn);
-        const sellVal = item.listPrice ?? item.thriftbooksPrice ?? 12.99;
+        const sellVal = item.listPrice ?? (item.thriftbooksPrice ? Math.max(14.99, item.thriftbooksPrice * 1.35) : 14.99);
         results.unshift({
           isbn: item.isbn,
           title: item.title ?? "Untitled",
@@ -234,28 +234,44 @@ export async function evaluateBuyingBook(
     lookupGoogleBooks(cleanIsbn).catch(() => null),
   ]);
 
+  // 3. Calculate smart baseline format pricing
+  const smartBaseline = resolveSmartBookPrice(
+    bookLookup?.bindingFormat,
+    bookLookup?.pageCount ?? gbDetails?.pageCount,
+    bookLookup?.category ?? bookLookup?.subcategory,
+  );
+
   const rawPrices = [
     tbDetails?.price,
     abePrice,
     gbDetails?.listPrice,
     bookLookup?.thriftbooksPrice,
+    smartBaseline,
   ].filter((p): p is number => typeof p === "number" && Number.isFinite(p) && p > 0);
 
   const priceRangeLow = rawPrices.length > 0 ? Math.min(...rawPrices) : 4.99;
-  const priceRangeHigh = rawPrices.length > 0 ? Math.max(...rawPrices) : 18.99;
+  const priceRangeHigh = rawPrices.length > 0 ? Math.max(...rawPrices) : 24.99;
 
-  // Base resell price: prioritize ThriftBooks, AbeBooks, Google Books, then format calculation
-  let baseSellPrice = (tbDetails?.price && tbDetails.price > 0)
-    ? tbDetails.price
-    : (abePrice ?? gbDetails?.listPrice ?? bookLookup?.thriftbooksPrice ?? resolveSmartBookPrice(bookLookup?.bindingFormat, bookLookup?.pageCount));
+  // Realistic Retail Resale Value Synthesis (What Ghostlight Books sells it for):
+  // - If AbeBooks price is available (used marketplace benchmark): use AbeBooks listing value
+  // - If Google Books MSRP list price is available: use 80% of MSRP for standard used bookstore list price
+  // - If ThriftBooks is available: ThriftBooks is clearance/bargain warehouse, so indie retail is 1.35x ThriftBooks
+  // - Otherwise fallback to smart format/category baseline (e.g. $16.95 for Trade Paperback, $24.95 for Hardcover)
+  let optimalRetailValue = smartBaseline;
 
-  if (!baseSellPrice || baseSellPrice <= 0) {
-    baseSellPrice = 9.99;
+  if (abePrice && abePrice > 0) {
+    optimalRetailValue = Math.max(abePrice, smartBaseline * 0.9);
+  } else if (gbDetails?.listPrice && gbDetails.listPrice > 0) {
+    optimalRetailValue = Number((gbDetails.listPrice * 0.82).toFixed(2));
+  } else if (tbDetails?.price && tbDetails.price > 0) {
+    optimalRetailValue = Math.max(Number((tbDetails.price * 1.35).toFixed(2)), smartBaseline);
+  } else if (bookLookup?.thriftbooksPrice && bookLookup.thriftbooksPrice > 0) {
+    optimalRetailValue = Math.max(Number((bookLookup.thriftbooksPrice * 1.35).toFixed(2)), smartBaseline);
   }
 
-  // Apply condition adjustment
+  // Condition adjustment from optimal resale benchmark:
   const discount = getConditionDiscount(condition);
-  const conditionAdjustedRetail = Math.max(1.99, baseSellPrice * (1 - discount));
+  const conditionAdjustedRetail = Math.max(2.99, optimalRetailValue * (1 - discount));
   const estimatedRetailValue = Number(conditionAdjustedRetail.toFixed(2));
 
   // 60% Store Buy Offer Math
@@ -279,7 +295,7 @@ export async function evaluateBuyingBook(
     offerAmount,
     storeCreditOfferAmount,
     marketSources: {
-      thriftbooksPrice: tbDetails?.price ?? null,
+      thriftbooksPrice: tbDetails?.price ?? bookLookup?.thriftbooksPrice ?? null,
       abebooksPrice: abePrice ?? null,
       googleBooksPrice: gbDetails?.listPrice ?? null,
       priceRangeLow: Number(priceRangeLow.toFixed(2)),
@@ -376,3 +392,4 @@ export async function processBuyingBatch(input: {
     timestamp: new Date().toISOString(),
   };
 }
+

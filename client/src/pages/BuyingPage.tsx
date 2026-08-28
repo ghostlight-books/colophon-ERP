@@ -1050,3 +1050,4 @@ export default function BuyingPage(): JSX.Element {
     </div>
   );
 }
+

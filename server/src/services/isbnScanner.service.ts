@@ -18,6 +18,115 @@ export interface ParsedIsbn {
   normalized: string;
 }
 
+export interface GoogleBooksDetails {
+  title: string | null;
+  author: string | null;
+  publisher: string | null;
+  publishedDate: string | null;
+  description: string | null;
+  pageCount: number | null;
+  categories: string[];
+  coverUrl: string | null;
+  listPrice: number | null;
+  retailPrice: number | null;
+}
+
+export async function lookupGoogleBooks(isbn: string): Promise<GoogleBooksDetails | null> {
+  const clean = isbn.replace(/[^0-9X]/gi, "").toUpperCase();
+  if (!clean) return null;
+
+  try {
+    const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(clean)}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      totalItems?: number;
+      items?: Array<{
+        volumeInfo?: {
+          title?: string;
+          authors?: string[];
+          publisher?: string;
+          publishedDate?: string;
+          description?: string;
+          pageCount?: number;
+          categories?: string[];
+          imageLinks?: { thumbnail?: string; smallThumbnail?: string };
+        };
+        saleInfo?: {
+          listPrice?: { amount?: number };
+          retailPrice?: { amount?: number };
+        };
+      }>;
+    };
+
+    const first = data.items?.[0];
+    if (!first) return null;
+
+    const vol = first.volumeInfo;
+    const sale = first.saleInfo;
+    const listPrice = sale?.listPrice?.amount || sale?.retailPrice?.amount || null;
+
+    return {
+      title: vol?.title || null,
+      author: vol?.authors?.[0] || null,
+      publisher: vol?.publisher || null,
+      publishedDate: vol?.publishedDate || null,
+      description: vol?.description || null,
+      pageCount: vol?.pageCount || null,
+      categories: vol?.categories || [],
+      coverUrl: vol?.imageLinks?.thumbnail ? vol.imageLinks.thumbnail.replace(/^http:\/\//, "https://") : null,
+      listPrice: typeof listPrice === "number" && listPrice > 0 ? listPrice : null,
+      retailPrice: typeof sale?.retailPrice?.amount === "number" && sale.retailPrice.amount > 0 ? sale.retailPrice.amount : listPrice,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function resolveSmartBookPrice(format?: string | null, pageCount?: number | null, category?: string | null): number {
+  const cleanFormat = (format || "").toLowerCase();
+  const pages = pageCount || 250;
+
+  let basePrice = 14.99;
+
+  if (cleanFormat.includes("hardcover") || cleanFormat.includes("cloth") || cleanFormat.includes("leather")) {
+    if (pages > 500) {
+      basePrice = 27.99;
+    } else if (pages > 350) {
+      basePrice = 24.99;
+    } else {
+      basePrice = 21.99;
+    }
+  } else if (cleanFormat.includes("mass") || cleanFormat.includes("pocket")) {
+    basePrice = 7.99;
+  } else if (cleanFormat.includes("paperback") || cleanFormat.includes("trade") || cleanFormat.includes("softcover")) {
+    if (pages > 450) {
+      basePrice = 18.99;
+    } else if (pages > 250) {
+      basePrice = 15.99;
+    } else {
+      basePrice = 13.99;
+    }
+  } else {
+    if (pages > 450) basePrice = 19.99;
+    else if (pages > 250) basePrice = 15.99;
+    else basePrice = 14.99;
+  }
+
+  const cleanCat = (category || "").toLowerCase();
+  if (cleanCat.includes("art") || cleanCat.includes("photography") || cleanCat.includes("architecture")) {
+    basePrice = Math.max(basePrice, 28.0);
+  } else if (cleanCat.includes("medical") || cleanCat.includes("psychology") || cleanCat.includes("philosophy") || cleanCat.includes("science")) {
+    basePrice = Math.max(basePrice, 16.95);
+  }
+
+  return Number(basePrice.toFixed(2));
+}
+
 export interface BookLookup {
   isbn: string;
   title: string | null;
@@ -428,95 +537,6 @@ export async function pullOpenLibraryMetadata(isbn: string): Promise<Pick<BookLo
     subcategory: book.subcategory,
     coverUrl: book.coverUrl,
   };
-}
-
-export function resolveSmartBookPrice(format?: string | null, pageCount?: number | null): number {
-  const cleanFormat = (format || "").toLowerCase();
-  if (cleanFormat.includes("mass") || cleanFormat.includes("pocket") || cleanFormat.includes("mmpb")) {
-    return 4.99;
-  }
-  if (cleanFormat.includes("hardcover") || cleanFormat.includes("cloth") || cleanFormat.includes("hardback")) {
-    return (pageCount && pageCount > 500) ? 17.99 : 14.99;
-  }
-  if (cleanFormat.includes("leather") || cleanFormat.includes("collector") || cleanFormat.includes("deluxe")) {
-    return 24.99;
-  }
-  // Standard Trade Paperback default
-  return (pageCount && pageCount > 450) ? 12.99 : 9.99;
-}
-
-export async function lookupGoogleBooks(isbn: string): Promise<{
-  title: string | null;
-  author: string | null;
-  publisher: string | null;
-  description: string | null;
-  coverUrl: string | null;
-  pageCount: number | null;
-  categories: string[];
-  listPrice: number | null;
-} | null> {
-  const cleanIsbn = isbn.replace(/[^0-9X]/gi, "");
-  try {
-    const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}`, {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(4500),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      items?: Array<{
-        volumeInfo?: {
-          title?: string;
-          authors?: string[];
-          publisher?: string;
-          description?: string;
-          pageCount?: number;
-          categories?: string[];
-          imageLinks?: {
-            extraLarge?: string;
-            large?: string;
-            medium?: string;
-            thumbnail?: string;
-            smallThumbnail?: string;
-          };
-        };
-        saleInfo?: {
-          listPrice?: { amount?: number };
-          retailPrice?: { amount?: number };
-        };
-      }>;
-    };
-    const item = data.items?.[0];
-    const volume = item?.volumeInfo;
-    if (!volume) return null;
-
-    let price: number | null = null;
-    if (item.saleInfo?.listPrice?.amount && item.saleInfo.listPrice.amount > 0) {
-      price = item.saleInfo.listPrice.amount;
-    } else if (item.saleInfo?.retailPrice?.amount && item.saleInfo.retailPrice.amount > 0) {
-      price = item.saleInfo.retailPrice.amount;
-    }
-
-    const cover =
-      volume.imageLinks?.extraLarge ||
-      volume.imageLinks?.large ||
-      volume.imageLinks?.medium ||
-      volume.imageLinks?.thumbnail ||
-      volume.imageLinks?.smallThumbnail ||
-      null;
-
-    return {
-      title: volume.title || null,
-      author: Array.isArray(volume.authors) ? volume.authors.join(", ") : null,
-      publisher: volume.publisher || null,
-      description: volume.description || null,
-      coverUrl: cover ? cover.replace("http://", "https://") : null,
-      pageCount: volume.pageCount || null,
-      categories: volume.categories || [],
-      listPrice: Number.isFinite(price) && (price ?? 0) > 0 ? price : null,
-    };
-  } catch {
-    return null;
-  }
 }
 
 export async function lookupBookByIsbn(input: string): Promise<BookLookup | null> {

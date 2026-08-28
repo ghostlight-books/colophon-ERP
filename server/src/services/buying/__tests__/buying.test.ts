@@ -84,8 +84,8 @@ describe("Book Buying & 60% Valuation Engine", () => {
       assert.equal(getConditionDiscount("Fine"), 0.0);
       assert.equal(getConditionDiscount("Very Good"), 0.1);
       assert.equal(getConditionDiscount("Good"), 0.2);
-      assert.equal(getConditionDiscount("Fair"), 0.3);
-      assert.equal(getConditionDiscount("Poor"), 0.4);
+      assert.equal(getConditionDiscount("Fair"), 0.35);
+      assert.equal(getConditionDiscount("Poor"), 0.5);
     });
   });
 
