@@ -1692,17 +1692,19 @@ export function createApp(): express.Express {
 
       res.status(201).json(bundle);
     } catch (error) {
-      next(error);
+      console.error("Bundle creation error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to create product bundle." });
     }
   });
 
-  app.post("/api/bundles/:id/unbundle", async (req, res, next) => {
+  app.post("/api/bundles/:id/unbundle", async (req, res) => {
     try {
       const storeId = typeof req.body?.storeId === "string" ? req.body.storeId : "ghostlight-demo";
       const result = await unbundleProduct(req.params.id, storeId);
       res.json(result);
     } catch (error) {
-      next(error);
+      console.error("Unbundle error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to unbundle product." });
     }
   });
 

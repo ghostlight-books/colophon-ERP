@@ -140,6 +140,19 @@ export async function searchAvailableItemsForBundling(options: {
  * 3. Creates/updates Parent Bundle in IsbnLookupCache, Book, and InventoryItem.
  * 4. Takes child items off individual sale by setting isBundledChild: true and reserving their quantity.
  */
+function parsePrice(val: unknown, fallback = 9.99): number {
+  if (typeof val === "number" && !isNaN(val) && Number.isFinite(val) && val > 0) {
+    return Number(val.toFixed(2));
+  }
+  if (typeof val === "string") {
+    const cleaned = parseFloat(val.replace(/[^0-9.]/g, ""));
+    if (!isNaN(cleaned) && Number.isFinite(cleaned) && cleaned > 0) {
+      return Number(cleaned.toFixed(2));
+    }
+  }
+  return fallback;
+}
+
 export async function createProductBundle(input: CreateProductBundleInput): Promise<ProductBundle> {
   if (!input.items || input.items.length < 2) {
     throw new Error("A product bundle must contain at least 2 items.");
@@ -150,11 +163,10 @@ export async function createProductBundle(input: CreateProductBundleInput): Prom
     : null;
   const validStoreId = store?.id || null;
 
-  const itemPrices = input.items.map((item: CreateProductBundleInput["items"][number]) => item.listPrice || 9.99);
+  const itemPrices = input.items.map((item) => parsePrice(item.listPrice, 9.99));
   const pricing = calculateSuggestedBundlePrice(itemPrices);
-  const finalPrice = typeof input.customBundlePrice === "number" && input.customBundlePrice > 0
-    ? Number(input.customBundlePrice.toFixed(2))
-    : pricing.suggestedBundlePrice;
+  const customPriceNum = parsePrice(input.customBundlePrice, 0);
+  const finalPrice = customPriceNum > 0 ? customPriceNum : pricing.suggestedBundlePrice;
 
   // Generate parent SKU with uniqueness protection
   const topicSlug = (input.topic || "GEN").replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase();
@@ -164,16 +176,16 @@ export async function createProductBundle(input: CreateProductBundleInput): Prom
   const bundleIsbn = `BDL-${Date.now()}-${randomSuffix}`;
 
   // Smart title generation
-  const itemTitles = input.items.map((i: CreateProductBundleInput["items"][number]) => i.title);
+  const itemTitles = input.items.map((i) => i.title || "Untitled Book");
   const defaultTitle = `${input.topic ? `${input.topic} Book Bundle` : "Curated Book Bundle"}: ${itemTitles.slice(0, 2).join(" & ")}${itemTitles.length > 2 ? ` (+${itemTitles.length - 2} more)` : ""}`;
   const finalTitle = (input.title?.trim() || defaultTitle).slice(0, 150);
 
   // Combine authors
-  const uniqueAuthors = Array.from(new Set(input.items.map((i: CreateProductBundleInput["items"][number]) => i.author).filter(Boolean)));
+  const uniqueAuthors = Array.from(new Set(input.items.map((i) => i.author).filter(Boolean)));
   const combinedAuthor = uniqueAuthors.length > 0 ? uniqueAuthors.slice(0, 3).join(", ") : "Various Authors";
 
   // First cover thumbnail
-  const primaryCover = input.items.find((i: CreateProductBundleInput["items"][number]) => Boolean(i.coverUrl))?.coverUrl || null;
+  const primaryCover = input.items.find((i) => Boolean(i.coverUrl))?.coverUrl || null;
 
   // 1. Create ProductBundle and child items in Prisma
   const bundleRecord = await prisma.productBundle.create({
@@ -190,14 +202,14 @@ export async function createProductBundle(input: CreateProductBundleInput): Prom
       status: "ACTIVE",
       storeId: validStoreId,
       items: {
-        create: input.items.map((item: CreateProductBundleInput["items"][number]) => ({
+        create: input.items.map((item) => ({
           isbn: item.isbn,
           sku: item.sku || `ITEM-${item.isbn.slice(-8)}-${Math.floor(Math.random() * 1000)}`,
-          title: item.title,
+          title: item.title || "Untitled Book",
           author: item.author || null,
           coverUrl: item.coverUrl || null,
           condition: item.condition || "Good",
-          listPrice: item.listPrice || 9.99,
+          listPrice: parsePrice(item.listPrice, 9.99),
           category: item.category || null,
           subcategory: item.subcategory || null,
           originalQty: 1,
