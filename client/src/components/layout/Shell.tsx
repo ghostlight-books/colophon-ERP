@@ -361,7 +361,7 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
             isDark ? "bg-white/15" : "bg-white/70",
           ].join(" ")}></div>
 
-          <nav className="mt-1 flex flex-1 flex-col gap-1.5 overflow-y-auto pr-0.5" aria-label="Primary">
+          <nav className="mt-0.5 flex flex-1 flex-col gap-1 overflow-y-auto pr-0.5" aria-label="Primary">
             {navItems.map((item) => {
               const hasChildren = Boolean(item.children && item.children.length > 0);
               const isChildActive = hasChildren && (item.children?.some((child) => activePath === child.to || (child.to !== "/dashboard" && activePath.startsWith(child.to))) ?? false);
@@ -370,7 +370,7 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
               const isExpanded = expandedMenus[item.key] ?? isParentActive;
 
               return (
-                <div key={item.key} className="flex flex-col gap-1">
+                <div key={item.key} className="flex flex-col gap-0.5">
                   <button
                     type="button"
                     onClick={() => {
@@ -385,7 +385,7 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
                       }
                     }}
                     className={[
-                      "group flex items-center justify-between rounded-full px-4 py-2.5 text-left text-[0.96rem] font-semibold transition",
+                      "group flex items-center justify-between rounded-full px-3.5 py-1.5 text-left text-[0.88rem] font-semibold transition",
                       isDirectActive && !hasChildren
                         ? "bg-[#e9ff63] text-slate-800 shadow-[inset_0_0_0_1px_rgba(201,224,86,0.48)]"
                         : isParentActive
@@ -398,10 +398,10 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
                     ].join(" ")}
                     aria-current={isDirectActive && !hasChildren ? "page" : undefined}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2.5">
                       <span
                         className={[
-                          "grid h-7 w-7 place-items-center rounded-full transition",
+                          "grid h-6 w-6 place-items-center rounded-full transition",
                           isDirectActive && !hasChildren
                             ? "bg-black/10 text-slate-700"
                             : isDark
@@ -415,7 +415,7 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
                     </div>
                     {hasChildren ? (
                       <ChevronDown
-                        size={15}
+                        size={14}
                         className={[
                           "transition-transform duration-200",
                           isExpanded ? "rotate-180" : "",
@@ -428,7 +428,7 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
                   {/* Sub-menu items */}
                   {hasChildren && isExpanded ? (
                     <div className={[
-                      "ml-4 flex flex-col gap-1 border-l-2 pl-3 py-1 my-0.5 animate-in fade-in slide-in-from-top-1 duration-150",
+                      "ml-3.5 flex flex-col gap-0.5 border-l-2 pl-2.5 py-0.5 my-0.5 animate-in fade-in slide-in-from-top-1 duration-150",
                       isDark ? "border-white/15" : "border-slate-300/70",
                     ].join(" ")}>
                       {item.children!.map((child) => {
@@ -439,7 +439,7 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
                             type="button"
                             onClick={() => onNavigate(child.to)}
                             className={[
-                              "group flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-semibold transition",
+                              "group flex items-center gap-2 rounded-lg px-2.5 py-1 text-left text-[11.5px] font-semibold transition",
                               isThisChildActive
                                 ? "bg-[#e9ff63] text-slate-900 shadow-sm"
                                 : isDark
