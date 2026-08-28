@@ -222,5 +222,77 @@ export interface BuyingBatchSummary {
   totalCreditOffer: number;
 }
 
+export interface ProductBundleItem {
+  id: string;
+  bundleId: string;
+  isbn: string;
+  sku: string;
+  title: string;
+  author: string | null;
+  coverUrl: string | null;
+  condition: string | null;
+  listPrice: number;
+  category: string | null;
+  subcategory: string | null;
+  originalQty: number;
+  createdAt: string;
+}
+
+export interface ProductBundle {
+  id: string;
+  parentSku: string;
+  title: string;
+  topic: string | null;
+  description: string | null;
+  bundlePrice: number;
+  originalTotalPrice: number;
+  discountPercent: number;
+  savingsAmount: number;
+  quantityOnHand: number;
+  status: "ACTIVE" | "UNBUNDLED" | "SOLD";
+  createdAt: string;
+  updatedAt: string;
+  unbundledAt?: string | null;
+  storeId?: string | null;
+  items: ProductBundleItem[];
+}
+
+export interface BundlePricingSuggestion {
+  totalIndividualPrice: number;
+  discountPercent: number;
+  discountedPrice: number;
+  suggestedBundlePrice: number;
+  savingsAmount: number;
+  savingsPercent: number;
+}
+
+export interface CreateProductBundleInput {
+  title?: string;
+  topic?: string;
+  description?: string;
+  customBundlePrice?: number;
+  items: Array<{
+    isbn: string;
+    sku?: string;
+    title: string;
+    author?: string | null;
+    coverUrl?: string | null;
+    condition?: string | null;
+    listPrice: number;
+    category?: string | null;
+    subcategory?: string | null;
+  }>;
+  storeId?: string;
+}
+
+export interface UnbundleResult {
+  success: boolean;
+  bundleId: string;
+  parentSku: string;
+  itemsRestored: number;
+  message: string;
+}
+
+
 
 

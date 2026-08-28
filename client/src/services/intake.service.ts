@@ -240,7 +240,23 @@ export async function receiveInventory(book: BookLookup, condition: BookConditio
   const response = await fetch(`${API_BASE}/api/inventory/active/${encodeURIComponent(book.isbn)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ condition, listPrice, container, deviceId, stationName: getStationName() }),
+    body: JSON.stringify({
+      condition,
+      listPrice,
+      container,
+      deviceId,
+      stationName: getStationName(),
+      title: book.title,
+      author: book.author,
+      publisher: book.publisher,
+      coverUrl: book.coverUrl,
+      category: book.category,
+      subcategory: book.subcategory,
+      mediaType: book.mediaType || "Book",
+      bindingFormat: book.bindingFormat,
+      pageCount: book.pageCount,
+      weightOz: book.weightOz,
+    }),
   });
   if (!response.ok) {
     throw new Error("Inventory could not be updated.");

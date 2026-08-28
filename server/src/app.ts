@@ -8,7 +8,7 @@ import { requestLogger } from "./middleware/requestLogger.js";
 import { requireSuperAdmin, tenantContext } from "./middleware/tenantContext.js";
 import { createStoreImpersonationSession, createUser, signIn } from "./services/auth.service.js";
 import { prisma } from "./config/database.js";
-import { lookupBookByIsbn, pullOpenLibraryMetadata } from "./services/isbnScanner.service.js";
+import { lookupBookByIsbn, pullOpenLibraryMetadata, autoCorrectIsbn } from "./services/isbnScanner.service.js";
 import { createSquareCheckoutLink, isSquareConfigured } from "./services/squarePayment.service.js";
 import { executeDropshipSettlement } from "./services/networkSettlement.service.js";
 import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service.js";
@@ -23,6 +23,13 @@ import { acquireReservationLock, releaseReservationLock, handleLocalSaleAndSync 
 import { autoSelectShippingRate, quoteAllShippingRates } from "./services/shipping/shippingRate.service.js";
 import { resolveBookDimensions } from "./services/isbn/dimensions.service.js";
 import { validateBuyingSearchParams, searchBuyingEditions, evaluateBuyingBook, processBuyingBatch } from "./services/buying.service.js";
+import {
+  calculateSuggestedBundlePrice,
+  searchAvailableItemsForBundling,
+  createProductBundle,
+  unbundleProduct,
+  listProductBundles,
+} from "./services/bundle.service.js";
 
 type OpsConnector = {
   key: string;
@@ -1355,38 +1362,163 @@ export function createApp(): express.Express {
 
   app.patch("/api/inventory/active/:isbn", async (req, res, next) => {
     try {
-      const { condition, listPrice, container, deviceId, stationName } = req.body as {
+      const cleanIsbn = autoCorrectIsbn(req.params.isbn.replace(/[^0-9X]/gi, "").toUpperCase());
+      const {
+        condition,
+        listPrice,
+        container,
+        deviceId,
+        stationName,
+        title,
+        author,
+        publisher,
+        coverUrl,
+        category,
+        subcategory,
+        mediaType,
+        bindingFormat,
+        pageCount,
+        weightOz,
+      } = req.body as {
         condition?: string;
         listPrice?: number;
         container?: string;
         deviceId?: string;
         stationName?: string;
+        title?: string;
+        author?: string;
+        publisher?: string;
+        coverUrl?: string;
+        category?: string;
+        subcategory?: string;
+        mediaType?: string;
+        bindingFormat?: string;
+        pageCount?: number;
+        weightOz?: number;
       };
-      const item = await prisma.isbnLookupCache.update({
-        where: { isbn: req.params.isbn },
-        data: {
-          quantityOnHand: { increment: 1 },
-          condition: condition ?? null,
-          listPrice: typeof listPrice === "number" ? listPrice : null,
+
+      // 1. If title metadata is missing, attempt quick lookup
+      let metaTitle = title;
+      let metaAuthor = author;
+      let metaPublisher = publisher;
+      let metaCoverUrl = coverUrl;
+      let metaCategory = category;
+      let metaSubcategory = subcategory;
+      let metaBinding = bindingFormat;
+      let metaPages = pageCount;
+      let metaWeight = weightOz;
+
+      if (!metaTitle) {
+        const lookup = await lookupBookByIsbn(cleanIsbn).catch(() => null);
+        if (lookup) {
+          metaTitle = lookup.title ?? undefined;
+          metaAuthor = lookup.author ?? undefined;
+          metaPublisher = lookup.publisher ?? undefined;
+          metaCoverUrl = lookup.coverUrl ?? undefined;
+          metaCategory = lookup.category ?? undefined;
+          metaSubcategory = lookup.subcategory ?? undefined;
+          metaBinding = lookup.bindingFormat ?? undefined;
+          metaPages = lookup.pageCount ?? undefined;
+          metaWeight = lookup.weightOz ?? undefined;
+        }
+      }
+
+      // 2. Upsert IsbnLookupCache
+      const item = await prisma.isbnLookupCache.upsert({
+        where: { isbn: cleanIsbn },
+        create: {
+          isbn: cleanIsbn,
+          title: metaTitle ?? `Scanned Book (${cleanIsbn})`,
+          author: metaAuthor ?? null,
+          publisher: metaPublisher ?? null,
+          coverUrl: metaCoverUrl ?? null,
+          category: metaCategory ?? "Print Books",
+          subcategory: metaSubcategory ?? null,
+          mediaType: mediaType ?? "Book",
+          bindingFormat: metaBinding ?? null,
+          pageCount: typeof metaPages === "number" ? metaPages : null,
+          weight: typeof metaWeight === "number" ? metaWeight : null,
+          quantityOnHand: 1,
+          condition: condition ?? "Good",
+          listPrice: typeof listPrice === "number" ? listPrice : 14.99,
+          thriftbooksPrice: typeof listPrice === "number" ? listPrice : null,
           container: container ?? null,
+          sku: `SCAN-${cleanIsbn.slice(-6)}`,
+          source: "scanner-station",
+        },
+        update: {
+          quantityOnHand: { increment: 1 },
+          condition: condition ?? undefined,
+          listPrice: typeof listPrice === "number" ? listPrice : undefined,
+          container: container ?? undefined,
+          title: metaTitle ?? undefined,
+          author: metaAuthor ?? undefined,
+          coverUrl: metaCoverUrl ?? undefined,
         },
       });
+
+      // 3. Upsert Book relation
+      const bookRecord = await prisma.book.upsert({
+        where: { isbn13: cleanIsbn },
+        create: {
+          isbn13: cleanIsbn,
+          title: item.title ?? `Scanned Book (${cleanIsbn})`,
+          author: item.author ?? "Unknown Author",
+          publisher: item.publisher ?? null,
+          listPriceCents: Math.round((typeof listPrice === "number" ? listPrice : 14.99) * 100),
+          genre: item.subcategory ?? item.category ?? "General",
+        },
+        update: {
+          listPriceCents: typeof listPrice === "number" ? Math.round(listPrice * 100) : undefined,
+        },
+      });
+
+      // 4. Upsert InventoryItem
+      const existingInventoryItem = await prisma.inventoryItem.findFirst({
+        where: { bookId: bookRecord.id, condition: condition ?? item.condition ?? "Good" },
+      });
+
+      if (existingInventoryItem) {
+        await prisma.inventoryItem.update({
+          where: { id: existingInventoryItem.id },
+          data: {
+            quantityOnHand: { increment: 1 },
+            acquiredAt: new Date(),
+          },
+        });
+      } else {
+        await prisma.inventoryItem.create({
+          data: {
+            bookId: bookRecord.id,
+            sku: `${item.sku}-${Date.now().toString().slice(-4)}`,
+            condition: condition ?? item.condition ?? "Good",
+            quantityOnHand: 1,
+            quantityReserved: 0,
+            locationCode: container ?? "Scanner Intake",
+          },
+        });
+      }
+
+      // 5. Create ScanEvent
       await prisma.scanEvent.create({
         data: {
           isbn: item.isbn,
           inventoryId: item.id,
-          deviceId: deviceId?.trim() || "unknown-device",
-          stationName: stationName?.trim() || null,
-          condition: condition ?? "Unknown",
-          listPrice: typeof listPrice === "number" ? listPrice : 0,
-          container: container ?? "Unassigned",
+          deviceId: deviceId?.trim() || "scanner-device",
+          stationName: stationName?.trim() || "Intake Station",
+          condition: condition ?? item.condition ?? "Good",
+          listPrice: typeof listPrice === "number" ? listPrice : (item.listPrice ?? 0),
+          container: container ?? item.container ?? "Unassigned",
         },
-      });
+      }).catch((err) => console.warn("ScanEvent creation warning:", err));
+
+      // 6. Trigger Shopify sync
       void syncInventoryItemByIsbn("ghostlight-demo", item.isbn)
         .then((result) => {
           if (!result.success) console.warn("Automatic Shopify inventory sync skipped", result.message);
         })
         .catch((error) => console.error("Automatic Shopify inventory sync failed", error));
+
       res.json(item);
     } catch (error) {
       next(error);
@@ -1468,6 +1600,96 @@ export function createApp(): express.Express {
       });
 
       res.status(201).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // --- Product Bundling API Endpoints ---
+  app.get("/api/bundles", async (req, res, next) => {
+    try {
+      const status = typeof req.query.status === "string" ? req.query.status : "ACTIVE";
+      const bundles = await listProductBundles(status);
+      res.json({ bundles });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/bundles/search-items", async (req, res, next) => {
+    try {
+      const query = typeof req.query.query === "string" ? req.query.query : undefined;
+      const topic = typeof req.query.topic === "string" ? req.query.topic : undefined;
+      const author = typeof req.query.author === "string" ? req.query.author : undefined;
+      const title = typeof req.query.title === "string" ? req.query.title : undefined;
+      const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 50;
+
+      const items = await searchAvailableItemsForBundling({
+        query,
+        topic,
+        author,
+        title,
+        limit,
+      });
+
+      res.json({ items });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/bundles/pricing-preview", (req, res) => {
+    const prices = Array.isArray(req.body?.prices) ? req.body.prices : [];
+    const suggestion = calculateSuggestedBundlePrice(prices);
+    res.json(suggestion);
+  });
+
+  app.post("/api/bundles", async (req, res, next) => {
+    try {
+      const { title, topic, description, customBundlePrice, items, storeId } = req.body as {
+        title?: string;
+        topic?: string;
+        description?: string;
+        customBundlePrice?: number;
+        items?: Array<{
+          isbn: string;
+          sku?: string;
+          title: string;
+          author?: string | null;
+          coverUrl?: string | null;
+          condition?: string | null;
+          listPrice: number;
+          category?: string | null;
+          subcategory?: string | null;
+        }>;
+        storeId?: string;
+      };
+
+      if (!Array.isArray(items) || items.length < 2) {
+        res.status(400).json({ error: "At least 2 items are required to create a bundle." });
+        return;
+      }
+
+      const bundle = await createProductBundle({
+        title,
+        topic,
+        description,
+        customBundlePrice,
+        items,
+        storeId,
+      });
+
+      res.status(201).json(bundle);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/bundles/:id/unbundle", async (req, res, next) => {
+    try {
+      const storeId = typeof req.body?.storeId === "string" ? req.body.storeId : "ghostlight-demo";
+      const result = await unbundleProduct(req.params.id, storeId);
+      res.json(result);
     } catch (error) {
       next(error);
     }

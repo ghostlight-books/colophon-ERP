@@ -19,6 +19,7 @@ import ProductPage from "./pages/ProductPage";
 import ShopifyPage from "./pages/ShopifyPage";
 import EbayPage from "./pages/EbayPage";
 import BuyingPage from "./pages/BuyingPage";
+import BundlesPage from "./pages/BundlesPage";
 import { hasModuleAccess, normalizeRole, type SystemModule } from "@colophon/shared";
 
 function EbayIcon(): JSX.Element {
@@ -176,6 +177,7 @@ function App(): JSX.Element {
           <Route path="lists" element={<ListsPage />} />
           <Route path="inventory" element={<ActiveInventoryPage />} />
           <Route path="inventory/product/:isbn" element={<ProductPage />} />
+          <Route path="bundles" element={<BundlesPage />} />
           <Route path="finance" element={<FinancePage />} />
           <Route path="shopify" element={<ShopifyPage />} />
           <Route path="ebay" element={<EbayPage />} />
@@ -253,6 +255,7 @@ function ShellRouteLayout(): JSX.Element {
         module: "INVENTORY",
         children: [
           { key: "active-inventory", label: "Active Inventory", to: "/inventory", icon: <BoxIcon /> },
+          { key: "bundles", label: "Product Bundles", to: "/bundles", icon: <BoxIcon /> },
           { key: "ebay", label: "eBay Hub", to: "/ebay", icon: <EbayIcon /> },
           { key: "shopify", label: "Shopify Sync", to: "/shopify", icon: <ShopifyIcon /> },
         ],
@@ -327,6 +330,7 @@ function ShellRouteLayout(): JSX.Element {
     "/intake": "INTAKE",
     "/buying": "INTAKE",
     "/inventory": "INVENTORY",
+    "/bundles": "INVENTORY",
     "/ebay": "INVENTORY",
     "/shopify": "INVENTORY",
     "/finance": "ACCOUNTING",
@@ -348,6 +352,9 @@ function ShellRouteLayout(): JSX.Element {
     },
     "/buying": {
       subtitle: "Evaluate incoming books, live comparative market prices, and 60% purchase offers.",
+    },
+    "/bundles": {
+      subtitle: "Curate multi-book product bundles with 10% off nearest .99 pricing and manage active sets.",
     },
     "/sales": {
       subtitle: "Track orders, invoices, and team sales activity.",

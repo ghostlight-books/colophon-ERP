@@ -55,6 +55,9 @@ model IsbnLookupCache {
   packageType      String?  @default("Package/Thick Envelope")
   suggestedShippingService String?
   estimatedShippingCost   Float?
+  isBundle         Boolean? @default(false)
+  bundleParentId   String?
+  isBundledChild   Boolean? @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   scanEvents       ScanEvent[]
@@ -62,6 +65,7 @@ model IsbnLookupCache {
   store            Store?   @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
   @@index([sku])
+  @@index([bundleParentId])
 }
 
 model ScanEvent {
@@ -576,4 +580,48 @@ model InventoryReservationLock {
   @@index([storeId, isbn])
   @@index([expiresAt])
 }
+
+model ProductBundle {
+  id                    String              @id @default(uuid())
+  parentSku             String              @unique
+  title                 String
+  topic                 String?
+  description           String?
+  bundlePrice           Float
+  originalTotalPrice    Float
+  discountPercent       Float               @default(10.0)
+  savingsAmount         Float               @default(0.0)
+  quantityOnHand        Int                 @default(1)
+  status                String              @default("ACTIVE") // "ACTIVE" | "UNBUNDLED" | "SOLD"
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  unbundledAt           DateTime?
+  storeId               String?
+  items                 ProductBundleItem[]
+
+  @@index([parentSku])
+  @@index([status])
+}
+
+model ProductBundleItem {
+  id             String        @id @default(uuid())
+  bundleId       String
+  bundle         ProductBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  isbn           String
+  sku            String
+  title          String
+  author         String?
+  coverUrl       String?
+  condition      String?
+  listPrice      Float
+  category       String?
+  subcategory    String?
+  originalQty    Int           @default(1)
+  createdAt      DateTime      @default(now())
+
+  @@index([bundleId])
+  @@index([isbn])
+  @@index([sku])
+}
+
 
