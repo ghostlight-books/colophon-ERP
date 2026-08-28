@@ -51,6 +51,66 @@ export function calculateSuggestedBundlePrice(individualPrices: number[]): Bundl
   };
 }
 
+let tablesChecked = false;
+export async function ensureBundleTablesExist(): Promise<void> {
+  if (tablesChecked) return;
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "ProductBundle" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "parentSku" TEXT NOT NULL,
+        "title" TEXT NOT NULL,
+        "topic" TEXT,
+        "description" TEXT,
+        "bundlePrice" REAL NOT NULL,
+        "originalTotalPrice" REAL NOT NULL,
+        "discountPercent" REAL NOT NULL DEFAULT 10.0,
+        "savingsAmount" REAL NOT NULL DEFAULT 0.0,
+        "quantityOnHand" INTEGER NOT NULL DEFAULT 1,
+        "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "unbundledAt" DATETIME,
+        "storeId" TEXT
+      );
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "ProductBundleItem" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "bundleId" TEXT NOT NULL,
+        "isbn" TEXT NOT NULL,
+        "sku" TEXT NOT NULL,
+        "title" TEXT NOT NULL,
+        "author" TEXT,
+        "coverUrl" TEXT,
+        "condition" TEXT,
+        "listPrice" REAL NOT NULL,
+        "category" TEXT,
+        "subcategory" TEXT,
+        "originalQty" INTEGER NOT NULL DEFAULT 1,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "ProductBundleItem_bundleId_fkey" FOREIGN KEY ("bundleId") REFERENCES "ProductBundle" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      );
+    `);
+
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "ProductBundle_parentSku_key" ON "ProductBundle"("parentSku");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "ProductBundle_parentSku_idx" ON "ProductBundle"("parentSku");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "ProductBundle_status_idx" ON "ProductBundle"("status");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "ProductBundleItem_bundleId_idx" ON "ProductBundleItem"("bundleId");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "ProductBundleItem_isbn_idx" ON "ProductBundleItem"("isbn");`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "ProductBundleItem_sku_idx" ON "ProductBundleItem"("sku");`);
+
+    try { await prisma.$executeRawUnsafe(`ALTER TABLE "IsbnLookupCache" ADD COLUMN "isBundle" BOOLEAN DEFAULT false;`); } catch {}
+    try { await prisma.$executeRawUnsafe(`ALTER TABLE "IsbnLookupCache" ADD COLUMN "bundleParentId" TEXT;`); } catch {}
+    try { await prisma.$executeRawUnsafe(`ALTER TABLE "IsbnLookupCache" ADD COLUMN "isBundledChild" BOOLEAN DEFAULT false;`); } catch {}
+
+    tablesChecked = true;
+  } catch (err) {
+    console.warn("ensureBundleTablesExist warning:", err);
+  }
+}
+
 /**
  * Searches in-stock, unbundled inventory items eligible for bundling by Topic/Category, Author, Title, or ISBN.
  */
@@ -73,6 +133,7 @@ export async function searchAvailableItemsForBundling(options: {
   subcategory: string | null;
   quantityOnHand: number;
 }>> {
+  await ensureBundleTablesExist();
   const { query, topic, author, title, limit = 50 } = options;
   const cleanQuery = query?.trim().toLowerCase();
 
@@ -154,6 +215,7 @@ function parsePrice(val: unknown, fallback = 9.99): number {
 }
 
 export async function createProductBundle(input: CreateProductBundleInput): Promise<ProductBundle> {
+  await ensureBundleTablesExist();
   if (!input.items || input.items.length < 2) {
     throw new Error("A product bundle must contain at least 2 items.");
   }
@@ -320,6 +382,7 @@ export async function createProductBundle(input: CreateProductBundleInput): Prom
  * 2. Restores all individual child items back to active standalone inventory.
  */
 export async function unbundleProduct(bundleId: string, storeId = "ghostlight-demo"): Promise<UnbundleResult> {
+  await ensureBundleTablesExist();
   const bundle = await prisma.productBundle.findUnique({
     where: { id: bundleId },
     include: { items: true },
@@ -398,6 +461,7 @@ export async function unbundleProduct(bundleId: string, storeId = "ghostlight-de
  * Lists all product bundles with their child item details.
  */
 export async function listProductBundles(status = "ACTIVE"): Promise<ProductBundle[]> {
+  await ensureBundleTablesExist();
   const bundles = await prisma.productBundle.findMany({
     where: status === "ALL" ? undefined : { status },
     include: { items: true },
