@@ -4,7 +4,6 @@ import SyncStatusIndicator from "../components/common/SyncStatusIndicator";
 import {
   fetchBundles,
   searchBundlingItems,
-  previewBundlePricing,
   createBundle,
   unbundle,
   type AvailableBundleItem,
@@ -110,7 +109,7 @@ export default function BundlesPage(): JSX.Element {
       setCustomPriceInput(String(pricingSuggestion.suggestedBundlePrice));
       
       // Auto-suggest a smart title if user hasn't typed a custom one
-      if (!bundleTitle || bundleTitle.startsWith("Curated") || bundleTitle.includes("Bundle")) {
+      if (!bundleTitle || bundleTitle.startsWith("Curated") || bundleTitle.includes("Bundle") || bundleTitle.includes("Collection")) {
         const topicName = selectedTopic !== "All" ? selectedTopic : (selectedItems[0]?.category || "Curated");
         const authors = Array.from(new Set(selectedItems.map((i) => i.author).filter(Boolean)));
         const primaryAuthor = authors.length === 1 ? `${authors[0]} Collection` : "";
@@ -270,43 +269,44 @@ export default function BundlesPage(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      {/* Top Header Card */}
-      <SurfaceCard>
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 w-full pb-5 mb-5 border-b border-slate-800">
+      {/* Top Header Card matching Colophon ERP Light Theme */}
+      <SurfaceCard className="space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200/80 pb-4">
           <div>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xl font-bold shadow-inner">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700 text-xl font-bold shadow-sm">
                 📦
               </div>
               <div>
-                <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
                   Product Bundling Studio
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium">
+                  <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-800 border border-amber-200/80">
                     10% Off · Nearest .99
                   </span>
                 </h1>
-                <p className="text-xs text-slate-400">
-                  Group titles by topic, author, or series into parent bundle SKUs with automated value pricing
+                <p className="mt-0.5 text-sm text-slate-500">
+                  Curate multi-book sets by topic, author, or series into parent bundle SKUs with automated value pricing
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <SyncStatusIndicator />
-            <div className="flex bg-slate-900/80 p-1 rounded-xl border border-slate-800">
+            {/* Clean Tab Switcher */}
+            <div className="flex rounded-2xl bg-slate-100 p-1 border border-slate-200/80">
               <button
                 type="button"
                 onClick={() => setActiveTab("builder")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
                   activeTab === "builder"
-                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm"
-                    : "text-slate-400 hover:text-slate-200"
+                    ? "bg-white text-slate-900 shadow-sm border border-slate-200/60"
+                    : "text-slate-600 hover:text-slate-900"
                 }`}
               >
                 <span>📦 Bundle Builder</span>
                 {selectedItems.length > 0 && (
-                  <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-amber-500 text-slate-950 font-bold">
+                  <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-amber-500 text-white font-bold">
                     {selectedItems.length}
                   </span>
                 )}
@@ -314,15 +314,15 @@ export default function BundlesPage(): JSX.Element {
               <button
                 type="button"
                 onClick={() => setActiveTab("active")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
                   activeTab === "active"
-                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm"
-                    : "text-slate-400 hover:text-slate-200"
+                    ? "bg-white text-slate-900 shadow-sm border border-slate-200/60"
+                    : "text-slate-600 hover:text-slate-900"
                 }`}
               >
                 <span>🗂️ Active Bundles</span>
                 {activeBundles.length > 0 && (
-                  <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-slate-700 text-slate-200 font-bold">
+                  <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-slate-200 text-slate-700 font-bold">
                     {activeBundles.length}
                   </span>
                 )}
@@ -330,16 +330,17 @@ export default function BundlesPage(): JSX.Element {
             </div>
           </div>
         </div>
+
         {/* Banner Messages */}
         {errorMessage && (
-          <div className="mb-4 p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-center justify-between animate-fadeIn">
-            <span className="flex items-center gap-2">
+          <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center justify-between shadow-sm animate-fadeIn">
+            <span className="flex items-center gap-2 font-medium">
               <span className="text-sm">⚠️</span> {errorMessage}
             </span>
             <button
               type="button"
               onClick={() => setErrorMessage(null)}
-              className="text-rose-400 hover:text-rose-200 font-bold"
+              className="text-rose-600 hover:text-rose-900 font-bold ml-2"
             >
               ✕
             </button>
@@ -347,14 +348,14 @@ export default function BundlesPage(): JSX.Element {
         )}
 
         {successMessage && (
-          <div className="mb-4 p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs flex items-center justify-between animate-fadeIn">
-            <span className="flex items-center gap-2">
-              <span className="text-sm">✨</span> {successMessage}
+          <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-center justify-between shadow-sm animate-fadeIn">
+            <span className="flex items-center gap-2 font-medium">
+              <span className="text-sm">✓</span> {successMessage}
             </span>
             <button
               type="button"
               onClick={() => setSuccessMessage(null)}
-              className="text-emerald-400 hover:text-emerald-200 font-bold"
+              className="text-emerald-600 hover:text-emerald-900 font-bold ml-2"
             >
               ✕
             </button>
@@ -367,25 +368,25 @@ export default function BundlesPage(): JSX.Element {
             {/* Multi-Criteria Search Filter Bar */}
             <form
               onSubmit={handleSearch}
-              className="p-4 bg-slate-900/60 rounded-xl border border-slate-800 space-y-3"
+              className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3 shadow-inner"
             >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                <span className="text-xs font-semibold text-slate-300 flex items-center gap-2">
-                  <span>🔍</span> Search Available Inventory for Bundling
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-2.5">
+                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <span>🔍</span> Filter Available Inventory for Bundling
                 </span>
-                <div className="flex items-center gap-2 text-xs text-slate-400">
-                  <span>Showing {searchResults.length} eligible titles in stock</span>
-                </div>
+                <span className="text-xs text-slate-500 font-medium">
+                  {searchResults.length} eligible in-stock items
+                </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {/* Topic / Genre dropdown */}
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Topic / Genre</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Topic / Genre</label>
                   <select
                     value={selectedTopic}
                     onChange={(e) => setSelectedTopic(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500/50"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 shadow-sm"
                   >
                     {TOPIC_OPTIONS.map((t) => (
                       <option key={t} value={t}>
@@ -397,46 +398,46 @@ export default function BundlesPage(): JSX.Element {
 
                 {/* Author search */}
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Author</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Author</label>
                   <input
                     type="text"
                     value={authorQuery}
                     onChange={(e) => setAuthorQuery(e.target.value)}
                     placeholder="e.g. Stephen King, Herbert"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-500/50"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 shadow-sm"
                   />
                 </div>
 
                 {/* Title search */}
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Title</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Title</label>
                   <input
                     type="text"
                     value={titleQuery}
                     onChange={(e) => setTitleQuery(e.target.value)}
                     placeholder="e.g. Dune, Fellowship"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-500/50"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 shadow-sm"
                   />
                 </div>
 
                 {/* Keyword search & action */}
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">Keyword / ISBN</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Keyword / ISBN</label>
                   <div className="flex gap-2">
                     <input
                       type="text"
                       value={keywordQuery}
                       onChange={(e) => setKeywordQuery(e.target.value)}
                       placeholder="e.g. Hardcover, 978..."
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-500/50"
+                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 shadow-sm"
                     />
                     <button
                       type="submit"
                       disabled={searchLoading}
-                      className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shrink-0 flex items-center gap-1.5"
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs transition shadow-sm shrink-0 flex items-center gap-1.5"
                     >
                       {searchLoading ? (
-                        <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                       ) : (
                         <span>Search</span>
                       )}
@@ -448,15 +449,15 @@ export default function BundlesPage(): JSX.Element {
 
             {/* Split Builder Layout: Inventory Picker (Left) & Bundle Cart (Right) */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Left Column: Inventory Items Picker */}
+              {/* Left Column: Inventory Items Picker (7 cols) */}
               <div className="lg:col-span-7 space-y-3">
-                <div className="flex items-center justify-between text-xs text-slate-400 px-1">
-                  <span>Click books below to add them to your bundle draft:</span>
+                <div className="flex items-center justify-between text-xs text-slate-600 px-1">
+                  <span>Click books to select them for your bundle:</span>
                   <div className="flex items-center gap-3">
                     <button
                       type="button"
                       onClick={handleSelectAllVisible}
-                      className="text-amber-400 hover:text-amber-300 font-semibold"
+                      className="text-amber-700 hover:text-amber-800 font-bold"
                     >
                       + Select All Visible
                     </button>
@@ -464,7 +465,7 @@ export default function BundlesPage(): JSX.Element {
                       <button
                         type="button"
                         onClick={handleClearSelection}
-                        className="text-slate-400 hover:text-slate-200"
+                        className="text-slate-500 hover:text-slate-800 font-medium"
                       >
                         Clear Selection ({selectedItems.length})
                       </button>
@@ -473,14 +474,14 @@ export default function BundlesPage(): JSX.Element {
                 </div>
 
                 {searchLoading ? (
-                  <div className="p-12 text-center text-slate-400 bg-slate-900/40 rounded-xl border border-slate-800 flex flex-col items-center gap-3">
-                    <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                    <span>Searching active inventory...</span>
+                  <div className="p-12 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col items-center gap-3">
+                    <div className="w-6 h-6 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-xs font-medium">Searching active inventory...</span>
                   </div>
                 ) : searchResults.length === 0 ? (
-                  <div className="p-12 text-center text-slate-400 bg-slate-900/40 rounded-xl border border-slate-800">
+                  <div className="p-12 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
                     <span className="text-3xl block mb-2">📚</span>
-                    <p className="text-sm font-semibold text-slate-300">No unbundled inventory items match your search.</p>
+                    <p className="text-sm font-bold text-slate-800">No unbundled inventory items match your search.</p>
                     <p className="text-xs text-slate-500 mt-1">Try broadening your criteria or selecting "All Topics".</p>
                   </div>
                 ) : (
@@ -491,14 +492,14 @@ export default function BundlesPage(): JSX.Element {
                         <div
                           key={item.isbn}
                           onClick={() => handleToggleItem(item)}
-                          className={`p-3 rounded-xl border cursor-pointer transition-all flex gap-3 select-none ${
+                          className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex gap-3 select-none ${
                             isSelected
-                              ? "bg-amber-500/15 border-amber-500/50 shadow-md shadow-amber-500/5 ring-1 ring-amber-500/30"
-                              : "bg-slate-900/50 border-slate-800/80 hover:bg-slate-900/90 hover:border-slate-700"
+                              ? "bg-amber-50/90 border-amber-400 shadow-md ring-2 ring-amber-400/40"
+                              : "bg-white border-slate-200/90 hover:border-slate-300 hover:shadow-sm"
                           }`}
                         >
                           {/* Thumbnail / Cover */}
-                          <div className="w-14 h-20 bg-slate-950 rounded-lg overflow-hidden shrink-0 border border-slate-800 flex items-center justify-center">
+                          <div className="w-14 h-20 bg-slate-100 rounded-lg overflow-hidden shrink-0 border border-slate-200 flex items-center justify-center">
                             {item.coverUrl ? (
                               <img
                                 src={item.coverUrl}
@@ -517,29 +518,29 @@ export default function BundlesPage(): JSX.Element {
                           <div className="flex-1 min-w-0 flex flex-col justify-between">
                             <div>
                               <div className="flex items-start justify-between gap-1">
-                                <h3 className="text-xs font-semibold text-slate-200 line-clamp-2 leading-snug">
+                                <h3 className="text-xs font-bold text-slate-900 line-clamp-2 leading-snug">
                                   {item.title}
                                 </h3>
                                 <input
                                   type="checkbox"
                                   checked={isSelected}
-                                  onChange={() => {}} // handled by parent div onClick
-                                  className="accent-amber-500 rounded mt-0.5"
+                                  onChange={() => {}} // handled by card onClick
+                                  className="accent-amber-600 rounded mt-0.5 cursor-pointer"
                                 />
                               </div>
-                              <p className="text-[11px] text-slate-400 truncate mt-0.5">{item.author || "Unknown Author"}</p>
+                              <p className="text-xs text-slate-500 truncate mt-0.5">{item.author || "Unknown Author"}</p>
                               {item.category && (
-                                <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-medium">
+                                <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-medium">
                                   {item.category}
                                 </span>
                               )}
                             </div>
 
-                            <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-800/60">
-                              <span className="text-xs font-bold text-amber-400">
+                            <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-100">
+                              <span className="text-sm font-extrabold text-amber-700">
                                 {formatCurrency(item.listPrice)}
                               </span>
-                              <span className="text-[10px] text-slate-500">Qty: {item.quantityOnHand}</span>
+                              <span className="text-[11px] text-slate-500 font-medium">Qty: {item.quantityOnHand}</span>
                             </div>
                           </div>
                         </div>
@@ -549,50 +550,50 @@ export default function BundlesPage(): JSX.Element {
                 )}
               </div>
 
-              {/* Right Column: Bundle Staging Cart & Pricing Box */}
+              {/* Right Column: Bundle Staging Cart & Pricing Box (5 cols) */}
               <div className="lg:col-span-5 space-y-4">
-                <div className="p-4 bg-slate-900/80 rounded-2xl border border-slate-800 shadow-xl space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-3">
                     <div className="flex items-center gap-2">
                       <span className="text-base">✨</span>
-                      <h2 className="text-sm font-bold text-slate-200">Curated Bundle Draft</h2>
+                      <h2 className="text-sm font-bold text-slate-900">Curated Bundle Draft</h2>
                     </div>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold border border-amber-200/80">
                       {selectedItems.length} Titles Selected
                     </span>
                   </div>
 
                   {/* Selected Item Chips */}
                   {selectedItems.length === 0 ? (
-                    <div className="p-8 text-center text-slate-500 border border-dashed border-slate-800 rounded-xl">
-                      <span className="text-2xl block mb-1.5">📦</span>
-                      <p className="text-xs font-semibold text-slate-400">Your bundle draft is empty.</p>
+                    <div className="p-8 text-center text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
+                      <span className="text-3xl block mb-1.5">📦</span>
+                      <p className="text-xs font-bold text-slate-700">Your bundle draft is empty.</p>
                       <p className="text-[11px] text-slate-500 mt-0.5">Select at least 2 books from the left to start.</p>
                     </div>
                   ) : (
-                    <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                    <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
                       {selectedItems.map((item) => (
                         <div
                           key={item.isbn}
-                          className="flex items-center justify-between gap-2 p-2 bg-slate-950/80 rounded-lg border border-slate-800/80 text-xs"
+                          className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 text-xs"
                         >
-                          <div className="flex items-center gap-2 min-w-0">
+                          <div className="flex items-center gap-2.5 min-w-0">
                             {item.coverUrl ? (
-                              <img src={item.coverUrl} alt="" className="w-6 h-8 object-cover rounded shrink-0" />
+                              <img src={item.coverUrl} alt="" className="w-7 h-9 object-cover rounded shadow-xs shrink-0" />
                             ) : (
-                              <span className="w-6 h-8 bg-slate-900 rounded flex items-center justify-center text-xs shrink-0">📖</span>
+                              <span className="w-7 h-9 bg-slate-200 rounded flex items-center justify-center text-xs shrink-0">📖</span>
                             )}
                             <div className="min-w-0">
-                              <p className="font-semibold text-slate-200 truncate">{item.title}</p>
-                              <p className="text-[10px] text-slate-400 truncate">{item.author || "Unknown Author"}</p>
+                              <p className="font-bold text-slate-900 truncate">{item.title}</p>
+                              <p className="text-[11px] text-slate-500 truncate">{item.author || "Unknown Author"}</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            <span className="font-medium text-slate-300">{formatCurrency(item.listPrice)}</span>
+                            <span className="font-bold text-slate-800">{formatCurrency(item.listPrice)}</span>
                             <button
                               type="button"
                               onClick={() => handleRemoveSelectedItem(item.isbn)}
-                              className="text-slate-500 hover:text-rose-400 text-sm font-bold px-1"
+                              className="text-slate-400 hover:text-rose-600 text-sm font-bold px-1"
                               title="Remove from draft"
                             >
                               ✕
@@ -604,35 +605,35 @@ export default function BundlesPage(): JSX.Element {
                   )}
 
                   {/* Live Pricing Math Breakdown Box */}
-                  <div className="p-3.5 bg-slate-950/90 rounded-xl border border-amber-500/20 space-y-2">
-                    <div className="flex items-center justify-between text-xs text-slate-400">
+                  <div className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200/80 space-y-2.5 shadow-xs">
+                    <div className="flex items-center justify-between text-xs text-slate-600">
                       <span>Total Individual Price Sum:</span>
-                      <span className="text-slate-200 font-medium">
+                      <span className="text-slate-900 font-bold">
                         {formatCurrency(pricingSuggestion.totalIndividualPrice)}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between text-xs text-emerald-400">
-                      <span className="flex items-center gap-1">
+                    <div className="flex items-center justify-between text-xs text-emerald-800">
+                      <span className="flex items-center gap-1 font-semibold">
                         <span>🏷️</span> Bundle Discount (10% Off):
                       </span>
-                      <span className="font-semibold">
+                      <span className="font-bold">
                         -{formatCurrency(pricingSuggestion.savingsAmount)}
                       </span>
                     </div>
 
-                    <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+                    <div className="pt-2.5 border-t border-amber-200/80 flex items-center justify-between">
                       <div>
-                        <span className="text-[11px] text-amber-400/90 block font-semibold">Suggested Bundle Price</span>
-                        <span className="text-[10px] text-slate-500">(Nearest ending in .99)</span>
+                        <span className="text-xs text-amber-900 block font-bold">Suggested Bundle Price</span>
+                        <span className="text-[11px] text-slate-500">(Nearest ending in .99)</span>
                       </div>
-                      <span className="text-lg font-extrabold text-amber-300">
+                      <span className="text-2xl font-black text-amber-700">
                         {formatCurrency(pricingSuggestion.suggestedBundlePrice)}
                       </span>
                     </div>
 
                     {pricingSuggestion.savingsAmount > 0 && (
-                      <div className="text-[11px] text-center text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded py-1 font-medium">
+                      <div className="text-xs text-center text-emerald-800 bg-emerald-100/80 border border-emerald-200 rounded-xl py-1.5 font-bold">
                         Customer saves {formatCurrency(pricingSuggestion.savingsAmount)} ({pricingSuggestion.savingsPercent}%) vs. individual purchase!
                       </div>
                     )}
@@ -641,33 +642,33 @@ export default function BundlesPage(): JSX.Element {
                   {/* Bundle Configuration Form */}
                   <div className="space-y-3 pt-1">
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                        Bundle Title <span className="text-rose-400">*</span>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
+                        Bundle Title <span className="text-rose-600">*</span>
                       </label>
                       <input
                         type="text"
                         value={bundleTitle}
                         onChange={(e) => setBundleTitle(e.target.value)}
                         placeholder="e.g. Isaac Asimov Classic Sci-Fi Bundle"
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-amber-500/50 font-medium"
+                        className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 font-medium shadow-sm"
                       />
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-300 mb-1">Topic / Category</label>
+                        <label className="block text-xs font-bold text-slate-800 mb-1">Topic / Category</label>
                         <input
                           type="text"
                           value={bundleTopic}
                           onChange={(e) => setBundleTopic(e.target.value)}
                           placeholder="e.g. Science Fiction"
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-500/50"
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 shadow-sm"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                          Bundle Price ($) <span className="text-amber-400 font-normal">(Editable)</span>
+                        <label className="block text-xs font-bold text-slate-800 mb-1">
+                          Bundle Price ($) <span className="text-slate-500 font-normal">(Editable)</span>
                         </label>
                         <input
                           type="number"
@@ -676,7 +677,7 @@ export default function BundlesPage(): JSX.Element {
                           value={customPriceInput}
                           onChange={(e) => setCustomPriceInput(e.target.value)}
                           placeholder="26.99"
-                          className="w-full bg-slate-950 border border-amber-500/40 rounded-lg px-3 py-2 text-xs text-amber-300 font-bold focus:outline-none focus:border-amber-400"
+                          className="w-full bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs text-amber-800 font-extrabold focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 shadow-sm"
                         />
                       </div>
                     </div>
@@ -686,15 +687,15 @@ export default function BundlesPage(): JSX.Element {
                       type="button"
                       disabled={selectedItems.length < 2 || isCreatingBundle}
                       onClick={handleCreateBundle}
-                      className={`w-full py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg ${
+                      className={`w-full py-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-sm ${
                         selectedItems.length < 2 || isCreatingBundle
-                          ? "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50"
-                          : "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-amber-500/20 active:scale-[0.99]"
+                          ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
+                          : "bg-amber-600 hover:bg-amber-700 text-white active:scale-[0.99]"
                       }`}
                     >
                       {isCreatingBundle ? (
                         <>
-                          <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                           <span>Creating Parent SKU & Reserving Stock...</span>
                         </>
                       ) : (
@@ -703,7 +704,7 @@ export default function BundlesPage(): JSX.Element {
                         </>
                       )}
                     </button>
-                    <p className="text-[10px] text-center text-slate-500 leading-normal">
+                    <p className="text-[11px] text-center text-slate-500 leading-normal">
                       Creating a bundle reserves the individual items so they are sold only as a single set. You can unbundle at any time.
                     </p>
                   </div>
@@ -716,29 +717,29 @@ export default function BundlesPage(): JSX.Element {
         {/* Tab 2: Active Bundles */}
         {activeTab === "active" && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h2 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+            <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+              <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span>🗂️</span> Active Curated Bundles
               </h2>
               <button
                 type="button"
                 onClick={loadActiveBundles}
                 disabled={bundlesLoading}
-                className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold"
+                className="text-xs text-amber-700 hover:text-amber-800 flex items-center gap-1 font-bold"
               >
                 <span>🔄 Refresh</span>
               </button>
             </div>
 
             {bundlesLoading ? (
-              <div className="p-12 text-center text-slate-400 bg-slate-900/40 rounded-xl border border-slate-800 flex flex-col items-center gap-3">
-                <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                <span>Loading active bundles...</span>
+              <div className="p-12 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col items-center gap-3">
+                <div className="w-6 h-6 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
+                <span className="text-xs font-medium">Loading active bundles...</span>
               </div>
             ) : activeBundles.length === 0 ? (
-              <div className="p-12 text-center text-slate-400 bg-slate-900/40 rounded-xl border border-slate-800">
+              <div className="p-12 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
                 <span className="text-3xl block mb-2">📦</span>
-                <p className="text-sm font-semibold text-slate-300">No active bundles created yet.</p>
+                <p className="text-sm font-bold text-slate-800">No active bundles created yet.</p>
                 <p className="text-xs text-slate-500 mt-1">Switch to the Bundle Builder tab to create your first multi-book bundle!</p>
               </div>
             ) : (
@@ -746,69 +747,69 @@ export default function BundlesPage(): JSX.Element {
                 {activeBundles.map((bundle) => (
                   <div
                     key={bundle.id}
-                    className="p-4 bg-slate-900/70 rounded-2xl border border-slate-800 hover:border-slate-700/80 transition-all space-y-3.5 shadow-lg"
+                    className="p-5 bg-white rounded-2xl border border-slate-200/90 hover:border-slate-300 hover:shadow-md transition space-y-4"
                   >
                     {/* Header: Title & Badges */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                          <span className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                          <span className="px-2.5 py-0.5 text-xs font-mono font-bold rounded-md bg-amber-50 text-amber-800 border border-amber-200">
                             {bundle.parentSku}
                           </span>
                           {bundle.topic && (
-                            <span className="px-2 py-0.5 text-[10px] font-medium rounded bg-slate-800 text-slate-300">
+                            <span className="px-2 py-0.5 text-xs font-medium rounded-md bg-slate-100 text-slate-700">
                               {bundle.topic}
                             </span>
                           )}
-                          <span className="px-2 py-0.5 text-[10px] font-medium rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          <span className="px-2 py-0.5 text-xs font-bold rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
                             {bundle.items.length} Books
                           </span>
                         </div>
-                        <h3 className="text-sm font-bold text-slate-100 line-clamp-1">{bundle.title}</h3>
+                        <h3 className="text-sm font-bold text-slate-900 line-clamp-1">{bundle.title}</h3>
                       </div>
 
                       {/* Pricing badge */}
                       <div className="text-right shrink-0">
-                        <span className="text-base font-extrabold text-amber-300 block">
+                        <span className="text-lg font-black text-amber-700 block">
                           {formatCurrency(bundle.bundlePrice)}
                         </span>
-                        <span className="text-[10px] text-slate-500 line-through">
+                        <span className="text-xs text-slate-400 line-through">
                           {formatCurrency(bundle.originalTotalPrice)}
                         </span>
                       </div>
                     </div>
 
                     {/* Child Book Thumbnails Grid */}
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 p-2.5 bg-slate-950/80 rounded-xl border border-slate-800/80">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5 p-3 bg-slate-50 rounded-xl border border-slate-200/80">
                       {bundle.items.map((child) => (
                         <div key={child.id} className="space-y-1">
-                          <div className="w-full h-24 bg-slate-900 rounded-lg overflow-hidden border border-slate-800 flex items-center justify-center">
+                          <div className="w-full h-24 bg-white rounded-lg overflow-hidden border border-slate-200 flex items-center justify-center shadow-2xs">
                             {child.coverUrl ? (
                               <img src={child.coverUrl} alt="" className="w-full h-full object-cover" />
                             ) : (
                               <span className="text-lg">📖</span>
                             )}
                           </div>
-                          <p className="text-[10px] font-semibold text-slate-300 truncate">{child.title}</p>
-                          <p className="text-[9px] text-slate-500 truncate">{child.author || "Unknown"}</p>
+                          <p className="text-[11px] font-bold text-slate-800 truncate">{child.title}</p>
+                          <p className="text-[10px] text-slate-500 truncate">{child.author || "Unknown"}</p>
                         </div>
                       ))}
                     </div>
 
                     {/* Bottom Actions */}
                     <div className="flex items-center justify-between pt-1 text-xs">
-                      <span className="text-[11px] text-slate-400">
+                      <span className="text-xs text-slate-500 font-medium">
                         Created {new Date(bundle.createdAt).toLocaleDateString()}
                       </span>
                       <button
                         type="button"
                         disabled={unbundlingId === bundle.id}
                         onClick={() => handleUnbundle(bundle)}
-                        className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 border border-rose-500/30 font-semibold rounded-lg transition-all flex items-center gap-1.5"
+                        className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
                       >
                         {unbundlingId === bundle.id ? (
                           <>
-                            <div className="w-3 h-3 border border-rose-300 border-t-transparent rounded-full animate-spin" />
+                            <div className="w-3 h-3 border-2 border-rose-700 border-t-transparent rounded-full animate-spin" />
                             <span>Restoring Items...</span>
                           </>
                         ) : (
