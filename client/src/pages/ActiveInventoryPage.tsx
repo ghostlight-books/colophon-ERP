@@ -129,36 +129,157 @@ function InventoryPage(): JSX.Element {
     }
   };
 
+function readAllLocalScannedBooks(): InventoryRecord[] {
+  if (typeof window === "undefined") return [];
+  const records: InventoryRecord[] = [];
+  const seen = new Set<string>();
+
+  // 1. Check colophon-current-scanned-books
+  try {
+    const raw = window.localStorage.getItem("colophon-current-scanned-books");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (!item || !item.isbn) continue;
+          const cleanIsbn = String(item.isbn).replace(/[^0-9X]/gi, "").toUpperCase();
+          if (seen.has(cleanIsbn)) continue;
+          seen.add(cleanIsbn);
+          records.push({
+            id: item.id || `local-${cleanIsbn}`,
+            isbn: cleanIsbn,
+            title: item.title ?? null,
+            author: item.author ?? null,
+            coverUrl: item.coverUrl ?? null,
+            thriftbooksPrice: item.thriftbooksPrice ?? null,
+            listPrice: item.listPrice ?? item.thriftbooksPrice ?? 9.99,
+            condition: item.condition ?? "Good",
+            container: item.container ?? "Main Intake",
+            category: item.category ?? "Print Books",
+            subcategory: item.subcategory ?? null,
+            mediaType: item.mediaType ?? "Book",
+            sku: item.sku ?? `BK-${cleanIsbn}`,
+            quantityOnHand: typeof item.quantityOnHand === "number" && item.quantityOnHand > 0 ? item.quantityOnHand : 1,
+            shopifyStatus: "Not connected",
+            networkStatus: "Available to share",
+          });
+        }
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+
+  // 2. Check colophon-scan-sessions
+  try {
+    const rawSessions = window.localStorage.getItem("colophon-scan-sessions");
+    if (rawSessions) {
+      const sessions = JSON.parse(rawSessions);
+      if (Array.isArray(sessions)) {
+        for (const session of sessions) {
+          if (!session || !Array.isArray(session.items)) continue;
+          for (const sItem of session.items) {
+            if (!sItem || !sItem.isbn) continue;
+            const cleanIsbn = String(sItem.isbn).replace(/[^0-9X]/gi, "").toUpperCase();
+            if (seen.has(cleanIsbn)) continue;
+            seen.add(cleanIsbn);
+            records.push({
+              id: sItem.id || `session-${cleanIsbn}`,
+              isbn: cleanIsbn,
+              title: sItem.title ?? `Scanned Book (${cleanIsbn})`,
+              author: null,
+              coverUrl: null,
+              thriftbooksPrice: sItem.value ?? null,
+              listPrice: sItem.value ?? 9.99,
+              condition: sItem.condition ?? "Good",
+              container: sItem.container ?? "Main Intake",
+              category: "Print Books",
+              subcategory: null,
+              mediaType: "Book",
+              sku: `BK-${cleanIsbn}`,
+              quantityOnHand: 1,
+              shopifyStatus: "Not connected",
+              networkStatus: "Available to share",
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+
+  return records;
+}
+
   const loadInventory = async (): Promise<void> => {
     setLoading(true);
+    let apiItems: InventoryRecord[] = [];
+    let connected = 0;
+
     try {
       const response = await fetch(resolveApiUrl(`/inventory/active?updatedAt=${Date.now()}`));
-      if (!response.ok) {
-        throw new Error(`Inventory service unavailable: ${response.status}`);
+      if (response.ok) {
+        const payload = (await response.json()) as { items: InventoryRecord[]; connectedStores: number };
+        apiItems = payload.items || [];
+        connected = payload.connectedStores || 0;
       }
-      const payload = (await response.json()) as { items: InventoryRecord[]; connectedStores: number };
-      setItems(payload.items || []);
-      setConnectedPartnerStores(payload.connectedStores || 0);
-      setMessage(payload.items.length === 0 ? "No scanned inventory has been stored yet." : "Inventory synced from the local catalog.");
     } catch {
-      // Direct relative fallback if running behind proxy
       try {
         const directRes = await fetch(`/api/inventory/active?updatedAt=${Date.now()}`);
         if (directRes.ok) {
           const payload = (await directRes.json()) as { items: InventoryRecord[]; connectedStores: number };
-          setItems(payload.items || []);
-          setConnectedPartnerStores(payload.connectedStores || 0);
-          setMessage("Inventory synced from the local catalog.");
-          return;
+          apiItems = payload.items || [];
+          connected = payload.connectedStores || 0;
         }
       } catch {
         // ignore
       }
+    }
+
+    // Merge API items + locally scanned browser items so nothing scanned is ever missing
+    const itemMap = new Map<string, InventoryRecord>();
+    for (const item of apiItems) {
+      if (item && item.isbn) {
+        itemMap.set(item.isbn.replace(/[^0-9X]/gi, "").toUpperCase(), item);
+      }
+    }
+
+    const localScanned = readAllLocalScannedBooks();
+    for (const local of localScanned) {
+      const key = local.isbn.replace(/[^0-9X]/gi, "").toUpperCase();
+      if (!itemMap.has(key)) {
+        itemMap.set(key, local);
+        // Automatically sync missing local scan to backend database in background
+        void fetch(resolveApiUrl(`/inventory/active/${encodeURIComponent(local.isbn)}`), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: local.title,
+            author: local.author,
+            listPrice: local.listPrice,
+            condition: local.condition,
+            container: local.container,
+            category: local.category,
+            subcategory: local.subcategory,
+            sku: local.sku,
+            quantityOnHand: local.quantityOnHand,
+            mediaType: local.mediaType,
+          }),
+        }).catch(() => {});
+      }
+    }
+
+    const allMerged = Array.from(itemMap.values());
+    if (allMerged.length > 0) {
+      setItems(allMerged);
+      setConnectedPartnerStores(connected);
+      setMessage(`Showing all ${allMerged.length} active inventory items.`);
+    } else {
       setItems(fallbackInventory);
       setMessage("Showing local inventory preview. Connect the API to sync all records.");
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   useEffect(() => {
