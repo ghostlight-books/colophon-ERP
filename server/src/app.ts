@@ -385,6 +385,14 @@ export function createApp(): express.Express {
   app.use(requestLogger);
   app.use(tenantContext);
 
+  // Path rewrite middleware: transparently support both /api/path and /path
+  app.use((req, _res, next) => {
+    if (!req.url.startsWith("/api") && !req.url.startsWith("/auth") && req.url !== "/" && !req.url.startsWith("/@") && !req.url.startsWith("/src")) {
+      req.url = `/api${req.url}`;
+    }
+    next();
+  });
+
   app.get("/", (req, res) => {
     const clientUrl = env.CLIENT_APP_URL.replace(/\/$/, "");
     const query = new URLSearchParams(req.query as Record<string, string>).toString();

@@ -23,7 +23,22 @@ type InventoryRecord = {
   networkStatus: "Available to share" | "Shared" | "Private";
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api";
+function resolveApiUrl(endpointPath: string): string {
+  const envBase = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
+  const path = endpointPath.startsWith("/") ? endpointPath : `/${endpointPath}`;
+
+  if (envBase) {
+    const cleanBase = envBase.replace(/\/+$/, "");
+    if (cleanBase.endsWith("/api")) {
+      return `${cleanBase}${path.startsWith("/api") ? path.slice(4) : path}`;
+    }
+    return `${cleanBase}${path.startsWith("/api") ? path : `/api${path}`}`;
+  }
+
+  // Fallback for local dev
+  return `http://localhost:4000${path.startsWith("/api") ? path : `/api${path}`}`;
+}
+
 const PARTNER_AVAILABILITY_CACHE_MS = 30 * 60 * 1000;
 
 const GENRE_OPTIONS = [
@@ -117,15 +132,28 @@ function InventoryPage(): JSX.Element {
   const loadInventory = async (): Promise<void> => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/inventory/active?updatedAt=${Date.now()}`);
+      const response = await fetch(resolveApiUrl(`/inventory/active?updatedAt=${Date.now()}`));
       if (!response.ok) {
-        throw new Error("Inventory service unavailable");
+        throw new Error(`Inventory service unavailable: ${response.status}`);
       }
       const payload = (await response.json()) as { items: InventoryRecord[]; connectedStores: number };
-      setItems(payload.items);
-      setConnectedPartnerStores(payload.connectedStores);
+      setItems(payload.items || []);
+      setConnectedPartnerStores(payload.connectedStores || 0);
       setMessage(payload.items.length === 0 ? "No scanned inventory has been stored yet." : "Inventory synced from the local catalog.");
     } catch {
+      // Direct relative fallback if running behind proxy
+      try {
+        const directRes = await fetch(`/api/inventory/active?updatedAt=${Date.now()}`);
+        if (directRes.ok) {
+          const payload = (await directRes.json()) as { items: InventoryRecord[]; connectedStores: number };
+          setItems(payload.items || []);
+          setConnectedPartnerStores(payload.connectedStores || 0);
+          setMessage("Inventory synced from the local catalog.");
+          return;
+        }
+      } catch {
+        // ignore
+      }
       setItems(fallbackInventory);
       setMessage("Showing local inventory preview. Connect the API to sync all records.");
     } finally {
@@ -243,7 +271,7 @@ function InventoryPage(): JSX.Element {
   async function removeItem(item: InventoryRecord): Promise<void> {
     if (!window.confirm(`Remove all on-hand units of ${item.title ?? item.isbn} from active inventory?`)) return;
     try {
-      const response = await fetch(`${API_BASE}/inventory/products/${encodeURIComponent(item.isbn)}`, { method: "DELETE" });
+      const response = await fetch(resolveApiUrl(`/inventory/products/${encodeURIComponent(item.isbn)}`), { method: "DELETE" });
       if (!response.ok) throw new Error("Inventory item could not be removed.");
       setItems((current) => current.filter((record) => record.id !== item.id));
       setSelectedIsbns((current) => {
@@ -288,7 +316,7 @@ function InventoryPage(): JSX.Element {
         }
       }
 
-      const response = await fetch(`${API_BASE}/inventory/bulk-update`, {
+      const response = await fetch(resolveApiUrl("/inventory/bulk-update"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -319,7 +347,7 @@ function InventoryPage(): JSX.Element {
     setBulkBusy(true);
     try {
       const isbnsArray = Array.from(selectedIsbns);
-      const response = await fetch(`${API_BASE}/inventory/bulk-update`, {
+      const response = await fetch(resolveApiUrl("/inventory/bulk-update"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -346,7 +374,7 @@ function InventoryPage(): JSX.Element {
     setBulkBusy(true);
     try {
       const isbnsArray = Array.from(selectedIsbns);
-      const response = await fetch(`${API_BASE}/inventory/bulk-delete`, {
+      const response = await fetch(resolveApiUrl("/inventory/bulk-delete"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isbns: isbnsArray }),
