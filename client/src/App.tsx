@@ -29,6 +29,37 @@ function EbayIcon(): JSX.Element {
   );
 }
 
+function ShopifyIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+      <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <line x1="3" y1="6" x2="21" y2="6" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M16 10a4 4 0 0 1-8 0" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function OrdersIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points="14 2 14 8 20 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <polyline points="10 9 9 9 8 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function RequestIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M12 7v5l3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function GridIcon(): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
@@ -194,11 +225,24 @@ function ShellRouteLayout(): JSX.Element {
 
   const navItems = useMemo<ShellNavItem[]>(() => {
     const items: Array<ShellNavItem & { module: SystemModule }> = [
-      { key: "dashboard", label: "Dashboard", to: "/dashboard", icon: <GridIcon />, module: "DASHBOARD" },
-      { key: "pos-register", label: "Point of Sale", to: "/pos-register", icon: <RegisterIcon />, module: "POS" },
-      { key: "calendar", label: "Calendar", to: "/calendar", icon: <CalendarIcon />, module: "CALENDAR" },
-      { key: "lists", label: "Lists", to: "/lists", icon: <ListsIcon />, module: "LISTS" },
-      { key: "intake", label: "Intake", to: "/intake", icon: <BoxIcon />, module: "INTAKE" },
+      {
+        key: "dashboard",
+        label: "Dashboard",
+        to: "/dashboard",
+        icon: <GridIcon />,
+        module: "DASHBOARD",
+      },
+      {
+        key: "pos-register",
+        label: "Point of Sale",
+        to: "/pos-register",
+        icon: <RegisterIcon />,
+        module: "POS",
+        children: [
+          { key: "pos-checkout", label: "Register & Cart", to: "/pos-register", icon: <RegisterIcon /> },
+          { key: "pos-sales", label: "Sales & Orders", to: "/sales", icon: <OrdersIcon /> },
+        ],
+      },
       {
         key: "inventory",
         label: "Inventory",
@@ -206,19 +250,84 @@ function ShellRouteLayout(): JSX.Element {
         icon: <BoxIcon />,
         module: "INVENTORY",
         children: [
-          { key: "active-inventory", label: "Active Inventory", to: "/inventory" },
+          { key: "active-inventory", label: "Active Inventory", to: "/inventory", icon: <BoxIcon /> },
           { key: "ebay", label: "eBay Hub", to: "/ebay", icon: <EbayIcon /> },
+          { key: "shopify", label: "Shopify Sync", to: "/shopify", icon: <ShopifyIcon /> },
         ],
       },
-      { key: "operations", label: "Operations", to: "/operations", icon: <OperationsIcon />, module: "DASHBOARD" },
-      { key: "marketing", label: "Marketing", to: "/marketing", icon: <MarketingIcon />, module: "LISTS" },
-      { key: "finance", label: "Accounting", to: "/finance", icon: <WalletIcon />, module: "ACCOUNTING" },
-      { key: "open-network", label: "Open Network", to: "/open-network", icon: <NetworkIcon />, module: "INVENTORY" },
+      {
+        key: "intake",
+        label: "Intake",
+        to: "/intake",
+        icon: <BoxIcon />,
+        module: "INTAKE",
+      },
+      {
+        key: "open-network",
+        label: "Open Network",
+        to: "/open-network",
+        icon: <NetworkIcon />,
+        module: "INVENTORY",
+        children: [
+          { key: "network-directory", label: "Bookstore Directory", to: "/open-network", icon: <NetworkIcon /> },
+          { key: "network-order", label: "Book Order Request", to: "/open-network/order", icon: <RequestIcon /> },
+        ],
+      },
+      {
+        key: "calendar",
+        label: "Calendar",
+        to: "/calendar",
+        icon: <CalendarIcon />,
+        module: "CALENDAR",
+      },
+      {
+        key: "lists",
+        label: "Lists",
+        to: "/lists",
+        icon: <ListsIcon />,
+        module: "LISTS",
+      },
+      {
+        key: "operations",
+        label: "Operations",
+        to: "/operations",
+        icon: <OperationsIcon />,
+        module: "DASHBOARD",
+      },
+      {
+        key: "marketing",
+        label: "Marketing",
+        to: "/marketing",
+        icon: <MarketingIcon />,
+        module: "LISTS",
+      },
+      {
+        key: "finance",
+        label: "Accounting",
+        to: "/finance",
+        icon: <WalletIcon />,
+        module: "ACCOUNTING",
+      },
     ];
     return items.filter((item) => hasModuleAccess(normalizeRole(currentUser.role), item.module));
   }, [currentUser.role]);
 
-  const routeModules: Record<string, SystemModule> = { "/dashboard": "DASHBOARD", "/pos-register": "POS", "/calendar": "CALENDAR", "/lists": "LISTS", "/intake": "INTAKE", "/inventory": "INVENTORY", "/ebay": "INVENTORY", "/finance": "ACCOUNTING", "/operations": "DASHBOARD", "/marketing": "LISTS", "/shopify": "INVENTORY", "/open-network": "INVENTORY" };
+  const routeModules: Record<string, SystemModule> = {
+    "/dashboard": "DASHBOARD",
+    "/pos-register": "POS",
+    "/sales": "POS",
+    "/calendar": "CALENDAR",
+    "/lists": "LISTS",
+    "/intake": "INTAKE",
+    "/inventory": "INVENTORY",
+    "/ebay": "INVENTORY",
+    "/shopify": "INVENTORY",
+    "/finance": "ACCOUNTING",
+    "/operations": "DASHBOARD",
+    "/marketing": "LISTS",
+    "/open-network": "INVENTORY",
+    "/open-network/order": "INVENTORY",
+  };
 
   const pageMeta: Record<string, { subtitle: string }> = {
     "/dashboard": {

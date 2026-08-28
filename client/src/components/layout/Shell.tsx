@@ -374,33 +374,35 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
                   <button
                     type="button"
                     onClick={() => {
-                      onNavigate(item.to);
                       if (hasChildren) {
                         setExpandedMenus((prev) => ({
                           ...prev,
                           [item.key]: !isExpanded,
                         }));
                       }
+                      if (!hasChildren || activePath !== item.to) {
+                        onNavigate(item.to);
+                      }
                     }}
                     className={[
                       "group flex items-center justify-between rounded-full px-4 py-2.5 text-left text-[0.96rem] font-semibold transition",
-                      isDirectActive && !isChildActive
+                      isDirectActive && !hasChildren
                         ? "bg-[#e9ff63] text-slate-800 shadow-[inset_0_0_0_1px_rgba(201,224,86,0.48)]"
                         : isParentActive
                           ? isDark
-                            ? "bg-white/12 text-slate-100"
-                            : "bg-white/60 text-slate-800"
+                            ? "bg-white/14 text-slate-100 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
+                            : "bg-white/65 text-slate-800 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]"
                           : isDark
                             ? "bg-white/8 text-slate-300 hover:bg-white/14 hover:text-white"
                             : "bg-white/40 text-slate-600 hover:bg-white/72 hover:text-slate-800",
                     ].join(" ")}
-                    aria-current={isDirectActive && !isChildActive ? "page" : undefined}
+                    aria-current={isDirectActive && !hasChildren ? "page" : undefined}
                   >
                     <div className="flex items-center gap-3">
                       <span
                         className={[
                           "grid h-7 w-7 place-items-center rounded-full transition",
-                          isDirectActive && !isChildActive
+                          isDirectActive && !hasChildren
                             ? "bg-black/10 text-slate-700"
                             : isDark
                               ? "bg-white/15 text-slate-300 group-hover:bg-white/20"
@@ -426,8 +428,8 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
                   {/* Sub-menu items */}
                   {hasChildren && isExpanded ? (
                     <div className={[
-                      "ml-5 flex flex-col gap-1 border-l-2 pl-3 py-1 my-0.5",
-                      isDark ? "border-white/15" : "border-slate-300/60",
+                      "ml-4 flex flex-col gap-1 border-l-2 pl-3 py-1 my-0.5 animate-in fade-in slide-in-from-top-1 duration-150",
+                      isDark ? "border-white/15" : "border-slate-300/70",
                     ].join(" ")}>
                       {item.children!.map((child) => {
                         const isThisChildActive = activePath === child.to || (child.to !== "/dashboard" && activePath.startsWith(child.to));

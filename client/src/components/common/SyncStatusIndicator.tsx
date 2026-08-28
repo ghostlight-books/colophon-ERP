@@ -146,12 +146,10 @@ export default function SyncStatusIndicator({ className = "", showDetailsByDefau
           <div
             className="fixed inset-0 z-[960] bg-slate-900/20 backdrop-blur-[1px]"
             onClick={() => setExpanded(false)}
-            aria-hidden="true"
           />
           <div className="absolute right-0 top-full z-[1000] mt-2 w-80 rounded-2xl border border-slate-200/90 bg-white p-4 shadow-2xl backdrop-blur-xl sm:w-96">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">System Sync Engine</p>
                 <h4 className="text-sm font-bold text-slate-800">Live Integration & Scraper Status</h4>
               </div>
               <button
