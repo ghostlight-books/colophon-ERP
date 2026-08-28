@@ -22,6 +22,7 @@ import { processEbayWebhookEvent, handleEbayWebhookChallenge } from "./services/
 import { acquireReservationLock, releaseReservationLock, handleLocalSaleAndSync } from "./services/inventory/concurrency.service.js";
 import { autoSelectShippingRate, quoteAllShippingRates } from "./services/shipping/shippingRate.service.js";
 import { resolveBookDimensions } from "./services/isbn/dimensions.service.js";
+import { validateBuyingSearchParams, searchBuyingEditions, evaluateBuyingBook, processBuyingBatch } from "./services/buying.service.js";
 
 type OpsConnector = {
   key: string;
@@ -1397,6 +1398,77 @@ export function createApp(): express.Express {
       return;
     }
     res.json(book);
+  });
+
+  // --- Book Buying Desk API Endpoints ---
+  app.get("/api/buying/search", async (req, res, next) => {
+    try {
+      const validation = validateBuyingSearchParams({
+        year: req.query.year,
+        publisher: req.query.publisher,
+        author: req.query.author,
+        isbn: req.query.isbn,
+        title: req.query.title,
+      });
+
+      if (!validation.valid || !validation.cleanParams) {
+        res.status(400).json({ error: validation.error || "Invalid search parameters." });
+        return;
+      }
+
+      const results = await searchBuyingEditions(validation.cleanParams);
+      res.json({ results });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/buying/evaluate/:isbn", async (req, res, next) => {
+    try {
+      const condition = (typeof req.query.condition === "string" ? req.query.condition : "Good") as any;
+      const evaluation = await evaluateBuyingBook(req.params.isbn, condition);
+      res.json(evaluation);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/buying/process", async (req, res, next) => {
+    try {
+      const { items, paymentMethod = "cash", customerName, customerEmail, customerPhone, storeId } = req.body as {
+        items?: Array<{
+          isbn: string;
+          condition: any;
+          sellPrice: number;
+          buyOffer: number;
+          title?: string;
+          author?: string;
+        }>;
+        paymentMethod?: "cash" | "storecredit" | "check";
+        customerName?: string;
+        customerEmail?: string;
+        customerPhone?: string;
+        storeId?: string;
+      };
+
+      if (!Array.isArray(items) || items.length === 0) {
+        res.status(400).json({ error: "At least one item is required to process a buyout." });
+        return;
+      }
+
+      const result = await processBuyingBatch({
+        items,
+        paymentMethod: paymentMethod || "cash",
+        customerName,
+        customerEmail,
+        customerPhone,
+        storeId,
+      });
+
+      res.status(201).json(result);
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.get("/api/operations/state", (_req, res) => {

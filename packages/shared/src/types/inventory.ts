@@ -153,4 +153,74 @@ export interface ShippingRateSelectionResult {
   isHighValueRouted: boolean;
 }
 
+export type BookBuyingCondition = "Fine" | "Very Good" | "Good" | "Fair" | "Poor";
+
+export interface BookBuyingMarketSources {
+  thriftbooksPrice?: number | null;
+  abebooksPrice?: number | null;
+  googleBooksPrice?: number | null;
+  priceRangeLow?: number | null;
+  priceRangeHigh?: number | null;
+}
+
+export interface BookBuyingOffer {
+  isbn: string;
+  title: string | null;
+  author: string | null;
+  publisher?: string | null;
+  year?: number | null;
+  coverUrl?: string | null;
+  bindingFormat?: string | null;
+  pageCount?: number | null;
+  condition: BookBuyingCondition;
+  conditionDiscount: number;
+  estimatedRetailValue: number;
+  offerPercentage: number;
+  offerAmount: number;
+  storeCreditOfferAmount: number;
+  marketSources: BookBuyingMarketSources;
+}
+
+export interface BookBuyingSearchParams {
+  year: number;
+  publisher?: string;
+  author?: string;
+  isbn?: string;
+  title?: string;
+}
+
+export interface BookBuyingSearchResult {
+  isbn: string;
+  title: string;
+  author: string | null;
+  year: number | null;
+  publisher: string | null;
+  coverUrl: string | null;
+  estimatedRetailValue: number;
+  offerAmount: number;
+}
+
+export interface BuyingBatchItem {
+  id: string;
+  isbn: string;
+  title: string;
+  author: string | null;
+  publisher?: string | null;
+  year?: number | null;
+  coverUrl?: string | null;
+  condition: BookBuyingCondition;
+  sellPrice: number;
+  buyOffer: number;
+  marketSources: BookBuyingMarketSources;
+  addedAt: string;
+}
+
+export interface BuyingBatchSummary {
+  totalItems: number;
+  totalEstimatedResaleValue: number;
+  totalCashOffer: number;
+  totalCreditOffer: number;
+}
+
+
 

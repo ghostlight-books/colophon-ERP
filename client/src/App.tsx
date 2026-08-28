@@ -18,6 +18,7 @@ import PosRegisterPage from "./pages/PosRegisterPage";
 import ProductPage from "./pages/ProductPage";
 import ShopifyPage from "./pages/ShopifyPage";
 import EbayPage from "./pages/EbayPage";
+import BuyingPage from "./pages/BuyingPage";
 import { hasModuleAccess, normalizeRole, type SystemModule } from "@colophon/shared";
 
 function EbayIcon(): JSX.Element {
@@ -167,6 +168,7 @@ function App(): JSX.Element {
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="pos-register" element={<PosRegisterPage />} />
           <Route path="intake" element={<IntakePage />} />
+          <Route path="buying" element={<BuyingPage />} />
           <Route path="sales" element={<InventoryPage />} />
           <Route path="operations" element={<OperationsPage />} />
           <Route path="marketing" element={<MarketingPage />} />
@@ -261,6 +263,10 @@ function ShellRouteLayout(): JSX.Element {
         to: "/intake",
         icon: <BoxIcon />,
         module: "INTAKE",
+        children: [
+          { key: "intake-scanner", label: "Scanner Station", to: "/intake", icon: <BoxIcon /> },
+          { key: "buying-desk", label: "Book Buying Desk", to: "/buying", icon: <WalletIcon /> },
+        ],
       },
       {
         key: "open-network",
@@ -319,6 +325,7 @@ function ShellRouteLayout(): JSX.Element {
     "/calendar": "CALENDAR",
     "/lists": "LISTS",
     "/intake": "INTAKE",
+    "/buying": "INTAKE",
     "/inventory": "INVENTORY",
     "/ebay": "INVENTORY",
     "/shopify": "INVENTORY",
@@ -338,6 +345,9 @@ function ShellRouteLayout(): JSX.Element {
     },
     "/intake": {
       subtitle: "Scan incoming books, match ISBNs, and route review exceptions.",
+    },
+    "/buying": {
+      subtitle: "Evaluate incoming books, live comparative market prices, and 60% purchase offers.",
     },
     "/sales": {
       subtitle: "Track orders, invoices, and team sales activity.",
