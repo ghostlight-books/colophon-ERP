@@ -90,6 +90,85 @@ const fallbackInventory: InventoryRecord[] = [
 type SortField = "title" | "sku" | "category" | "mediaType" | "listPrice" | "shopifyStatus" | "networkStatus";
 type SortDirection = "asc" | "desc";
 
+function readAllLocalScannedBooks(): InventoryRecord[] {
+  if (typeof window === "undefined") return [];
+  const records: InventoryRecord[] = [];
+  const seen = new Set<string>();
+
+  // 1. Check colophon-current-scanned-books
+  try {
+    const raw = window.localStorage.getItem("colophon-current-scanned-books");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (!item || !item.isbn) continue;
+          const cleanIsbn = String(item.isbn).replace(/[^0-9X]/gi, "").toUpperCase();
+          if (seen.has(cleanIsbn)) continue;
+          seen.add(cleanIsbn);
+          records.push({
+            id: item.id || `local-${cleanIsbn}`,
+            isbn: cleanIsbn,
+            title: item.title ?? null,
+            author: item.author ?? null,
+            coverUrl: item.coverUrl ?? null,
+            thriftbooksPrice: item.thriftbooksPrice ?? null,
+            listPrice: item.listPrice ?? item.thriftbooksPrice ?? 9.99,
+            condition: item.condition ?? "Good",
+            container: item.container ?? "Main Intake",
+            category: item.category ?? "Print Books",
+            subcategory: item.subcategory ?? null,
+            mediaType: item.mediaType ?? "Book",
+            sku: item.sku ?? `BK-${cleanIsbn}`,
+            quantityOnHand: typeof item.quantityOnHand === "number" && item.quantityOnHand > 0 ? item.quantityOnHand : 1,
+            shopifyStatus: "Not connected",
+            networkStatus: "Available to share",
+          });
+        }
+      }
+    }
+  } catch {}
+
+  // 2. Check colophon-scan-sessions
+  try {
+    const rawSessions = window.localStorage.getItem("colophon-scan-sessions");
+    if (rawSessions) {
+      const sessions = JSON.parse(rawSessions);
+      if (Array.isArray(sessions)) {
+        for (const session of sessions) {
+          if (!session || !Array.isArray(session.items)) continue;
+          for (const sItem of session.items) {
+            if (!sItem || !sItem.isbn) continue;
+            const cleanIsbn = String(sItem.isbn).replace(/[^0-9X]/gi, "").toUpperCase();
+            if (seen.has(cleanIsbn)) continue;
+            seen.add(cleanIsbn);
+            records.push({
+              id: sItem.id || `session-${cleanIsbn}`,
+              isbn: cleanIsbn,
+              title: sItem.title ?? `Scanned Book (${cleanIsbn})`,
+              author: null,
+              coverUrl: null,
+              thriftbooksPrice: sItem.value ?? null,
+              listPrice: sItem.value ?? 9.99,
+              condition: sItem.condition ?? "Good",
+              container: sItem.container ?? "Main Intake",
+              category: "Print Books",
+              subcategory: null,
+              mediaType: "Book",
+              sku: `BK-${cleanIsbn}`,
+              quantityOnHand: 1,
+              shopifyStatus: "Not connected",
+              networkStatus: "Available to share",
+            });
+          }
+        }
+      }
+    }
+  } catch {}
+
+  return records;
+}
+
 function InventoryPage(): JSX.Element {
   const navigate = useNavigate();
   const [items, setItems] = useState<InventoryRecord[]>([]);
@@ -129,89 +208,6 @@ function InventoryPage(): JSX.Element {
     }
   };
 
-function readAllLocalScannedBooks(): InventoryRecord[] {
-  if (typeof window === "undefined") return [];
-  const records: InventoryRecord[] = [];
-  const seen = new Set<string>();
-
-  // 1. Check colophon-current-scanned-books
-  try {
-    const raw = window.localStorage.getItem("colophon-current-scanned-books");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          if (!item || !item.isbn) continue;
-          const cleanIsbn = String(item.isbn).replace(/[^0-9X]/gi, "").toUpperCase();
-          if (seen.has(cleanIsbn)) continue;
-          seen.add(cleanIsbn);
-          records.push({
-            id: item.id || `local-${cleanIsbn}`,
-            isbn: cleanIsbn,
-            title: item.title ?? null,
-            author: item.author ?? null,
-            coverUrl: item.coverUrl ?? null,
-            thriftbooksPrice: item.thriftbooksPrice ?? null,
-            listPrice: item.listPrice ?? item.thriftbooksPrice ?? 9.99,
-            condition: item.condition ?? "Good",
-            container: item.container ?? "Main Intake",
-            category: item.category ?? "Print Books",
-            subcategory: item.subcategory ?? null,
-            mediaType: item.mediaType ?? "Book",
-            sku: item.sku ?? `BK-${cleanIsbn}`,
-            quantityOnHand: typeof item.quantityOnHand === "number" && item.quantityOnHand > 0 ? item.quantityOnHand : 1,
-            shopifyStatus: "Not connected",
-            networkStatus: "Available to share",
-          });
-        }
-      }
-    }
-  } catch {
-    // ignore parse errors
-  }
-
-  // 2. Check colophon-scan-sessions
-  try {
-    const rawSessions = window.localStorage.getItem("colophon-scan-sessions");
-    if (rawSessions) {
-      const sessions = JSON.parse(rawSessions);
-      if (Array.isArray(sessions)) {
-        for (const session of sessions) {
-          if (!session || !Array.isArray(session.items)) continue;
-          for (const sItem of session.items) {
-            if (!sItem || !sItem.isbn) continue;
-            const cleanIsbn = String(sItem.isbn).replace(/[^0-9X]/gi, "").toUpperCase();
-            if (seen.has(cleanIsbn)) continue;
-            seen.add(cleanIsbn);
-            records.push({
-              id: sItem.id || `session-${cleanIsbn}`,
-              isbn: cleanIsbn,
-              title: sItem.title ?? `Scanned Book (${cleanIsbn})`,
-              author: null,
-              coverUrl: null,
-              thriftbooksPrice: sItem.value ?? null,
-              listPrice: sItem.value ?? 9.99,
-              condition: sItem.condition ?? "Good",
-              container: sItem.container ?? "Main Intake",
-              category: "Print Books",
-              subcategory: null,
-              mediaType: "Book",
-              sku: `BK-${cleanIsbn}`,
-              quantityOnHand: 1,
-              shopifyStatus: "Not connected",
-              networkStatus: "Available to share",
-            });
-          }
-        }
-      }
-    }
-  } catch {
-    // ignore parse errors
-  }
-
-  return records;
-}
-
   const loadInventory = async (): Promise<void> => {
     setLoading(true);
     let apiItems: InventoryRecord[] = [];
@@ -237,7 +233,7 @@ function readAllLocalScannedBooks(): InventoryRecord[] {
       }
     }
 
-    // Merge API items + locally scanned browser items so nothing scanned is ever missing
+    // Merge API items + locally scanned browser items
     const itemMap = new Map<string, InventoryRecord>();
     for (const item of apiItems) {
       if (item && item.isbn) {
@@ -250,7 +246,6 @@ function readAllLocalScannedBooks(): InventoryRecord[] {
       const key = local.isbn.replace(/[^0-9X]/gi, "").toUpperCase();
       if (!itemMap.has(key)) {
         itemMap.set(key, local);
-        // Automatically sync missing local scan to backend database in background
         void fetch(resolveApiUrl(`/inventory/active/${encodeURIComponent(local.isbn)}`), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

@@ -156,11 +156,12 @@ export async function createProductBundle(input: CreateProductBundleInput): Prom
     ? Number(input.customBundlePrice.toFixed(2))
     : pricing.suggestedBundlePrice;
 
-  // Generate parent SKU
+  // Generate parent SKU with uniqueness protection
   const topicSlug = (input.topic || "GEN").replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase();
   const timeSuffix = Date.now().toString().slice(-6);
-  const parentSku = `BDL-${topicSlug || "BOOK"}-${timeSuffix}`;
-  const bundleIsbn = `BDL-${Date.now()}`;
+  const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
+  const parentSku = `BDL-${topicSlug || "BOOK"}-${timeSuffix}-${randomSuffix}`;
+  const bundleIsbn = `BDL-${Date.now()}-${randomSuffix}`;
 
   // Smart title generation
   const itemTitles = input.items.map((i: CreateProductBundleInput["items"][number]) => i.title);
@@ -191,7 +192,7 @@ export async function createProductBundle(input: CreateProductBundleInput): Prom
       items: {
         create: input.items.map((item: CreateProductBundleInput["items"][number]) => ({
           isbn: item.isbn,
-          sku: item.sku || `ITEM-${item.isbn}`,
+          sku: item.sku || `ITEM-${item.isbn.slice(-8)}-${Math.floor(Math.random() * 1000)}`,
           title: item.title,
           author: item.author || null,
           coverUrl: item.coverUrl || null,
@@ -253,28 +254,32 @@ export async function createProductBundle(input: CreateProductBundleInput): Prom
     },
   });
 
-  // 4. Update Child Items: Take them off individual sale
+  // 4. Update Child Items: Take them off individual sale safely
   for (const item of input.items) {
-    // In IsbnLookupCache: mark isBundledChild and decrement quantityOnHand so not sold individually
+    const existingCache = await prisma.isbnLookupCache.findUnique({ where: { isbn: item.isbn } });
+    const currentQty = existingCache?.quantityOnHand ?? 1;
+
     await prisma.isbnLookupCache.updateMany({
       where: { isbn: item.isbn },
       data: {
         isBundledChild: true,
         bundleParentId: bundleRecord.id,
-        quantityOnHand: { decrement: 1 },
+        quantityOnHand: Math.max(0, currentQty - 1),
       },
     });
 
-    // In InventoryItem: reserve quantity
     const book = await prisma.book.findUnique({ where: { isbn13: item.isbn } });
     if (book) {
-      await prisma.inventoryItem.updateMany({
-        where: { bookId: book.id },
-        data: {
-          quantityOnHand: { decrement: 1 },
-          quantityReserved: { increment: 1 },
-        },
-      });
+      const invItems = await prisma.inventoryItem.findMany({ where: { bookId: book.id } });
+      for (const inv of invItems) {
+        await prisma.inventoryItem.update({
+          where: { id: inv.id },
+          data: {
+            quantityOnHand: Math.max(0, inv.quantityOnHand - 1),
+            quantityReserved: inv.quantityReserved + 1,
+          },
+        });
+      }
     }
 
     // Trigger Shopify background inventory update

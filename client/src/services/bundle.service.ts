@@ -128,14 +128,31 @@ export async function previewBundlePricing(prices: number[]): Promise<BundlePric
 
 export async function createBundle(input: CreateProductBundleInput): Promise<ProductBundle> {
   const url = resolveApiUrl("/bundles");
-  const res = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+  } catch {
+    // Relative fallback if host/port differs
+    res = await fetchWithTimeout("/api/bundles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+  }
+
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Failed to create product bundle (${res.status}).`);
+    let errMessage = `Failed to create product bundle (${res.status}).`;
+    try {
+      const err = (await res.json()) as { error?: string };
+      if (err && err.error) errMessage = err.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(errMessage);
   }
   window.dispatchEvent(new Event("colophon-inventory-updated"));
   return res.json() as Promise<ProductBundle>;
@@ -143,14 +160,30 @@ export async function createBundle(input: CreateProductBundleInput): Promise<Pro
 
 export async function unbundle(bundleId: string): Promise<UnbundleResult> {
   const url = resolveApiUrl(`/bundles/${encodeURIComponent(bundleId)}/unbundle`);
-  const res = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ storeId: "ghostlight-demo" }),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storeId: "ghostlight-demo" }),
+    });
+  } catch {
+    res = await fetchWithTimeout(`/api/bundles/${encodeURIComponent(bundleId)}/unbundle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storeId: "ghostlight-demo" }),
+    });
+  }
+
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Failed to unbundle product (${res.status}).`);
+    let errMessage = `Failed to unbundle product (${res.status}).`;
+    try {
+      const err = (await res.json()) as { error?: string };
+      if (err && err.error) errMessage = err.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(errMessage);
   }
   window.dispatchEvent(new Event("colophon-inventory-updated"));
   return res.json() as Promise<UnbundleResult>;

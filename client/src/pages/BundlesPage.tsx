@@ -217,11 +217,16 @@ export default function BundlesPage(): JSX.Element {
       return;
     }
 
-    const priceNum = parseFloat(customPriceInput);
-    if (!Number.isFinite(priceNum) || priceNum <= 0) {
-      setErrorMessage("Please enter a valid bundle price.");
-      return;
-    }
+    const parsedPrice = parseFloat(customPriceInput);
+    const finalPrice = Number.isFinite(parsedPrice) && parsedPrice > 0
+      ? parsedPrice
+      : (pricingSuggestion.suggestedBundlePrice > 0 ? pricingSuggestion.suggestedBundlePrice : 9.99);
+
+    const defaultTopic = selectedTopic !== "All" ? selectedTopic : (selectedItems[0]?.category || "Curated");
+    const finalTopic = bundleTopic.trim() || defaultTopic;
+
+    const defaultTitle = `${finalTopic} Book Bundle (${selectedItems.length} Books)`;
+    const finalTitle = bundleTitle.trim() || defaultTitle;
 
     setIsCreatingBundle(true);
     setErrorMessage(null);
@@ -229,19 +234,19 @@ export default function BundlesPage(): JSX.Element {
 
     try {
       const newBundle = await createBundle({
-        title: bundleTitle.trim() || undefined,
-        topic: bundleTopic.trim() || (selectedTopic !== "All" ? selectedTopic : undefined),
+        title: finalTitle,
+        topic: finalTopic,
         description: bundleDescription.trim() || undefined,
-        customBundlePrice: priceNum,
+        customBundlePrice: finalPrice,
         items: selectedItems.map((item) => ({
           isbn: item.isbn,
-          sku: item.sku,
-          title: item.title,
+          sku: item.sku || `ITEM-${item.isbn}`,
+          title: item.title || "Untitled Book",
           author: item.author,
           coverUrl: item.coverUrl,
-          condition: item.condition,
-          listPrice: item.listPrice,
-          category: item.category,
+          condition: item.condition || "Good",
+          listPrice: item.listPrice || 9.99,
+          category: item.category || finalTopic,
           subcategory: item.subcategory,
         })),
       });
@@ -252,6 +257,7 @@ export default function BundlesPage(): JSX.Element {
       setBundleDescription("");
       void handleSearch();
       void loadActiveBundles();
+      setActiveTab("active");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Failed to create bundle.");
     } finally {
