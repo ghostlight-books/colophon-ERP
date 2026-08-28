@@ -4,7 +4,9 @@ import {
   validateBuyingSearchParams,
   getConditionDiscount,
   evaluateBuyingBook,
+  processBuyingBatch,
 } from "../../buying.service.js";
+import { prisma } from "../../../config/database.js";
 
 describe("Book Buying & 60% Valuation Engine", () => {
   describe("validateBuyingSearchParams", () => {
@@ -111,4 +113,49 @@ describe("Book Buying & 60% Valuation Engine", () => {
       assert.ok(offer.marketSources.priceRangeLow <= offer.marketSources.priceRangeHigh);
     });
   });
+
+  describe("processBuyingBatch Inventory Ingestion", () => {
+    it("successfully persists acquired books to active inventory, Book model, and InventoryItem", async () => {
+      const testIsbn = "9780143127741";
+      const initialCache = await prisma.isbnLookupCache.findUnique({ where: { isbn: testIsbn } });
+      const initialQty = initialCache?.quantityOnHand ?? 0;
+
+      const result = await processBuyingBatch({
+        items: [
+          {
+            isbn: testIsbn,
+            title: "Test Acquired Book",
+            author: "Test Author",
+            condition: "Good",
+            sellPrice: 15.0,
+            buyOffer: 9.0,
+          },
+        ],
+        paymentMethod: "cash",
+        customerName: "Alice Walker",
+      });
+
+      assert.equal(result.success, true);
+      assert.equal(result.itemsProcessed, 1);
+      assert.equal(result.totalPaid, 9.0);
+
+      // Verify IsbnLookupCache quantity incremented
+      const updatedCache = await prisma.isbnLookupCache.findUnique({ where: { isbn: testIsbn } });
+      assert.ok(updatedCache);
+      assert.equal(updatedCache.quantityOnHand, initialQty + 1);
+      assert.equal(updatedCache.listPrice, 15.0);
+
+      // Verify Book model created/updated
+      const book = await prisma.book.findUnique({
+        where: { isbn13: testIsbn },
+        include: { inventoryItems: true },
+      });
+      assert.ok(book);
+      assert.equal(book.listPriceCents, 1500);
+      assert.ok(book.inventoryItems.length > 0);
+      const totalInventoryItemQty = book.inventoryItems.reduce((sum, item) => sum + item.quantityOnHand, 0);
+      assert.ok(totalInventoryItemQty >= 1);
+    });
+  });
 });
+

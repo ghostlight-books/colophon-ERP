@@ -2,6 +2,7 @@ import { prisma } from "../config/database.js";
 import { lookupBookByIsbn, resolveSmartBookPrice, autoCorrectIsbn, parseIsbn, lookupGoogleBooks } from "./isbnScanner.service.js";
 import { lookupThriftbooksDetails } from "./thriftbooksScraper.service.js";
 import { lookupAbeBooksPrice } from "./abebooksScraper.service.js";
+import { syncInventoryItemByIsbn } from "./ecommerce.service.js";
 import type {
   BookBuyingCondition,
   BookBuyingOffer,
@@ -311,7 +312,10 @@ export async function processBuyingBatch(input: {
     sellPrice: number;
     buyOffer: number;
     title?: string;
-    author?: string;
+    author?: string | null;
+    publisher?: string | null;
+    year?: number | null;
+    coverUrl?: string | null;
   }>;
   paymentMethod: "cash" | "storecredit" | "check";
   customerName?: string;
@@ -332,13 +336,14 @@ export async function processBuyingBatch(input: {
 
   for (const item of input.items) {
     totalPaid += item.buyOffer;
+    const cleanIsbn = autoCorrectIsbn(item.isbn.replace(/[^0-9X]/gi, "").toUpperCase());
 
-    // Update inventory quantity and condition
-    await prisma.isbnLookupCache.upsert({
-      where: { isbn: item.isbn },
+    // 1. Update IsbnLookupCache
+    const cacheRecord = await prisma.isbnLookupCache.upsert({
+      where: { isbn: cleanIsbn },
       create: {
-        isbn: item.isbn,
-        title: item.title ?? `Acquired Book (${item.isbn})`,
+        isbn: cleanIsbn,
+        title: item.title ?? `Acquired Book (${cleanIsbn})`,
         author: item.author ?? null,
         quantityOnHand: 1,
         condition: item.condition,
@@ -347,7 +352,7 @@ export async function processBuyingBatch(input: {
         source: "buyout-desk",
         category: "Print Books",
         mediaType: "Book",
-        sku: `BUY-${item.isbn.slice(-6)}`,
+        sku: `BUY-${cleanIsbn.slice(-6)}`,
       },
       update: {
         quantityOnHand: { increment: 1 },
@@ -356,18 +361,62 @@ export async function processBuyingBatch(input: {
       },
     });
 
-    // Record scan/acquisition event
+    // 2. Upsert Book relation for POS and inventory tracking
+    const bookRecord = await prisma.book.upsert({
+      where: { isbn13: cleanIsbn },
+      create: {
+        isbn13: cleanIsbn,
+        title: item.title ?? cacheRecord.title ?? `Acquired Book (${cleanIsbn})`,
+        author: item.author ?? cacheRecord.author ?? "Unknown Author",
+        listPriceCents: Math.round(item.sellPrice * 100),
+        genre: cacheRecord.subcategory ?? cacheRecord.category ?? "General",
+      },
+      update: {
+        listPriceCents: Math.round(item.sellPrice * 100),
+      },
+    });
+
+    // 3. Upsert InventoryItem
+    const existingInventoryItem = await prisma.inventoryItem.findFirst({
+      where: { bookId: bookRecord.id, condition: item.condition },
+    });
+
+    if (existingInventoryItem) {
+      await prisma.inventoryItem.update({
+        where: { id: existingInventoryItem.id },
+        data: {
+          quantityOnHand: { increment: 1 },
+          acquiredAt: new Date(),
+        },
+      });
+    } else {
+      await prisma.inventoryItem.create({
+        data: {
+          bookId: bookRecord.id,
+          sku: `${cacheRecord.sku}-${Date.now().toString().slice(-4)}`,
+          condition: item.condition,
+          quantityOnHand: 1,
+          quantityReserved: 0,
+          locationCode: "Inbound Buyout",
+        },
+      });
+    }
+
+    // 4. Record scan/acquisition event with proper UUID
     await prisma.scanEvent.create({
       data: {
-        isbn: item.isbn,
-        inventoryId: item.isbn,
+        isbn: cleanIsbn,
+        inventoryId: cacheRecord.id,
         deviceId: "buying-desk",
         stationName: "Book Buying Desk",
         condition: item.condition,
         listPrice: item.sellPrice,
         container: "Buying Inbound",
       },
-    }).catch(() => null);
+    }).catch((err) => console.warn("ScanEvent creation warning:", err));
+
+    // 5. Trigger Shopify inventory sync in background if configured
+    void syncInventoryItemByIsbn(storeId, cleanIsbn).catch(() => null);
   }
 
   // If cash/check payment, log outgoing inventory purchase transaction in Finance

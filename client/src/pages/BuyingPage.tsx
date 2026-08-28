@@ -330,6 +330,7 @@ export default function BuyingPage(): JSX.Element {
       // Clear batch upon successful ingestion
       setBatchItems([]);
       setActiveOffer(null);
+      window.dispatchEvent(new Event("colophon-inventory-updated"));
       setSuccessMessage(`Successfully purchased ${result.itemsProcessed} books for ${formatCurrency(result.totalPaid)}!`);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Failed to process buyout.");

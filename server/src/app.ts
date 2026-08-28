@@ -1173,6 +1173,9 @@ export function createApp(): express.Express {
     for (const book of books) {
       const totalQuantity = book.inventoryItems.reduce((sum, item) => sum + item.quantityOnHand, 0);
       const primaryItem = book.inventoryItems.sort((a, b) => b.quantityOnHand - a.quantityOnHand)[0];
+      const existingCache = await prisma.isbnLookupCache.findUnique({ where: { isbn: book.isbn13 } });
+
+      const effectiveQty = Math.max(totalQuantity, existingCache?.quantityOnHand ?? 0);
 
       await prisma.isbnLookupCache.upsert({
         where: { isbn: book.isbn13 },
@@ -1183,7 +1186,7 @@ export function createApp(): express.Express {
           publisher: book.publisher,
           description: null,
           coverUrl: null,
-          quantityOnHand: totalQuantity,
+          quantityOnHand: effectiveQty,
           thriftbooksPrice: null,
           listPrice: book.listPriceCents ? book.listPriceCents / 100 : null,
           condition: primaryItem?.condition ?? null,
@@ -1199,13 +1202,12 @@ export function createApp(): express.Express {
           title: book.title,
           author: book.author,
           publisher: book.publisher,
-          quantityOnHand: totalQuantity,
-          listPrice: book.listPriceCents ? book.listPriceCents / 100 : null,
-          condition: primaryItem?.condition ?? null,
-          category: book.genre,
-          sku: primaryItem?.sku ?? `BK-${book.isbn13}`,
-          labelTitle: book.title,
-          source: "database-sync",
+          quantityOnHand: effectiveQty,
+          listPrice: book.listPriceCents ? book.listPriceCents / 100 : (existingCache?.listPrice ?? null),
+          condition: primaryItem?.condition ?? existingCache?.condition ?? null,
+          category: book.genre ?? existingCache?.category ?? null,
+          sku: primaryItem?.sku ?? existingCache?.sku ?? `BK-${book.isbn13}`,
+          labelTitle: book.title ?? existingCache?.labelTitle,
         },
       });
     }
