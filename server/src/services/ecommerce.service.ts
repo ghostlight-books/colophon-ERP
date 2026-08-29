@@ -205,14 +205,14 @@ class ShopifyAdapter implements EcommerceAdapter {
     const locationId = locations.locations?.find((location) => location.id)?.id;
     if (!locationId) return { success: false, message: "Shopify has no active inventory location." };
 
-    const stockQuantity = Math.max(1, Math.floor(item.quantity));
+    const stockQuantity = Math.max(0, Math.floor(item.quantity));
     await parseResponse(await fetch(`${this.baseUrl}/admin/api/2024-01/inventory_levels/set.json`, {
       method: "POST",
       headers: this.headers,
       body: JSON.stringify({ location_id: locationId, inventory_item_id: inventoryItemId, available: stockQuantity }),
     }));
 
-    return { success: true, message: `Synced ${item.title} to Shopify: In Stock (Qty ${stockQuantity}, Category: Print Books)` };
+    return { success: true, message: `Synced ${item.title} to Shopify: ${stockQuantity > 0 ? `In Stock (Qty ${stockQuantity})` : "Out of Stock (Qty 0)"}` };
   }
 
   async fetchRecentOrders(): Promise<unknown[]> {
@@ -501,7 +501,7 @@ export async function syncProductBundleToShopify(
     seoDescription: `Save with this curated ${bundle.items.length}-book set: ${bundle.items.map((i) => i.title).slice(0, 3).join(", ")}.`,
     category: "Book Bundles",
     price: bundle.bundlePrice,
-    quantity: bundle.status === "ACTIVE" ? Math.max(1, bundle.quantityOnHand) : 0,
+    quantity: bundle.status === "ACTIVE" ? 1 : 0,
     weight: bundle.items.length * 16,
   };
 

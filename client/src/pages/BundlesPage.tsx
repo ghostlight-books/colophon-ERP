@@ -609,14 +609,19 @@ export default function BundlesPage(): JSX.Element {
               {/* Right Column: Bundle Staging Cart & Pricing Box (5 cols) */}
               <div className="lg:col-span-5 space-y-4">
                 <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                    <div className="flex items-center justify-between border-b border-slate-200 pb-3">
                     <div className="flex items-center gap-2">
                       <span className="text-base">✨</span>
                       <h2 className="text-sm font-bold text-slate-900">Curated Bundle Draft</h2>
                     </div>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold border border-amber-200/80">
-                      {selectedItems.length} Titles Selected
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold border border-blue-200">
+                        Bundle Qty: 1
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold border border-amber-200/80">
+                        {selectedItems.length} Books
+                      </span>
+                    </div>
                   </div>
 
                   {/* Selected Item Chips */}
@@ -837,8 +842,11 @@ export default function BundlesPage(): JSX.Element {
                               {bundle.topic}
                             </span>
                           )}
-                          <span className="px-2 py-0.5 text-xs font-bold rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
-                            {bundle.items.length} Books
+                          <span className="px-2.5 py-0.5 text-xs font-bold rounded-md bg-blue-50 text-blue-700 border border-blue-200">
+                            Qty: 1
+                          </span>
+                          <span className="px-2.5 py-0.5 text-xs font-bold rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            {bundle.items.length}-Book Set
                           </span>
                         </div>
                         <h3 className="text-sm font-bold text-slate-900 line-clamp-1">{bundle.title}</h3>
