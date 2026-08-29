@@ -1028,6 +1028,7 @@ function Shell({
                                 window.localStorage.removeItem("colophon-current-user");
                                 onCurrentUserChange({ name: "Sarah", email: "owner@ghostlightbooks.com", role: "Owner" });
                                 setMenu("none");
+                                onNavigate("/login");
                               }
                             }}
                             className={[

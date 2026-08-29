@@ -20,6 +20,7 @@ import ShopifyPage from "./pages/ShopifyPage";
 import EbayPage from "./pages/EbayPage";
 import BuyingPage from "./pages/BuyingPage";
 import BundlesPage from "./pages/BundlesPage";
+import LoginPage from "./pages/LoginPage";
 import LibraryDashboardPage from "./pages/library/LibraryDashboardPage";
 import LibraryScannerPage from "./pages/library/LibraryScannerPage";
 import LibraryCatalogPage from "./pages/library/LibraryCatalogPage";
@@ -171,6 +172,7 @@ function App(): JSX.Element {
     <WorkspaceProvider>
       <BrowserRouter>
         <Routes>
+          <Route path="/login" element={<LoginPage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/" element={<ShellRouteLayout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
