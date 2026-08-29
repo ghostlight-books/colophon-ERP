@@ -389,12 +389,24 @@ function InventoryPage(): JSX.Element {
     try {
       const response = await fetch(resolveApiUrl(`/inventory/products/${encodeURIComponent(item.isbn)}`), { method: "DELETE" });
       if (!response.ok) throw new Error("Inventory item could not be removed.");
-      setItems((current) => current.filter((record) => record.id !== item.id));
+      setItems((current) => current.filter((record) => record.id !== item.id && record.isbn !== item.isbn));
       setSelectedIsbns((current) => {
         const next = new Set(current);
         next.delete(item.isbn);
         return next;
       });
+
+      // Clean local storage cache
+      try {
+        const rawCurrent = window.localStorage.getItem("colophon-current-scanned-books");
+        if (rawCurrent) {
+          const parsed = JSON.parse(rawCurrent);
+          if (Array.isArray(parsed)) {
+            window.localStorage.setItem("colophon-current-scanned-books", JSON.stringify(parsed.filter((i: { isbn?: string }) => i?.isbn !== item.isbn)));
+          }
+        }
+      } catch {}
+
       setMessage(`${item.title ?? item.isbn} was removed from active inventory.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Inventory item could not be removed."); }
   }
@@ -486,7 +498,7 @@ function InventoryPage(): JSX.Element {
   // Bulk Delete Handler
   const handleBulkDelete = async (): Promise<void> => {
     if (selectedIsbns.size === 0) return;
-    if (!window.confirm(`Are you sure you want to remove ${selectedIsbns.size} selected item(s) from inventory?`)) return;
+    if (!window.confirm(`Are you sure you want to permanently delete ${selectedIsbns.size} selected item(s) from inventory?`)) return;
     setBulkBusy(true);
     try {
       const isbnsArray = Array.from(selectedIsbns);
@@ -497,8 +509,34 @@ function InventoryPage(): JSX.Element {
       });
 
       if (!response.ok) throw new Error("Bulk delete failed.");
+
+      // Clean local storage cache
+      try {
+        const rawCurrent = window.localStorage.getItem("colophon-current-scanned-books");
+        if (rawCurrent) {
+          const parsed = JSON.parse(rawCurrent);
+          if (Array.isArray(parsed)) {
+            const remaining = parsed.filter((i: { isbn?: string }) => !selectedIsbns.has(String(i?.isbn || "").replace(/[^0-9X]/gi, "").toUpperCase()));
+            window.localStorage.setItem("colophon-current-scanned-books", JSON.stringify(remaining));
+          }
+        }
+        const rawSessions = window.localStorage.getItem("colophon-scan-sessions");
+        if (rawSessions) {
+          const sessions = JSON.parse(rawSessions);
+          if (Array.isArray(sessions)) {
+            const cleaned = sessions.map((s: { items?: Array<{ isbn?: string }> }) => ({
+              ...s,
+              items: Array.isArray(s.items)
+                ? s.items.filter((i) => !selectedIsbns.has(String(i?.isbn || "").replace(/[^0-9X]/gi, "").toUpperCase()))
+                : [],
+            }));
+            window.localStorage.setItem("colophon-scan-sessions", JSON.stringify(cleaned));
+          }
+        }
+      } catch {}
+
       setItems((current) => current.filter((item) => !selectedIsbns.has(item.isbn)));
-      setMessage(`Removed ${isbnsArray.length} items from active inventory.`);
+      setMessage(`Successfully removed ${isbnsArray.length} items from active inventory.`);
       deselectAll();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to remove selected items.");
@@ -609,9 +647,9 @@ function InventoryPage(): JSX.Element {
               type="button"
               disabled={bulkBusy}
               onClick={() => void handleBulkDelete()}
-              className="rounded-xl bg-rose-500/20 border border-rose-500/40 px-3.5 py-2 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/30"
+              className="flex items-center gap-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 px-3.5 py-2 text-xs font-bold text-white transition shadow-sm active:scale-[0.98]"
             >
-              Remove
+              <span>🗑️ Bulk Delete ({selectedIsbns.size})</span>
             </button>
             <button
               type="button"

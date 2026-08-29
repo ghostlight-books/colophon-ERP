@@ -1331,11 +1331,134 @@ export function createApp(): express.Express {
     } catch (error) { next(error); }
   });
 
-  app.delete("/api/inventory/products/:isbn", async (req, res, next) => {
+  app.delete("/api/inventory/products/:isbn", async (req, res) => {
     try {
-      const product = await prisma.isbnLookupCache.update({ where: { isbn: req.params.isbn }, data: { quantityOnHand: 0 } });
-      res.json({ success: true, product });
-    } catch (error) { next(error); }
+      const cleanIsbn = autoCorrectIsbn(req.params.isbn.replace(/[^0-9X]/gi, "").toUpperCase());
+      await prisma.isbnLookupCache.updateMany({ where: { isbn: cleanIsbn }, data: { quantityOnHand: 0 } });
+      const book = await prisma.book.findUnique({ where: { isbn13: cleanIsbn } });
+      if (book) {
+        await prisma.inventoryItem.updateMany({ where: { bookId: book.id }, data: { quantityOnHand: 0 } });
+      }
+      void syncInventoryItemByIsbn("ghostlight-demo", cleanIsbn).catch(() => null);
+      res.json({ success: true, isbn: cleanIsbn });
+    } catch (error) {
+      console.error("Delete product error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to remove product from inventory." });
+    }
+  });
+
+  app.post("/api/inventory/bulk-delete", async (req, res) => {
+    try {
+      const { isbns } = req.body as { isbns?: string[] };
+      if (!Array.isArray(isbns) || isbns.length === 0) {
+        res.status(400).json({ error: "isbns array is required." });
+        return;
+      }
+
+      const cleanIsbns = isbns.map((i) => autoCorrectIsbn(String(i).replace(/[^0-9X]/gi, "").toUpperCase()));
+
+      // 1. Set quantity to 0 in IsbnLookupCache
+      await prisma.isbnLookupCache.updateMany({
+        where: { isbn: { in: cleanIsbns } },
+        data: { quantityOnHand: 0 },
+      });
+
+      // 2. Set quantity to 0 in InventoryItem
+      const books = await prisma.book.findMany({
+        where: { isbn13: { in: cleanIsbns } },
+        select: { id: true, isbn13: true },
+      });
+      const bookIds = books.map((b) => b.id);
+
+      if (bookIds.length > 0) {
+        await prisma.inventoryItem.updateMany({
+          where: { bookId: { in: bookIds } },
+          data: { quantityOnHand: 0 },
+        });
+      }
+
+      // 3. Trigger Shopify background sync for deleted items
+      for (const isbn of cleanIsbns) {
+        void syncInventoryItemByIsbn("ghostlight-demo", isbn).catch(() => null);
+      }
+
+      res.json({ success: true, count: cleanIsbns.length });
+    } catch (error) {
+      console.error("Bulk delete error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Bulk delete failed." });
+    }
+  });
+
+  app.post("/api/inventory/bulk-update", async (req, res) => {
+    try {
+      const { isbns, updates, syncToShopify } = req.body as {
+        isbns?: string[];
+        updates?: {
+          category?: string;
+          subcategory?: string;
+          condition?: string;
+          mediaType?: string;
+          listPrice?: number;
+        };
+        syncToShopify?: boolean;
+      };
+
+      if (!Array.isArray(isbns) || isbns.length === 0) {
+        res.status(400).json({ error: "isbns array is required." });
+        return;
+      }
+
+      const cleanIsbns = isbns.map((i) => autoCorrectIsbn(String(i).replace(/[^0-9X]/gi, "").toUpperCase()));
+      const updateData: Record<string, unknown> = {};
+
+      if (updates?.category !== undefined) updateData.category = updates.category;
+      if (updates?.subcategory !== undefined) updateData.subcategory = updates.subcategory;
+      if (updates?.condition !== undefined) updateData.condition = updates.condition;
+      if (updates?.mediaType !== undefined) updateData.mediaType = updates.mediaType;
+      if (typeof updates?.listPrice === "number" && !isNaN(updates.listPrice)) updateData.listPrice = updates.listPrice;
+
+      if (Object.keys(updateData).length > 0) {
+        await prisma.isbnLookupCache.updateMany({
+          where: { isbn: { in: cleanIsbns } },
+          data: updateData,
+        });
+
+        // Also update Book & InventoryItem
+        const books = await prisma.book.findMany({
+          where: { isbn13: { in: cleanIsbns } },
+        });
+
+        for (const book of books) {
+          if (updates?.category || updates?.subcategory || updates?.listPrice) {
+            await prisma.book.update({
+              where: { id: book.id },
+              data: {
+                genre: updates?.subcategory || updates?.category || undefined,
+                listPriceCents: typeof updates?.listPrice === "number" ? Math.round(updates.listPrice * 100) : undefined,
+              },
+            });
+          }
+
+          if (updates?.condition) {
+            await prisma.inventoryItem.updateMany({
+              where: { bookId: book.id },
+              data: { condition: updates.condition },
+            });
+          }
+        }
+      }
+
+      if (syncToShopify) {
+        for (const isbn of cleanIsbns) {
+          void syncInventoryItemByIsbn("ghostlight-demo", isbn).catch(() => null);
+        }
+      }
+
+      res.json({ success: true, count: cleanIsbns.length });
+    } catch (error) {
+      console.error("Bulk update error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Bulk update failed." });
+    }
   });
 
   app.post("/api/inventory/products/:isbn/pull-open-library", async (req, res, next) => {
