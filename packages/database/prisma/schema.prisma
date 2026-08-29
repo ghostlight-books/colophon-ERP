@@ -624,4 +624,78 @@ model ProductBundleItem {
   @@index([sku])
 }
 
+model LibraryVolume {
+  id                    String                @id @default(uuid())
+  isbn                  String
+  title                 String
+  author                String?
+  publisher             String?
+  publishYear           String?
+  description           String?
+  coverUrl              String?
+  deweyDecimal          String?               // e.g. "813.54"
+  deweyCategory         String?               // e.g. "800 - Literature"
+  locClassification     String?               // e.g. "PS3558.E63 D86"
+  lccn                  String?               // Library of Congress Control Number
+  oclcNumber            String?               // OCLC Worldcat Number
+  subjects              String?
+  pageCount             Int?
+  bindingFormat         String?
+  language              String?               @default("English")
+  
+  // Location
+  roomName              String?
+  bookcaseName          String?
+  shelfName             String?
+  shelfLocationId       String?
+  shelfLocation         LibraryShelfLocation? @relation(fields: [shelfLocationId], references: [id], onDelete: SetNull)
+
+  // Valuation & Personal Cataloging
+  replacementValue      Float                 @default(0.0)
+  acquisitionPrice      Float?
+  acquisitionDate       DateTime?
+  readingStatus         String                @default("UNREAD") // "UNREAD" | "READING" | "COMPLETED" | "WISHLIST"
+  rating                Int?
+  personalNotes         String?
+  exLibrisTags          String?
+
+  // Lending & Circulation
+  isLoaned              Boolean               @default(false)
+  borrowerName          String?
+  borrowerContact       String?
+  loanDate              DateTime?
+  dueDate               DateTime?
+  returnDate            DateTime?
+
+  storeId               String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@index([isbn])
+  @@index([title])
+  @@index([author])
+  @@index([deweyDecimal])
+  @@index([locClassification])
+  @@index([readingStatus])
+  @@index([isLoaned])
+  @@index([shelfLocationId])
+}
+
+model LibraryShelfLocation {
+  id                    String                @id @default(uuid())
+  roomName              String
+  bookcaseName          String
+  shelfName             String
+  fullLocationLabel     String
+  description           String?
+  capacity              Int?                  @default(30)
+  storeId               String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  volumes               LibraryVolume[]
+
+  @@unique([roomName, bookcaseName, shelfName])
+  @@index([roomName])
+}
+
 

@@ -44,3 +44,4 @@ CREATE INDEX IF NOT EXISTS "ProductBundle_status_idx" ON "ProductBundle"("status
 CREATE INDEX IF NOT EXISTS "ProductBundleItem_bundleId_idx" ON "ProductBundleItem"("bundleId");
 CREATE INDEX IF NOT EXISTS "ProductBundleItem_isbn_idx" ON "ProductBundleItem"("isbn");
 CREATE INDEX IF NOT EXISTS "ProductBundleItem_sku_idx" ON "ProductBundleItem"("sku");
+

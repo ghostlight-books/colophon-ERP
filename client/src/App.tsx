@@ -20,6 +20,13 @@ import ShopifyPage from "./pages/ShopifyPage";
 import EbayPage from "./pages/EbayPage";
 import BuyingPage from "./pages/BuyingPage";
 import BundlesPage from "./pages/BundlesPage";
+import LibraryDashboardPage from "./pages/library/LibraryDashboardPage";
+import LibraryScannerPage from "./pages/library/LibraryScannerPage";
+import LibraryCatalogPage from "./pages/library/LibraryCatalogPage";
+import LibraryShelvesPage from "./pages/library/LibraryShelvesPage";
+import LibraryLendingPage from "./pages/library/LibraryLendingPage";
+import LibraryValuationReportPage from "./pages/library/LibraryValuationReportPage";
+import { WorkspaceProvider, useWorkspace } from "./contexts/WorkspaceContext";
 import { hasModuleAccess, normalizeRole, type SystemModule } from "@colophon/shared";
 
 function EbayIcon(): JSX.Element {
@@ -161,37 +168,48 @@ function NetworkIcon(): JSX.Element {
 
 function App(): JSX.Element {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/admin" element={<AdminPage />} />
-        <Route path="/" element={<ShellRouteLayout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<DashboardPage />} />
-          <Route path="pos-register" element={<PosRegisterPage />} />
-          <Route path="intake" element={<IntakePage />} />
-          <Route path="buying" element={<BuyingPage />} />
-          <Route path="sales" element={<InventoryPage />} />
-          <Route path="operations" element={<OperationsPage />} />
-          <Route path="marketing" element={<MarketingPage />} />
-          <Route path="calendar" element={<CalendarPage />} />
-          <Route path="lists" element={<ListsPage />} />
-          <Route path="inventory" element={<ActiveInventoryPage />} />
-          <Route path="inventory/product/:isbn" element={<ProductPage />} />
-          <Route path="bundles" element={<BundlesPage />} />
-          <Route path="finance" element={<FinancePage />} />
-          <Route path="shopify" element={<ShopifyPage />} />
-          <Route path="ebay" element={<EbayPage />} />
-          <Route path="open-network" element={<OpenNetworkPage />} />
-          <Route path="open-network/order" element={<NetworkOrderRequestPage />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <WorkspaceProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="/" element={<ShellRouteLayout />}>
+            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="pos-register" element={<PosRegisterPage />} />
+            <Route path="intake" element={<IntakePage />} />
+            <Route path="buying" element={<BuyingPage />} />
+            <Route path="sales" element={<InventoryPage />} />
+            <Route path="operations" element={<OperationsPage />} />
+            <Route path="marketing" element={<MarketingPage />} />
+            <Route path="calendar" element={<CalendarPage />} />
+            <Route path="lists" element={<ListsPage />} />
+            <Route path="inventory" element={<ActiveInventoryPage />} />
+            <Route path="inventory/product/:isbn" element={<ProductPage />} />
+            <Route path="bundles" element={<BundlesPage />} />
+            <Route path="finance" element={<FinancePage />} />
+            <Route path="shopify" element={<ShopifyPage />} />
+            <Route path="ebay" element={<EbayPage />} />
+            <Route path="open-network" element={<OpenNetworkPage />} />
+            <Route path="open-network/order" element={<NetworkOrderRequestPage />} />
+
+            {/* Colophon Library Edition Routes */}
+            <Route path="library" element={<LibraryDashboardPage />} />
+            <Route path="library/scan" element={<LibraryScannerPage />} />
+            <Route path="library/catalog" element={<LibraryCatalogPage />} />
+            <Route path="library/shelves" element={<LibraryShelvesPage />} />
+            <Route path="library/lending" element={<LibraryLendingPage />} />
+            <Route path="library/valuation" element={<LibraryValuationReportPage />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </WorkspaceProvider>
   );
 }
 
 function ShellRouteLayout(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
+  const { mode, setMode } = useWorkspace();
   const [currentUser, setCurrentUser] = useState<LoggedInUser>(() => {
     if (typeof window === "undefined") {
       return {
@@ -227,7 +245,8 @@ function ShellRouteLayout(): JSX.Element {
     window.localStorage.setItem("colophon-current-user", JSON.stringify(currentUser));
   }, [currentUser]);
 
-  const navItems = useMemo<ShellNavItem[]>(() => {
+  // Bookstore Nav Items
+  const bookstoreNavItems = useMemo<ShellNavItem[]>(() => {
     const items: Array<ShellNavItem & { module: SystemModule }> = [
       {
         key: "dashboard",
@@ -321,6 +340,50 @@ function ShellRouteLayout(): JSX.Element {
     return items.filter((item) => hasModuleAccess(normalizeRole(currentUser.role), item.module));
   }, [currentUser.role]);
 
+  // Library Nav Items
+  const libraryNavItems = useMemo<ShellNavItem[]>(() => {
+    return [
+      {
+        key: "library-dashboard",
+        label: "Library Dashboard",
+        to: "/library",
+        icon: <GridIcon />,
+      },
+      {
+        key: "library-scan",
+        label: "Camera Scanner",
+        to: "/library/scan",
+        icon: <BoxIcon />,
+      },
+      {
+        key: "library-catalog",
+        label: "Collection Catalog",
+        to: "/library/catalog",
+        icon: <ListsIcon />,
+      },
+      {
+        key: "library-shelves",
+        label: "Shelves & Rooms",
+        to: "/library/shelves",
+        icon: <OperationsIcon />,
+      },
+      {
+        key: "library-lending",
+        label: "Lending & Circulation",
+        to: "/library/lending",
+        icon: <NetworkIcon />,
+      },
+      {
+        key: "library-valuation",
+        label: "Insurance Appraisal",
+        to: "/library/valuation",
+        icon: <WalletIcon />,
+      },
+    ];
+  }, []);
+
+  const activeNavItems = mode === "library" ? libraryNavItems : bookstoreNavItems;
+
   const routeModules: Record<string, SystemModule> = {
     "/dashboard": "DASHBOARD",
     "/pos-register": "POS",
@@ -386,27 +449,54 @@ function ShellRouteLayout(): JSX.Element {
     "/open-network": {
       subtitle: "Shared database and communications hub for independent bookstores.",
     },
+    "/library": {
+      subtitle: "Cataloging, Dewey/LOC classification, shelf organization & insurance valuation.",
+    },
+    "/library/scan": {
+      subtitle: "Device camera barcode scanner with instant Dewey/LOC classification & shelf intake.",
+    },
+    "/library/catalog": {
+      subtitle: "Browse and search your collection by call number, subject, and room location.",
+    },
+    "/library/shelves": {
+      subtitle: "Physical room, bookcase, and shelf organizer with volume capacity meters.",
+    },
+    "/library/lending": {
+      subtitle: "Track borrowed books, return due dates, and patron contact logs.",
+    },
+    "/library/valuation": {
+      subtitle: "Collection replacement appraisal schedule for personal property insurance.",
+    },
   };
 
-  const allNavLinks = navItems.flatMap((item) => [item, ...(item.children ?? [])]);
-  const activePath = allNavLinks.find((item) => item.to === location.pathname || (item.to !== "/dashboard" && location.pathname.startsWith(item.to)))?.to ?? "/dashboard";
-  const meta = pageMeta[activePath] ?? pageMeta["/dashboard"];
+  const allNavLinks = activeNavItems.flatMap((item) => [item, ...(item.children ?? [])]);
+  const activePath = allNavLinks.find((item) => item.to === location.pathname || (item.to !== "/dashboard" && item.to !== "/library" && location.pathname.startsWith(item.to)))?.to ?? (mode === "library" ? "/library" : "/dashboard");
+  const meta = pageMeta[activePath] ?? pageMeta[mode === "library" ? "/library" : "/dashboard"];
 
   useEffect(() => {
+    if (location.pathname.startsWith("/library")) {
+      if (mode !== "library") setMode("library");
+      return;
+    }
     const matchedPath = Object.keys(routeModules).find((path) => location.pathname.startsWith(path));
     const module = matchedPath ? routeModules[matchedPath] : "DASHBOARD";
     if (!hasModuleAccess(normalizeRole(currentUser.role), module)) {
       setAccessWarning("You do not have access to that area.");
       navigate("/dashboard", { replace: true });
     }
-  }, [currentUser.role, location.pathname, navigate]);
+  }, [currentUser.role, location.pathname, navigate, mode, setMode]);
 
   return (
     <Shell
       greeting={`Welcome, ${currentUser.name} 🎉`}
       subtitle={meta.subtitle}
-      navItems={navItems}
+      navItems={activeNavItems}
       activePath={activePath}
+      workspaceMode={mode}
+      onWorkspaceModeChange={(newMode) => {
+        setMode(newMode);
+        navigate(newMode === "library" ? "/library" : "/dashboard");
+      }}
       onNavigate={(to) => navigate(to)}
       currentUser={currentUser}
       onCurrentUserChange={setCurrentUser}

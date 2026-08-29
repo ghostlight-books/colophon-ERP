@@ -30,6 +30,22 @@ import {
   unbundleProduct,
   listProductBundles,
 } from "./services/bundle.service.js";
+import {
+  createLibraryVolume,
+  scanAndIntakeVolume,
+  listLibraryVolumes,
+  getLibraryVolume,
+  updateLibraryVolume,
+  deleteLibraryVolume,
+  listShelfLocations,
+  createShelfLocation,
+  deleteShelfLocation,
+  loanVolume,
+  returnVolume,
+  getLibraryDashboardSummary,
+  generateValuationReport,
+} from "./services/library/libraryVolume.service.js";
+import { enrichLibraryClassification } from "./services/library/libraryClassification.service.js";
 
 type OpsConnector = {
   key: string;
@@ -1866,8 +1882,188 @@ export function createApp(): express.Express {
         message: `Successfully synced ${syncedCount} of ${activeBundles.length} active bundles to Shopify.`,
       });
     } catch (error) {
-      console.error("Sync all bundles to Shopify error:", error);
-      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to sync bundles to Shopify." });
+  // ==========================================
+  // COLOPHON LIBRARY EDITION ROUTES
+  // ==========================================
+
+  // Dashboard summary & analytics
+  app.get("/api/library/dashboard", async (req, res) => {
+    try {
+      const storeId = typeof req.query?.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const summary = await getLibraryDashboardSummary(storeId);
+      res.json(summary);
+    } catch (error) {
+      console.error("Library dashboard error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load library dashboard." });
+    }
+  });
+
+  // Volumes list & search
+  app.get("/api/library/volumes", async (req, res) => {
+    try {
+      const query = typeof req.query?.query === "string" ? req.query.query : undefined;
+      const deweyPrefix = typeof req.query?.dewey === "string" ? req.query.dewey : undefined;
+      const locPrefix = typeof req.query?.loc === "string" ? req.query.loc : undefined;
+      const shelfLocationId = typeof req.query?.shelfLocationId === "string" ? req.query.shelfLocationId : undefined;
+      const roomName = typeof req.query?.roomName === "string" ? req.query.roomName : undefined;
+      const readingStatus = typeof req.query?.readingStatus === "string" ? req.query.readingStatus : undefined;
+      const isLoaned = req.query?.isLoaned !== undefined ? req.query.isLoaned === "true" : undefined;
+      const limit = typeof req.query?.limit === "string" ? parseInt(req.query.limit, 10) : 100;
+      const offset = typeof req.query?.offset === "string" ? parseInt(req.query.offset, 10) : 0;
+
+      const result = await listLibraryVolumes({
+        query,
+        deweyPrefix,
+        locPrefix,
+        shelfLocationId,
+        roomName,
+        readingStatus,
+        isLoaned,
+        limit,
+        offset,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Library volumes query error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list library volumes." });
+    }
+  });
+
+  // Create / add single volume
+  app.post("/api/library/volumes", async (req, res) => {
+    try {
+      const volume = await createLibraryVolume(req.body);
+      res.json(volume);
+    } catch (error) {
+      console.error("Create library volume error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to add book to library." });
+    }
+  });
+
+  // Fast barcode / camera scan intake
+  app.post("/api/library/scan", async (req, res) => {
+    try {
+      const { isbn, shelfLocationId, ...customData } = req.body || {};
+      if (!isbn || typeof isbn !== "string") {
+        return res.status(400).json({ error: "ISBN is required for scanning." });
+      }
+      const volume = await scanAndIntakeVolume(isbn, shelfLocationId, customData);
+      res.json(volume);
+    } catch (error) {
+      console.error("Library scan intake error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to scan and intake book." });
+    }
+  });
+
+  // Get single volume
+  app.get("/api/library/volumes/:id", async (req, res) => {
+    try {
+      const volume = await getLibraryVolume(req.params.id);
+      if (!volume) return res.status(404).json({ error: "Library volume not found." });
+      res.json(volume);
+    } catch (error) {
+      console.error("Get library volume error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to fetch volume." });
+    }
+  });
+
+  // Update volume
+  app.patch("/api/library/volumes/:id", async (req, res) => {
+    try {
+      const updated = await updateLibraryVolume(req.params.id, req.body);
+      res.json(updated);
+    } catch (error) {
+      console.error("Update library volume error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to update volume." });
+    }
+  });
+
+  // Delete volume
+  app.delete("/api/library/volumes/:id", async (req, res) => {
+    try {
+      await deleteLibraryVolume(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete library volume error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to delete volume." });
+    }
+  });
+
+  // Shelves & Location Management
+  app.get("/api/library/shelves", async (req, res) => {
+    try {
+      const storeId = typeof req.query?.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const shelves = await listShelfLocations(storeId);
+      res.json({ shelves });
+    } catch (error) {
+      console.error("List shelves error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list shelves." });
+    }
+  });
+
+  app.post("/api/library/shelves", async (req, res) => {
+    try {
+      const shelf = await createShelfLocation(req.body);
+      res.json(shelf);
+    } catch (error) {
+      console.error("Create shelf error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to create shelf location." });
+    }
+  });
+
+  app.delete("/api/library/shelves/:id", async (req, res) => {
+    try {
+      await deleteShelfLocation(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete shelf error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to delete shelf location." });
+    }
+  });
+
+  // Lending Circulation
+  app.post("/api/library/volumes/:id/loan", async (req, res) => {
+    try {
+      const { borrowerName, borrowerContact, dueDate } = req.body || {};
+      if (!borrowerName) return res.status(400).json({ error: "Borrower name is required to loan a volume." });
+      const loaned = await loanVolume(req.params.id, borrowerName, borrowerContact, dueDate);
+      res.json(loaned);
+    } catch (error) {
+      console.error("Loan volume error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to loan volume." });
+    }
+  });
+
+  app.post("/api/library/volumes/:id/return", async (req, res) => {
+    try {
+      const returned = await returnVolume(req.params.id);
+      res.json(returned);
+    } catch (error) {
+      console.error("Return volume error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to return volume." });
+    }
+  });
+
+  // Insurance & Estate Appraisal Report
+  app.get("/api/library/valuation-report", async (req, res) => {
+    try {
+      const storeId = typeof req.query?.storeId === "string" ? req.query.storeId : "ghostlight-demo";
+      const report = await generateValuationReport(storeId);
+      res.json(report);
+    } catch (error) {
+      console.error("Valuation report error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to generate insurance report." });
+    }
+  });
+
+  // Live ISBN classification enrichment preview
+  app.get("/api/library/enrich-isbn/:isbn", async (req, res) => {
+    try {
+      const enrichment = await enrichLibraryClassification(req.params.isbn);
+      res.json(enrichment);
+    } catch (error) {
+      console.error("Enrich ISBN error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to classify ISBN." });
     }
   });
 

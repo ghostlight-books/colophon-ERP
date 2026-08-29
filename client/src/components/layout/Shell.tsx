@@ -30,6 +30,8 @@ type ShellProps = {
   onNavigate: (to: string) => void;
   currentUser: LoggedInUser;
   onCurrentUserChange: (user: LoggedInUser) => void;
+  workspaceMode?: "bookstore" | "library";
+  onWorkspaceModeChange?: (mode: "bookstore" | "library") => void;
   children: ReactNode;
 };
 
@@ -68,7 +70,18 @@ type ServiceHealth = {
   path?: string;
 };
 
-function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUser, onCurrentUserChange, children }: ShellProps): JSX.Element {
+function Shell({
+  greeting,
+  subtitle,
+  navItems,
+  activePath,
+  onNavigate,
+  currentUser,
+  onCurrentUserChange,
+  workspaceMode = "bookstore",
+  onWorkspaceModeChange,
+  children,
+}: ShellProps): JSX.Element {
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window === "undefined") {
       return "light";
@@ -344,20 +357,68 @@ function Shell({ greeting, subtitle, navItems, activePath, onNavigate, currentUs
           ].join(" ")}
         >
           <div className={[
-            "flex items-center gap-2.5 px-2 py-2 transition-colors duration-300",
+            "flex items-center justify-between gap-2 px-2 py-1.5 transition-colors duration-300",
             isDark ? "text-slate-100" : "text-slate-700",
           ].join(" ")}>
-            <BrandLogo className="h-10 w-10 shrink-0" />
-            <div>
-              <p className={[
-                "text-[0.7rem] tracking-[0.01em] transition-colors duration-300",
-                isDark ? "text-slate-400" : "text-slate-500",
-              ].join(" ")}>Colophon ERP</p>
+            <div className="flex items-center gap-2.5">
+              <BrandLogo className="h-9 w-9 shrink-0" />
+              <div>
+                <p className={[
+                  "text-[0.7rem] tracking-[0.01em] transition-colors duration-300 font-bold",
+                  isDark ? "text-slate-300" : "text-slate-700",
+                ].join(" ")}>
+                  {workspaceMode === "library" ? "Colophon Library" : "Colophon Bookstore"}
+                </p>
+                <p className="text-[9.5px] text-slate-400">
+                  {workspaceMode === "library" ? "Personal & Pro Edition" : "Retail ERP Edition"}
+                </p>
+              </div>
             </div>
           </div>
 
+          {/* Workspace Mode Switcher Pill */}
           <div className={[
-            "my-3 h-px transition-colors duration-300",
+            "mt-2 mb-1 p-1 rounded-2xl flex items-center gap-1 transition-colors duration-300",
+            isDark ? "bg-white/10" : "bg-slate-200/70",
+          ].join(" ")}>
+            <button
+              type="button"
+              onClick={() => onWorkspaceModeChange?.("bookstore")}
+              className={[
+                "flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer",
+                workspaceMode === "bookstore"
+                  ? isDark
+                    ? "bg-amber-500/20 text-amber-300 shadow-sm border border-amber-500/30"
+                    : "bg-white text-amber-900 shadow-sm border border-amber-200/70"
+                  : isDark
+                    ? "text-slate-400 hover:text-slate-200"
+                    : "text-slate-600 hover:text-slate-900",
+              ].join(" ")}
+            >
+              <span>🏪</span>
+              <span>Store</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onWorkspaceModeChange?.("library")}
+              className={[
+                "flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer",
+                workspaceMode === "library"
+                  ? isDark
+                    ? "bg-indigo-500/25 text-indigo-300 shadow-sm border border-indigo-500/30"
+                    : "bg-white text-indigo-950 shadow-sm border border-indigo-200/70"
+                  : isDark
+                    ? "text-slate-400 hover:text-slate-200"
+                    : "text-slate-600 hover:text-slate-900",
+              ].join(" ")}
+            >
+              <span>🏛️</span>
+              <span>Library</span>
+            </button>
+          </div>
+
+          <div className={[
+            "my-2 h-px transition-colors duration-300",
             isDark ? "bg-white/15" : "bg-white/70",
           ].join(" ")}></div>
 
