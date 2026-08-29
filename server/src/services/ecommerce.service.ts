@@ -23,7 +23,22 @@ export type InventorySyncProgress = {
 interface EcommerceAdapter {
   updateInventoryLevel(sku: string, quantity: number): Promise<{ success: boolean; message?: string }>;
   updateInventoryLevelByBarcode(sku: string, barcode: string, quantity: number): Promise<{ success: boolean; message?: string }>;
-  syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number; weight?: number | null }): Promise<{ success: boolean; message?: string }>;
+  syncInventoryItem(item: {
+    sku: string;
+    barcode: string;
+    title: string;
+    author: string | null;
+    description: string | null;
+    coverUrl: string | null;
+    images?: string[];
+    tags: string[];
+    seoTitle: string | null;
+    seoDescription: string | null;
+    category: string | null;
+    price: number;
+    quantity: number;
+    weight?: number | null;
+  }): Promise<{ success: boolean; message?: string }>;
   fetchRecentOrders(): Promise<unknown[]>;
   checkConnection(): Promise<{ connected: boolean; message: string }>;
 }
@@ -123,12 +138,32 @@ class ShopifyAdapter implements EcommerceAdapter {
     return { success: true };
   }
 
-  async syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number; weight?: number | null }): Promise<{ success: boolean; message?: string }> {
+  async syncInventoryItem(item: {
+    sku: string;
+    barcode: string;
+    title: string;
+    author: string | null;
+    description: string | null;
+    coverUrl: string | null;
+    images?: string[];
+    tags: string[];
+    seoTitle: string | null;
+    seoDescription: string | null;
+    category: string | null;
+    price: number;
+    quantity: number;
+    weight?: number | null;
+  }): Promise<{ success: boolean; message?: string }> {
     if (this.isLocalDevConnector()) return { success: true };
     const products = await parseResponse<{ products?: Array<{ id?: number; variants?: Array<{ id?: number; sku?: string; barcode?: string; inventory_item_id?: number }> }> }>(await fetch(`${this.baseUrl}/admin/api/2024-01/products.json?limit=250`, { headers: this.headers }));
     const matchedProduct = products.products?.find((product) => product.variants?.some((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode)));
     const variant = matchedProduct?.variants?.find((candidate) => candidate.sku === item.sku || (item.barcode && candidate.barcode === item.barcode));
     const visibleDescription = [item.author ? `<p><strong>Author:</strong> ${escapeHtml(item.author)}</p>` : "", item.description ? `<p>${escapeHtml(item.description)}</p>` : ""].filter(Boolean).join("");
+
+    const imagesArray = Array.isArray(item.images) && item.images.length > 0
+      ? item.images.filter((src): src is string => Boolean(src && src.trim())).map((src, idx) => ({ src, position: idx + 1, alt: `${item.title} - Book ${idx + 1}` }))
+      : (item.coverUrl ? [{ src: item.coverUrl, position: 1, alt: item.title }] : []);
+
     const productPayload = {
       title: item.title,
       body_html: visibleDescription,
@@ -144,7 +179,7 @@ class ShopifyAdapter implements EcommerceAdapter {
         { namespace: "global", key: "title_tag", type: "single_line_text_field", value: item.seoTitle ?? item.title },
         { namespace: "global", key: "description_tag", type: "multi_line_text_field", value: item.seoDescription ?? item.description ?? item.title },
       ],
-      ...(item.coverUrl ? { images: [{ src: item.coverUrl }] } : {}),
+      ...(imagesArray.length > 0 ? { images: imagesArray } : {}),
     };
 
     let inventoryItemId: number | undefined = variant?.inventory_item_id;
@@ -269,7 +304,22 @@ class WooCommerceAdapter implements EcommerceAdapter {
     return this.updateInventoryLevel(sku, quantity);
   }
 
-  async syncInventoryItem(item: { sku: string; barcode: string; title: string; author: string | null; description: string | null; coverUrl: string | null; tags: string[]; seoTitle: string | null; seoDescription: string | null; category: string | null; price: number; quantity: number; weight?: number | null }): Promise<{ success: boolean; message?: string }> {
+  async syncInventoryItem(item: {
+    sku: string;
+    barcode: string;
+    title: string;
+    author: string | null;
+    description: string | null;
+    coverUrl: string | null;
+    images?: string[];
+    tags: string[];
+    seoTitle: string | null;
+    seoDescription: string | null;
+    category: string | null;
+    price: number;
+    quantity: number;
+    weight?: number | null;
+  }): Promise<{ success: boolean; message?: string }> {
     return this.updateInventoryLevel(item.sku, item.quantity);
   }
 
@@ -480,7 +530,13 @@ export async function syncProductBundleToShopify(
 </div>
   `.trim();
 
-  const primaryCover = bundle.items.find((i) => Boolean(i.coverUrl))?.coverUrl || null;
+  // Collect all unique cover images from each product in the bundle
+  const allImages = bundle.items
+    .map((item) => item.coverUrl)
+    .filter((url): url is string => Boolean(url && url.trim().length > 0))
+    .filter((url, index, arr) => arr.indexOf(url) === index);
+
+  const primaryCover = allImages[0] || null;
   const tags = [
     "Book Bundles",
     "Curated Bundle",
@@ -496,6 +552,7 @@ export async function syncProductBundleToShopify(
     author: vendorName,
     description: fullDescriptionHtml,
     coverUrl: primaryCover,
+    images: allImages,
     tags,
     seoTitle: `${bundle.title} | Curated Book Bundle`,
     seoDescription: `Save with this curated ${bundle.items.length}-book set: ${bundle.items.map((i) => i.title).slice(0, 3).join(", ")}.`,
