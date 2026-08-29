@@ -12,7 +12,7 @@ import { lookupBookByIsbn, pullOpenLibraryMetadata, autoCorrectIsbn } from "./se
 import { createSquareCheckoutLink, isSquareConfigured } from "./services/squarePayment.service.js";
 import { executeDropshipSettlement } from "./services/networkSettlement.service.js";
 import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service.js";
-import { checkStoreConnection, fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncInventoryItemByIsbn, syncStoreInventory, syncStoreInventoryCatalog, type EcommercePlatform } from "./services/ecommerce.service.js";
+import { checkStoreConnection, fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncInventoryItemByIsbn, syncStoreInventory, syncStoreInventoryCatalog, syncProductBundleToShopify, type EcommercePlatform } from "./services/ecommerce.service.js";
 import { completeShopifyInstall, createShopifyInstallUrl } from "./services/shopifyOAuth.service.js";
 import { createEbayAuthUrl, exchangeEbayCode, saveDirectEbayToken, getValidEbayAccessToken } from "./services/ebay/ebayAuth.service.js";
 import { publishBookToEbay, withdrawOffer } from "./services/ebay/ebayInventory.service.js";
@@ -1828,6 +1828,46 @@ export function createApp(): express.Express {
     } catch (error) {
       console.error("Unbundle error:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "Failed to unbundle product." });
+    }
+  });
+
+  app.post("/api/bundles/:id/sync-shopify", async (req, res) => {
+    try {
+      const storeId = typeof req.body?.storeId === "string" ? req.body.storeId : "ghostlight-demo";
+      const result = await syncProductBundleToShopify(storeId, req.params.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Sync bundle to Shopify error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to sync bundle to Shopify." });
+    }
+  });
+
+  app.post("/api/bundles/sync-all-shopify", async (req, res) => {
+    try {
+      const storeId = typeof req.body?.storeId === "string" ? req.body.storeId : "ghostlight-demo";
+      const activeBundles = await listProductBundles("ACTIVE");
+      let syncedCount = 0;
+      const errors: string[] = [];
+
+      for (const bundle of activeBundles) {
+        try {
+          const syncRes = await syncProductBundleToShopify(storeId, bundle.id);
+          if (syncRes.success) syncedCount++;
+        } catch (e) {
+          errors.push(bundle.title);
+        }
+      }
+
+      res.json({
+        success: true,
+        synced: syncedCount,
+        total: activeBundles.length,
+        errors,
+        message: `Successfully synced ${syncedCount} of ${activeBundles.length} active bundles to Shopify.`,
+      });
+    } catch (error) {
+      console.error("Sync all bundles to Shopify error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to sync bundles to Shopify." });
     }
   });
 

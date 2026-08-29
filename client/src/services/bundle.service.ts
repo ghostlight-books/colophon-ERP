@@ -188,3 +188,59 @@ export async function unbundle(bundleId: string): Promise<UnbundleResult> {
   window.dispatchEvent(new Event("colophon-inventory-updated"));
   return res.json() as Promise<UnbundleResult>;
 }
+
+export async function syncBundleToShopify(bundleId: string): Promise<{ success: boolean; message?: string }> {
+  const url = resolveApiUrl(`/bundles/${encodeURIComponent(bundleId)}/sync-shopify`);
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storeId: "ghostlight-demo" }),
+    });
+  } catch {
+    res = await fetchWithTimeout(`/api/bundles/${encodeURIComponent(bundleId)}/sync-shopify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storeId: "ghostlight-demo" }),
+    });
+  }
+
+  if (!res.ok) {
+    let errMessage = `Failed to sync bundle to Shopify (${res.status}).`;
+    try {
+      const err = (await res.json()) as { error?: string };
+      if (err && err.error) errMessage = err.error;
+    } catch {}
+    throw new Error(errMessage);
+  }
+  return res.json() as Promise<{ success: boolean; message?: string }>;
+}
+
+export async function syncAllBundlesToShopify(): Promise<{ success: boolean; synced: number; total: number; message: string }> {
+  const url = resolveApiUrl("/bundles/sync-all-shopify");
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storeId: "ghostlight-demo" }),
+    });
+  } catch {
+    res = await fetchWithTimeout("/api/bundles/sync-all-shopify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storeId: "ghostlight-demo" }),
+    });
+  }
+
+  if (!res.ok) {
+    let errMessage = `Failed to sync all bundles to Shopify (${res.status}).`;
+    try {
+      const err = (await res.json()) as { error?: string };
+      if (err && err.error) errMessage = err.error;
+    } catch {}
+    throw new Error(errMessage);
+  }
+  return res.json() as Promise<{ success: boolean; synced: number; total: number; message: string }>;
+}

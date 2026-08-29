@@ -433,3 +433,87 @@ export async function checkStoreConnection(storeId: string, platform: EcommerceP
   const { adapter } = await getAdapter(storeId, platform);
   return adapter.checkConnection();
 }
+
+export async function syncProductBundleToShopify(
+  storeId: string,
+  bundleIdOrSku: string
+): Promise<{ success: boolean; message?: string }> {
+  const bundle = await prisma.productBundle.findFirst({
+    where: {
+      OR: [{ id: bundleIdOrSku }, { parentSku: bundleIdOrSku }],
+    },
+    include: { items: true },
+  });
+
+  if (!bundle) {
+    return { success: false, message: `Product bundle ${bundleIdOrSku} was not found.` };
+  }
+
+  const { adapter, integration } = await getAdapter(storeId, "shopify");
+  if (!integration.syncInventory) {
+    return { success: false, message: "Shopify inventory sync is disabled for this store." };
+  }
+
+  const uniqueAuthors = Array.from(new Set(bundle.items.map((i) => i.author).filter(Boolean)));
+  const vendorName = uniqueAuthors.length > 0 ? uniqueAuthors.slice(0, 2).join(" & ") : "Ghostlight Bundles";
+
+  // Build rich HTML bundle description with all titles
+  const booksListHtml = bundle.items
+    .map(
+      (item) =>
+        `<li><strong>${escapeHtml(item.title)}</strong>${item.author ? ` by ${escapeHtml(item.author)}` : ""}${item.condition ? ` &mdash; <em>${escapeHtml(item.condition)} Condition</em>` : ""} (Individual: $${item.listPrice.toFixed(2)})</li>`
+    )
+    .join("\n");
+
+  const fullDescriptionHtml = `
+<div class="product-bundle-container" style="font-family: inherit; line-height: 1.6;">
+  <p>${escapeHtml(bundle.description || `Curated special value book bundle featuring ${bundle.items.length} titles.`)}</p>
+  <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 14px 18px; border-radius: 10px; margin: 16px 0;">
+    <h4 style="margin: 0 0 10px 0; color: #0f172a; font-size: 15px;">Included in this Curated Bundle (${bundle.items.length} Books):</h4>
+    <ul style="margin: 0; padding-left: 20px; color: #334155;">
+      ${booksListHtml}
+    </ul>
+  </div>
+  <p style="font-size: 14px; color: #059669; font-weight: 600;">
+    Bundle Special Price: $${bundle.bundlePrice.toFixed(2)} &bull; Save $${bundle.savingsAmount.toFixed(2)} (${bundle.discountPercent}% Off Total Retail $${bundle.originalTotalPrice.toFixed(2)})
+  </p>
+</div>
+  `.trim();
+
+  const primaryCover = bundle.items.find((i) => Boolean(i.coverUrl))?.coverUrl || null;
+  const tags = [
+    "Book Bundles",
+    "Curated Bundle",
+    bundle.topic || "Curated Set",
+    `${bundle.items.length} Book Bundle`,
+    "Special Value Set",
+  ].filter(Boolean);
+
+  const bundlePayload = {
+    sku: bundle.parentSku,
+    barcode: bundle.parentSku,
+    title: bundle.title,
+    author: vendorName,
+    description: fullDescriptionHtml,
+    coverUrl: primaryCover,
+    tags,
+    seoTitle: `${bundle.title} | Curated Book Bundle`,
+    seoDescription: `Save with this curated ${bundle.items.length}-book set: ${bundle.items.map((i) => i.title).slice(0, 3).join(", ")}.`,
+    category: "Book Bundles",
+    price: bundle.bundlePrice,
+    quantity: bundle.status === "ACTIVE" ? Math.max(1, bundle.quantityOnHand) : 0,
+    weight: bundle.items.length * 16,
+  };
+
+  const result = await adapter.syncInventoryItem(bundlePayload);
+  await prisma.storeEcommerceIntegration.update({ where: { id: integration.id }, data: { lastSyncedAt: new Date() } });
+
+  // When bundle is active, take child items off individual Shopify sale
+  if (bundle.status === "ACTIVE") {
+    for (const child of bundle.items) {
+      void adapter.updateInventoryLevelByBarcode(child.sku, child.isbn, 0).catch(() => null);
+    }
+  }
+
+  return result;
+}

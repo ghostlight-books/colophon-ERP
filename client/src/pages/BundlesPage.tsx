@@ -7,6 +7,8 @@ import {
   searchBundlingItems,
   createBundle,
   unbundle,
+  syncBundleToShopify,
+  syncAllBundlesToShopify,
   type AvailableBundleItem,
 } from "../services/bundle.service";
 import type {
@@ -81,6 +83,8 @@ export default function BundlesPage(): JSX.Element {
   const [activeBundles, setActiveBundles] = useState<ProductBundle[]>([]);
   const [bundlesLoading, setBundlesLoading] = useState(false);
   const [unbundlingId, setUnbundlingId] = useState<string | null>(null);
+  const [syncingShopifyId, setSyncingShopifyId] = useState<string | null>(null);
+  const [isSyncingAllShopify, setIsSyncingAllShopify] = useState(false);
 
   // Notifications
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -285,6 +289,37 @@ export default function BundlesPage(): JSX.Element {
       setErrorMessage(err instanceof Error ? err.message : "Failed to unbundle.");
     } finally {
       setUnbundlingId(null);
+    }
+  };
+
+  // Handle Shopify Sync for Single Bundle
+  const handleSyncBundleToShopify = async (bundle: ProductBundle): Promise<void> => {
+    setSyncingShopifyId(bundle.id);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      await syncBundleToShopify(bundle.id);
+      setSuccessMessage(`Successfully published "${bundle.title}" (SKU: ${bundle.parentSku}) to Shopify / Ecommerce!`);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Failed to sync bundle to Shopify.");
+    } finally {
+      setSyncingShopifyId(null);
+    }
+  };
+
+  // Handle Shopify Sync for All Active Bundles
+  const handleSyncAllBundlesToShopify = async (): Promise<void> => {
+    if (activeBundles.length === 0) return;
+    setIsSyncingAllShopify(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const res = await syncAllBundlesToShopify();
+      setSuccessMessage(res.message || `Successfully synced ${res.synced} bundles to Shopify!`);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Failed to sync all bundles to Shopify.");
+    } finally {
+      setIsSyncingAllShopify(false);
     }
   };
 
@@ -738,18 +773,38 @@ export default function BundlesPage(): JSX.Element {
         {/* Tab 2: Active Bundles */}
         {activeTab === "active" && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+            <div className="flex items-center justify-between border-b border-slate-200/80 pb-3 flex-wrap gap-2">
               <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span>🗂️</span> Active Curated Bundles
+                <span>🗂️</span> Active Curated Bundles ({activeBundles.length})
               </h2>
-              <button
-                type="button"
-                onClick={loadActiveBundles}
-                disabled={bundlesLoading}
-                className="text-xs text-amber-700 hover:text-amber-800 flex items-center gap-1 font-bold"
-              >
-                <span>🔄 Refresh</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSyncAllBundlesToShopify}
+                  disabled={isSyncingAllShopify || activeBundles.length === 0}
+                  className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-xl transition shadow-xs flex items-center gap-1.5 disabled:opacity-50"
+                  title="Publish and sync all active bundles to Shopify"
+                >
+                  {isSyncingAllShopify ? (
+                    <>
+                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Syncing to Shopify...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🛍️ Sync All to Shopify</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={loadActiveBundles}
+                  disabled={bundlesLoading}
+                  className="text-xs text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1"
+                >
+                  <span>🔄 Refresh</span>
+                </button>
+              </div>
             </div>
 
             {bundlesLoading ? (
@@ -818,27 +873,47 @@ export default function BundlesPage(): JSX.Element {
                     </div>
 
                     {/* Bottom Actions */}
-                    <div className="flex items-center justify-between pt-1 text-xs">
+                    <div className="flex items-center justify-between pt-1 text-xs flex-wrap gap-2">
                       <span className="text-xs text-slate-500 font-medium">
                         Created {new Date(bundle.createdAt).toLocaleDateString()}
                       </span>
-                      <button
-                        type="button"
-                        disabled={unbundlingId === bundle.id}
-                        onClick={() => handleUnbundle(bundle)}
-                        className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-xl transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
-                      >
-                        {unbundlingId === bundle.id ? (
-                          <>
-                            <div className="w-3 h-3 border-2 border-rose-700 border-t-transparent rounded-full animate-spin" />
-                            <span>Restoring Items...</span>
-                          </>
-                        ) : (
-                          <>
-                            <span>🔓 Unbundle & Restore</span>
-                          </>
-                        )}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={syncingShopifyId === bundle.id}
+                          onClick={() => handleSyncBundleToShopify(bundle)}
+                          className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold rounded-xl transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                          title="Publish this bundle product and inventory to Shopify"
+                        >
+                          {syncingShopifyId === bundle.id ? (
+                            <>
+                              <div className="w-3 h-3 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin" />
+                              <span>Publishing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>🛍️ Sync to Shopify</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={unbundlingId === bundle.id}
+                          onClick={() => handleUnbundle(bundle)}
+                          className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-xl transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                        >
+                          {unbundlingId === bundle.id ? (
+                            <>
+                              <div className="w-3 h-3 border-2 border-rose-700 border-t-transparent rounded-full animate-spin" />
+                              <span>Restoring Items...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>🔓 Unbundle</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}

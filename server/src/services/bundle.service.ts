@@ -1,5 +1,5 @@
 import { prisma } from "../config/database.js";
-import { syncInventoryItemByIsbn } from "./ecommerce.service.js";
+import { syncInventoryItemByIsbn, syncProductBundleToShopify } from "./ecommerce.service.js";
 import type {
   ProductBundle,
   BundlePricingSuggestion,
@@ -356,12 +356,12 @@ export async function createProductBundle(input: CreateProductBundleInput): Prom
       }
     }
 
-    // Trigger Shopify background inventory update
+    // Trigger Shopify background inventory update for child item
     void syncInventoryItemByIsbn(input.storeId || "ghostlight-demo", item.isbn).catch(() => null);
   }
 
-  // Trigger Shopify sync for the new Parent Bundle
-  void syncInventoryItemByIsbn(input.storeId || "ghostlight-demo", bundleIsbn).catch(() => null);
+  // Trigger Shopify sync for the new Parent Bundle with rich HTML description, cover gallery, and price
+  void syncProductBundleToShopify(input.storeId || "ghostlight-demo", bundleRecord.id).catch(() => null);
 
   return {
     ...bundleRecord,
@@ -380,6 +380,7 @@ export async function createProductBundle(input: CreateProductBundleInput): Prom
  * Unbundles a Product Bundle:
  * 1. Dissolves the Parent Bundle SKU (sets quantityOnHand: 0, status: "UNBUNDLED").
  * 2. Restores all individual child items back to active standalone inventory.
+ * 3. Syncs updated stock quantities to Shopify / Ecommerce.
  */
 export async function unbundleProduct(bundleId: string, storeId = "ghostlight-demo"): Promise<UnbundleResult> {
   await ensureBundleTablesExist();
@@ -421,6 +422,9 @@ export async function unbundleProduct(bundleId: string, storeId = "ghostlight-de
       data: { quantityOnHand: 0 },
     });
   }
+
+  // Set bundle to 0 on Shopify
+  void syncProductBundleToShopify(storeId, bundle.id).catch(() => null);
 
   // 3. Restore all child items to active standalone inventory
   for (const item of bundle.items) {
