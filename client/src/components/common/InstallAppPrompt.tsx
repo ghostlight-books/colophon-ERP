@@ -56,7 +56,7 @@ export default function InstallAppPrompt() {
   return (
     <>
       {/* Floating Bottom App Installation Banner */}
-      <div className="fixed bottom-20 lg:bottom-6 left-4 right-4 max-w-md mx-auto z-[9985] bg-gradient-to-r from-slate-900/95 to-indigo-950/95 backdrop-blur-xl text-white p-3.5 rounded-2xl border border-indigo-500/30 shadow-2xl flex items-center justify-between gap-3 animate-slideUp">
+      <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] lg:bottom-6 left-4 right-4 max-w-md mx-auto z-[9985] bg-gradient-to-r from-slate-900/95 to-indigo-950/95 backdrop-blur-xl text-white p-3.5 rounded-2xl border border-indigo-500/30 shadow-2xl flex items-center justify-between gap-3 animate-slideUp">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-10 h-10 rounded-xl bg-indigo-600/90 border border-indigo-400/40 flex items-center justify-center text-xl shrink-0 shadow-sm">
             🏛️

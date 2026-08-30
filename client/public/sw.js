@@ -1,10 +1,13 @@
-// Colophon Library Service Worker
-const CACHE_NAME = "colophon-library-v1";
+// Colophon Library & ERP Service Worker
+const CACHE_NAME = "colophon-library-v2";
 const STATIC_ASSETS = [
   "/",
   "/index.html",
   "/manifest.json",
   "/icons/icon.svg",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/apple-touch-icon.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -58,11 +61,10 @@ self.addEventListener("fetch", (event) => {
         return caches.match(event.request).then((cached) => {
           if (cached) return cached;
           if (event.request.mode === "navigate") {
-            return caches.match("/index.html");
+            return caches.match("/");
           }
-          return new Response("Offline", { status: 503, statusText: "Service Unavailable" });
+          return new Response("Offline", { status: 503, statusText: "Offline" });
         });
       })
   );
 });
-
