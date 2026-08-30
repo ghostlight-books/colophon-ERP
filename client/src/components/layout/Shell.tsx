@@ -648,12 +648,12 @@ function Shell({
           {isPosRoute ? null : (
             <header
               className={[
-                "relative z-[120] overflow-visible flex items-center justify-between rounded-[20px] sm:rounded-[26px] border px-3.5 py-2.5 sm:px-6 sm:py-3.5 transition-colors duration-300 shadow-xs",
+                "relative z-[120] overflow-visible flex items-center justify-between rounded-[20px] sm:rounded-[26px] border px-3 py-2 sm:px-5 sm:py-3 transition-colors duration-300 shadow-xs",
                 isDark ? "border-slate-800 bg-[#131927] text-white" : "border-slate-300 bg-[#f1f5f9] text-slate-900",
               ].join(" ")}
             >
-              {/* Left: Mobile Hamburger + Brand Logo Badge */}
-              <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+              {/* Left: Mobile Hamburger Button & Brand Logo */}
+              <div className="flex items-center gap-2.5">
                 <button
                   type="button"
                   onClick={() => setIsMobileDrawerOpen(true)}
@@ -667,94 +667,56 @@ function Shell({
                   <Menu size={18} strokeWidth={2.2} />
                 </button>
 
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-2">
                   <BrandLogo className="h-7 w-7 text-indigo-500 shrink-0" />
-                  <span className={[
-                    "text-xs sm:text-sm font-bold tracking-tight truncate",
-                    isDark ? "text-white" : "text-slate-900",
-                  ].join(" ")}>
-                    {workspaceMode === "library" ? "Colophon Library" : "Colophon Bookstore"}
-                  </span>
                 </div>
               </div>
 
-              {/* Center/Right: Quick Workspace Switcher Pill + Menu Button */}
-              <div className="flex items-center gap-2 sm:gap-3">
-                {/* 1. Header Workspace Mode Switcher Pill */}
-                <div className="flex items-center p-0.5 sm:p-1 bg-slate-200/90 dark:bg-slate-800 rounded-2xl border border-slate-300 dark:border-slate-700 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => onWorkspaceModeChange?.("bookstore")}
-                    title="Switch to Bookstore ERP (POS, Inventory, Intake, Finance, eBay)"
-                    className={`px-2.5 sm:px-3 py-1 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer text-xs ${
-                      workspaceMode === "bookstore"
-                        ? "bg-white dark:bg-indigo-600 text-slate-900 dark:text-white shadow-xs font-black"
-                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                    }`}
-                  >
-                    <span>🏪</span>
-                    <span className="hidden sm:inline">Store</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onWorkspaceModeChange?.("library")}
-                    title="Switch to Personal Library (Catalog, Shelves, Scanner, Lending, Valuation)"
-                    className={`px-2.5 sm:px-3 py-1 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer text-xs ${
-                      workspaceMode === "library"
-                        ? "bg-white dark:bg-indigo-600 text-slate-900 dark:text-white shadow-xs font-black"
-                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                    }`}
-                  >
-                    <span>🏛️</span>
-                    <span className="hidden sm:inline">Library</span>
-                  </button>
-                </div>
-
-                {/* 2. Unified Header Menu Button */}
-                <div ref={toolbarRef} className="relative z-[140] shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setMenu((current) => (current === "none" ? "menu" : "none"))}
-                    className={[
-                      "flex items-center gap-2 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-2xl border transition cursor-pointer active:scale-95 shadow-xs font-semibold text-xs",
-                      menu !== "none"
-                        ? isDark
-                          ? "border-indigo-500 bg-indigo-950/80 text-white ring-2 ring-indigo-500/40"
-                          : "border-indigo-400 bg-indigo-50 text-indigo-950 ring-2 ring-indigo-300"
-                        : isDark
-                          ? "border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700"
-                          : "border-slate-300 bg-[#e2e8f0] text-slate-800 hover:bg-[#cbd5e1]",
-                    ].join(" ")}
-                    aria-label="Toggle Menu"
-                    title="Menu"
-                  >
-                    <div className="relative flex items-center justify-center">
-                      <div className="h-7 w-7 rounded-full bg-amber-400 text-slate-950 font-black flex items-center justify-center text-xs shadow-xs">
-                        {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : "U"}
-                      </div>
-                      <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white dark:border-slate-900 bg-emerald-500" />
+              {/* Right: Unified Header Menu Button */}
+              <div ref={toolbarRef} className="relative z-[140] shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setMenu((current) => (current === "none" ? "menu" : "none"))}
+                  className={[
+                    "flex items-center gap-2 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-2xl border transition cursor-pointer active:scale-95 shadow-xs font-semibold text-xs",
+                    menu !== "none"
+                      ? isDark
+                        ? "border-indigo-500 bg-indigo-950/80 text-white ring-2 ring-indigo-500/40"
+                        : "border-indigo-400 bg-indigo-50 text-indigo-950 ring-2 ring-indigo-300"
+                      : isDark
+                        ? "border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700"
+                        : "border-slate-300 bg-[#e2e8f0] text-slate-800 hover:bg-[#cbd5e1]",
+                  ].join(" ")}
+                  aria-label="Toggle Menu"
+                  title="Menu"
+                >
+                  <div className="relative flex items-center justify-center">
+                    <div className="h-7 w-7 rounded-full bg-amber-400 text-slate-950 font-black flex items-center justify-center text-xs shadow-xs">
+                      {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : "U"}
                     </div>
+                    <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white dark:border-slate-900 bg-emerald-500" />
+                  </div>
 
-                    <span className="font-bold text-xs truncate max-w-[100px]">
-                      {currentUser.name ? currentUser.name.split(" ")[0] : "Menu"}
+                  <span className="font-bold text-xs truncate max-w-[100px]">
+                    {currentUser.name ? currentUser.name.split(" ")[0] : "Menu"}
+                  </span>
+
+                  {unreadCount > 0 && (
+                    <span className="min-w-[18px] h-[18px] rounded-full bg-rose-500 px-1 text-[10px] font-black text-white flex items-center justify-center">
+                      {unreadCount}
                     </span>
+                  )}
 
-                    {unreadCount > 0 && (
-                      <span className="min-w-[18px] h-[18px] rounded-full bg-rose-500 px-1 text-[10px] font-black text-white flex items-center justify-center">
-                        {unreadCount}
-                      </span>
-                    )}
+                  <ChevronDown
+                    size={14}
+                    className={`transition-transform duration-200 text-slate-500 dark:text-slate-400 ${
+                      menu !== "none" ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
 
-                    <ChevronDown
-                      size={14}
-                      className={`transition-transform duration-200 text-slate-500 dark:text-slate-400 ${
-                        menu !== "none" ? "rotate-180" : ""
-                      }`}
-                    />
-                  </button>
-
-                  {/* Consolidated Menu Dropdown */}
-                  {menu !== "none" && (
+                {/* Consolidated Menu Dropdown */}
+                {menu !== "none" && (
                     <div
                       className={[
                         "absolute right-0 top-[52px] z-[1000] w-80 sm:w-96 rounded-3xl border p-4 shadow-2xl animate-scaleUp",
