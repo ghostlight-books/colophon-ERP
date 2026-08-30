@@ -411,71 +411,97 @@ function ShellRouteLayout(): JSX.Element {
     "/open-network/order": "INVENTORY",
   };
 
-  const pageMeta: Record<string, { subtitle: string }> = {
+  const pageMeta: Record<string, { title: string; subtitle: string }> = {
     "/dashboard": {
+      title: "Store Overview",
       subtitle: "Here's what is happening in your store.",
     },
     "/pos-register": {
+      title: "Point of Sale",
       subtitle: "POS machine and cart are ready for checkout.",
     },
     "/intake": {
+      title: "Book Intake",
       subtitle: "Scan incoming books, match ISBNs, and route review exceptions.",
     },
     "/buying": {
-      subtitle: "Evaluate incoming books, live comparative market prices, and 60% purchase offers.",
+      title: "Buy Back Books",
+      subtitle: "Evaluate incoming books, live comparative market prices, and purchase offers.",
     },
     "/bundles": {
-      subtitle: "Curate multi-book product bundles with 10% off nearest .99 pricing and manage active sets.",
+      title: "Product Bundles",
+      subtitle: "Curate multi-book product bundles and manage active sets.",
     },
     "/sales": {
+      title: "Orders & Sales",
       subtitle: "Track orders, invoices, and team sales activity.",
     },
     "/operations": {
+      title: "Operations & Tasks",
       subtitle: "Coordinate receiving, tasks, and operational workflows.",
     },
     "/marketing": {
+      title: "Marketing Hub",
       subtitle: "Manage social channels, review stats, and publish campaigns.",
     },
     "/calendar": {
+      title: "Calendar & Schedule",
       subtitle: "Track events, rentals, and key operational dates.",
     },
     "/lists": {
+      title: "Task Boards & Lists",
       subtitle: "Shared team boards and store-wide task lists.",
     },
     "/inventory": {
+      title: "Store Inventory",
       subtitle: "Monitor stock levels, low-quantity alerts, and replenishment workflow.",
     },
     "/ebay": {
+      title: "eBay Integration",
       subtitle: "Two-way inventory sync, opportunity scoring, criteria push rules, and single-copy protection.",
     },
     "/finance": {
+      title: "Financial Reports",
       subtitle: "Accounting pulse and due bills at a glance.",
     },
     "/shopify": {
+      title: "Shopify Integration",
       subtitle: "Connect your Shopify store, sync inventory, and import recent orders.",
     },
     "/open-network": {
+      title: "Open Book Network",
       subtitle: "Shared database and communications hub for independent bookstores.",
     },
     "/library": {
+      title: "Library Dashboard",
       subtitle: "Cataloging, Dewey/LOC classification, shelf organization & insurance valuation.",
     },
     "/library/scan": {
+      title: "Quick Camera Scanner",
       subtitle: "Device camera barcode scanner with instant Dewey/LOC classification & shelf intake.",
     },
+    "/library/quick-scan": {
+      title: "Batch Camera Scanner",
+      subtitle: "Rapid batch intake and camera scanning.",
+    },
     "/library/catalog": {
+      title: "Library Catalog",
       subtitle: "Browse and search your collection by call number, subject, and room location.",
     },
     "/library/shelves": {
+      title: "Bookcases & Shelves",
       subtitle: "Physical room, bookcase, and shelf organizer with volume capacity meters.",
     },
     "/library/exchange": {
+      title: "Marketplace & Offers",
       subtitle: "Review incoming cash offers and propose book trades across community libraries and bookstores.",
     },
     "/library/lending": {
+      title: "Lending Tracker",
       subtitle: "Track borrowed books, return due dates, and patron contact logs.",
     },
     "/library/valuation": {
+      title: "Insurance Valuation",
       subtitle: "Collection replacement appraisal schedule for personal property insurance.",
     },
   };
@@ -499,7 +525,7 @@ function ShellRouteLayout(): JSX.Element {
 
   return (
     <Shell
-      greeting={`Welcome, ${currentUser.name} 🎉`}
+      greeting={meta.title}
       subtitle={meta.subtitle}
       navItems={activeNavItems}
       activePath={activePath}
