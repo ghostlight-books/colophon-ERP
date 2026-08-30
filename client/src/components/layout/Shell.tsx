@@ -401,13 +401,15 @@ function Shell({
   return (
     <div className={[
       "min-h-screen transition-colors duration-300 font-sans",
-      isPosRoute ? "p-1 md:p-2" : "p-3 md:p-4",
+      isPosRoute
+        ? "pt-[calc(env(safe-area-inset-top,0px)+0.5rem)] pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)] px-1 sm:px-2"
+        : "pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] pb-[calc(env(safe-area-inset-bottom,0px)+4.5rem)] px-2.5 sm:px-4 lg:py-6 lg:px-6",
       isDark ? "bg-[#090d16]" : "bg-[#e2e8f0]",
     ].join(" ")}>
       <div
         className={[
           "relative min-h-[calc(100vh-1.5rem)] overflow-visible border shadow-sm transition-colors duration-300",
-          isPosRoute ? "rounded-[18px]" : "rounded-[34px]",
+          isPosRoute ? "rounded-[18px]" : "rounded-[30px] sm:rounded-[34px]",
           isDark
             ? "border-slate-800 bg-[#0f1422] text-slate-100"
             : "border-slate-300 bg-[#f8fafc] text-slate-900",
@@ -1245,7 +1247,7 @@ function Shell({
             {/* Drawer Panel */}
             <div
               className={[
-                "relative w-72 max-w-[85vw] h-full flex flex-col p-4 shadow-2xl border-r z-10 animate-slideRight overflow-y-auto",
+                "relative w-72 max-w-[85vw] h-full flex flex-col pt-[calc(env(safe-area-inset-top,0px)+1rem)] pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)] px-4 shadow-2xl border-r z-10 animate-slideRight overflow-y-auto",
                 isDark ? "bg-[#131927] border-slate-800 text-slate-100" : "bg-white border-slate-200 text-slate-800",
               ].join(" ")}
             >

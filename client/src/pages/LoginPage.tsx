@@ -92,13 +92,13 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#e2e8f0] dark:bg-slate-950 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans transition-colors duration-300">
+    <div className="min-h-screen bg-[#e2e8f0] dark:bg-slate-950 flex flex-col justify-center items-center pt-[calc(env(safe-area-inset-top,0px)+1rem)] pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] px-4 relative overflow-hidden font-sans transition-colors duration-300">
       {/* Background subtle radial glow */}
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-500/10 dark:bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-sky-500/10 dark:bg-sky-600/15 rounded-full blur-3xl pointer-events-none" />
 
       {/* Top Controls: Theme Toggle */}
-      <div className="absolute top-5 right-5 z-20">
+      <div className="absolute top-[calc(env(safe-area-inset-top,0px)+1rem)] right-5 z-20">
         <button
           type="button"
           onClick={toggleTheme}
