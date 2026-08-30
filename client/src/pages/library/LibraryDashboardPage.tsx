@@ -61,7 +61,7 @@ export default function LibraryDashboardPage() {
           librarySpaceId: activeSpaceId !== "ALL" ? activeSpaceId : undefined,
           limit: 50,
         }),
-        fetchShelves(activeSpaceId !== "ALL" ? activeSpaceId : undefined).catch(() => []),
+        fetchShelves().catch(() => []),
       ]);
       setData(summary);
       setRecentVolumes(volumesRes.items);

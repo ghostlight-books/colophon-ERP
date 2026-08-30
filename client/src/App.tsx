@@ -529,6 +529,7 @@ function ShellRouteLayout(): JSX.Element {
       subtitle={meta.subtitle}
       navItems={activeNavItems}
       activePath={activePath}
+      workspaceMode={mode}
       onWorkspaceModeChange={(newMode) => {
         setMode(newMode);
         navigate(newMode === "library" ? "/library" : "/dashboard");
