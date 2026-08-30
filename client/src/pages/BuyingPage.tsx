@@ -529,10 +529,8 @@ export default function BuyingPage(): JSX.Element {
                     <CameraBarcodeScanner
                       onScan={(isbn) => {
                         setBarcodeInput(isbn);
-                        setCameraActive(false);
                         void handleLookupIsbn(isbn);
                       }}
-                      onClose={() => setCameraActive(false)}
                     />
                   </div>
                 )}

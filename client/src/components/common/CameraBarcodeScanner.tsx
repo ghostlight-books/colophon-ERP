@@ -1,11 +1,18 @@
-import { useEffect, useRef, useState } from "react";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  BrowserMultiFormatReader,
+  BarcodeFormat,
+  DecodeHintType,
+} from "@zxing/library";
 import { createWorker } from "tesseract.js";
 
 // Synthesizes a fast confirmation chime via Web Audio API
 export function playScanChime(): void {
   try {
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
     const ctx = new AudioCtx();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -14,21 +21,21 @@ export function playScanChime(): void {
     osc.frequency.setValueAtTime(880, ctx.currentTime); // A5 note
     osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.1); // A6 note
 
-    gain.gain.setValueAtTime(0.2, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.14);
 
     osc.connect(gain);
     gain.connect(ctx.destination);
 
     osc.start();
-    osc.stop(ctx.currentTime + 0.12);
+    osc.stop(ctx.currentTime + 0.14);
   } catch {}
 }
 
 export function triggerHapticFeedback(): void {
   try {
     if ("vibrate" in navigator && typeof navigator.vibrate === "function") {
-      navigator.vibrate(80);
+      navigator.vibrate([30, 40, 50]);
     }
   } catch {}
 }
@@ -38,15 +45,18 @@ export function triggerHapticFeedback(): void {
  */
 export function extractIsbnFromText(rawText: string): string | null {
   if (!rawText) return null;
-
-  // Clean common OCR noise
   const text = rawText.replace(/[\r\n]+/g, " ");
 
   // 1. Look for explicit ISBN labeled patterns, e.g. "ISBN 978-0-14-143951-8" or "ISBN: 0141439513"
-  const explicitMatches = text.matchAll(/ISBN(?:-1[03])?[\s:]*([0-9Xx\s-]{10,22})/gi);
+  const explicitMatches = text.matchAll(
+    /ISBN(?:-1[03])?[\s:]*([0-9Xx\s-]{10,22})/gi
+  );
   for (const m of explicitMatches) {
     const cleaned = m[1].replace(/[^0-9Xx]/gi, "").toUpperCase();
-    if (cleaned.length === 13 && (cleaned.startsWith("978") || cleaned.startsWith("979"))) {
+    if (
+      cleaned.length === 13 &&
+      (cleaned.startsWith("978") || cleaned.startsWith("979"))
+    ) {
       return cleaned;
     }
     if (cleaned.length === 10) {
@@ -67,7 +77,10 @@ export function extractIsbnFromText(rawText: string): string | null {
   const genericMatches = text.matchAll(/([0-9Xx]{10,13})/gi);
   for (const m of genericMatches) {
     const cleaned = m[1].toUpperCase();
-    if (cleaned.length === 13 && (cleaned.startsWith("978") || cleaned.startsWith("979"))) {
+    if (
+      cleaned.length === 13 &&
+      (cleaned.startsWith("978") || cleaned.startsWith("979"))
+    ) {
       return cleaned;
     }
     if (cleaned.length === 10) {
@@ -89,161 +102,287 @@ export interface CameraBarcodeScannerProps {
 export default function CameraBarcodeScanner({
   onScan,
   onClose,
-  cooldownMs = 1800,
+  cooldownMs = 1500,
   continuous = true,
   className = "",
 }: CameraBarcodeScannerProps) {
-  const containerId = useRef(`colophon-qr-reader-${Math.random().toString(36).substring(2, 9)}`).current;
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const scanningLoopIdRef = useRef<number | null>(null);
+
   const lastScannedTime = useRef<number>(0);
   const lastScannedCode = useRef<string>("");
   const isProcessingRef = useRef<boolean>(false);
 
-  // Mode: "barcode" (default) or "ocr" (text scanning)
+  // Modes: "barcode" (default) or "ocr" (printed text recognition)
   const [scanMode, setScanMode] = useState<"barcode" | "ocr">("barcode");
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+  const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [cameras, setCameras] = useState<Array<{ id: string; label: string }>>([]);
-  const [selectedCameraId, setSelectedCameraId] = useState<string>("");
+
+  // Camera Capabilities: Focus, Zoom, Flash
   const [torchAvailable, setTorchAvailable] = useState<boolean>(false);
   const [torchOn, setTorchOn] = useState<boolean>(false);
-  const [isInitializing, setIsInitializing] = useState<boolean>(true);
+  const [zoomRange, setZoomRange] = useState<{ min: number; max: number; step: number } | null>(null);
+  const [currentZoom, setCurrentZoom] = useState<number>(1);
+  const [tapFocusPoint, setTapFocusPoint] = useState<{ x: number; y: number } | null>(null);
 
   // OCR state
   const [isOcrProcessing, setIsOcrProcessing] = useState<boolean>(false);
   const [ocrStatusText, setOcrStatusText] = useState<string>("");
   const [manualIsbnInput, setManualIsbnInput] = useState<string>("");
 
+  // Discover connected camera devices
   useEffect(() => {
-    let isMounted = true;
+    async function loadCameras() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoInputs = devices.filter((d) => d.kind === "videoinput");
+        setCameras(videoInputs);
+        if (videoInputs.length > 0) {
+          // Default to environment / back-facing camera
+          const backCamera =
+            videoInputs.find((d) => /back|rear|environment|macro/i.test(d.label)) ||
+            videoInputs[0];
+          setSelectedDeviceId(backCamera.deviceId);
+        }
+      } catch (err) {
+        console.warn("Could not list video devices:", err);
+      }
+    }
+    void loadCameras();
+  }, []);
 
-    async function initScanner() {
+  // Handle successful barcode recognition and auto-submission
+  const handleBarcodeDecoded = useCallback(
+    async (decodedText: string) => {
+      const clean = decodedText.replace(/[^0-9X]/gi, "").toUpperCase();
+      if (!clean || clean.length < 8) return;
+
+      const now = Date.now();
+      if (isProcessingRef.current) return;
+      if (clean === lastScannedCode.current && now - lastScannedTime.current < cooldownMs) {
+        return;
+      }
+
+      lastScannedCode.current = clean;
+      lastScannedTime.current = now;
+      isProcessingRef.current = true;
+
+      // Audio + Haptic Feedback
+      playScanChime();
+      triggerHapticFeedback();
+
+      try {
+        await onScan(clean);
+      } finally {
+        isProcessingRef.current = false;
+        if (!continuous && streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+        }
+      }
+    },
+    [cooldownMs, continuous, onScan]
+  );
+
+  // Initialize Camera Stream with Continuous Autofocus & High Definition
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function startCameraStream() {
       setIsInitializing(true);
       setErrorMessage(null);
 
+      // Stop any prior stream
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (readerRef.current) {
+        readerRef.current.reset();
+      }
+
       try {
-        // 1. Discover cameras
-        const devices = await Html5Qrcode.getCameras().catch(() => []);
-        if (isMounted && devices && devices.length > 0) {
-          const list = devices.map((d) => ({
-            id: d.id,
-            label: d.label || `Camera ${d.id.substring(0, 5)}`,
-          }));
-          setCameras(list);
-          const backCam = list.find((c) => /back|rear|environment/i.test(c.label)) || list[0];
-          setSelectedCameraId(backCam.id);
-        }
-
-        // 2. Initialize Html5Qrcode with all barcode formats
-        const formatsToSupport = [
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39,
-          Html5QrcodeSupportedFormats.QR_CODE,
-        ];
-
-        const html5QrCode = new Html5Qrcode(containerId, {
-          formatsToSupport,
-          verbose: false,
-        });
-        scannerRef.current = html5QrCode;
-
-        // 3. Start scanning with environment camera (or chosen camera)
-        const cameraConfig = selectedCameraId ? { deviceId: { exact: selectedCameraId } } : { facingMode: "environment" };
-
-        const scanConfig = {
-          fps: 15,
-          qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-            const qrboxWidth = Math.max(240, Math.floor(minEdge * 0.85));
-            const qrboxHeight = Math.max(140, Math.floor(qrboxWidth * 0.65));
-            return { width: qrboxWidth, height: qrboxHeight };
+        // Build video constraints with full autofocus and macro focus
+        const constraints: MediaStreamConstraints = {
+          video: {
+            deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
+            facingMode: selectedDeviceId ? undefined : { ideal: "environment" },
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 },
+            frameRate: { ideal: 30, min: 15 },
+            // Advanced WebRTC focus & exposure controls
+            advanced: [
+              { focusMode: "continuous" } as any,
+              { focusDistance: { min: 0.05, ideal: 0.1 } } as any,
+              { exposureMode: "continuous" } as any,
+              { whiteBalanceMode: "continuous" } as any,
+            ],
           },
-          aspectRatio: 1.0,
+          audio: false,
         };
 
-        await html5QrCode.start(
-          cameraConfig,
-          scanConfig,
-          async (decodedText) => {
-            if (scanMode !== "barcode") return; // In OCR mode, don't trigger barcode listener
-            const clean = decodedText.replace(/[^0-9X]/gi, "").toUpperCase();
-            if (!clean || clean.length < 8) return;
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (isCancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
 
-            const now = Date.now();
-            if (isProcessingRef.current) return;
-            if (clean === lastScannedCode.current && now - lastScannedTime.current < cooldownMs) {
-              return;
-            }
+        streamRef.current = stream;
+        const videoTrack = stream.getVideoTracks()[0];
 
-            lastScannedCode.current = clean;
-            lastScannedTime.current = now;
-            isProcessingRef.current = true;
+        // Attach to video element
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
 
-            playScanChime();
-            triggerHapticFeedback();
+        // Query Capabilities (Autofocus, Zoom, Flash)
+        if (videoTrack && typeof videoTrack.getCapabilities === "function") {
+          const caps = videoTrack.getCapabilities() as {
+            torch?: boolean;
+            zoom?: { min: number; max: number; step: number };
+            focusMode?: string[];
+          };
 
-            try {
-              await onScan(clean);
-            } finally {
-              isProcessingRef.current = false;
-              if (!continuous && isMounted) {
-                if (html5QrCode.isScanning) {
-                  await html5QrCode.stop().catch(() => {});
-                }
+          if (caps.torch) {
+            setTorchAvailable(true);
+          }
+          if (caps.zoom) {
+            setZoomRange({
+              min: caps.zoom.min || 1,
+              max: Math.min(caps.zoom.max || 5, 5),
+              step: caps.zoom.step || 0.1,
+            });
+            setCurrentZoom(caps.zoom.min || 1);
+          }
+        }
+
+        setIsInitializing(false);
+
+        // 2. Setup ZXing Reader with Try Harder & Multiple 1D/2D Formats
+        const hints = new Map();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.QR_CODE,
+          BarcodeFormat.ITF,
+        ]);
+        hints.set(DecodeHintType.TRY_HARDER, true);
+
+        const codeReader = new BrowserMultiFormatReader(hints, 100);
+        readerRef.current = codeReader;
+
+        // 3. Start ZXing continuous decoding loop
+        if (videoRef.current) {
+          codeReader.decodeContinuously(videoRef.current, (result) => {
+            if (result && !isCancelled) {
+              const text = result.getText();
+              if (text) {
+                void handleBarcodeDecoded(text);
               }
             }
-          },
-          () => {
-            // Ignore normal frame parse errors
-          }
-        );
-
-        if (isMounted) {
-          setHasPermission(true);
-          setIsInitializing(false);
-
-          // Check torch capability
-          try {
-            const capabilities = html5QrCode.getRunningTrackCapabilities() as { torch?: boolean };
-            if (capabilities && "torch" in capabilities && capabilities.torch) {
-              setTorchAvailable(true);
-            }
-          } catch {}
+          });
         }
       } catch (err: unknown) {
-        if (isMounted) {
-          console.error("Camera init error:", err);
+        if (!isCancelled) {
+          console.error("Camera stream error:", err);
           const msg = err instanceof Error ? err.message : String(err);
-          if (msg.includes("Permission") || msg.includes("NotAllowedError") || msg.includes("denied")) {
-            setErrorMessage("Camera access was denied. Please grant camera permission in your browser settings.");
+          if (msg.includes("NotAllowedError") || msg.includes("Permission")) {
+            setErrorMessage("Camera access was denied. Please allow camera permissions in your browser.");
           } else if (msg.includes("NotFoundError") || msg.includes("DevicesNotFoundError")) {
-            setErrorMessage("No camera was found on this device. You can enter ISBNs manually.");
+            setErrorMessage("No camera was found on this device.");
           } else {
-            setErrorMessage("Could not start camera feed. Please check device permissions or enter ISBN manually.");
+            setErrorMessage("Could not activate camera. You can type or paste the ISBN below.");
           }
-          setHasPermission(false);
           setIsInitializing(false);
         }
       }
     }
 
-    void initScanner();
+    void startCameraStream();
 
     return () => {
-      isMounted = false;
-      if (scannerRef.current) {
-        if (scannerRef.current.isScanning) {
-          scannerRef.current.stop().catch(() => {});
-        }
-        scannerRef.current.clear();
-        scannerRef.current = null;
+      isCancelled = true;
+      if (scanningLoopIdRef.current) {
+        window.cancelAnimationFrame(scanningLoopIdRef.current);
+      }
+      if (readerRef.current) {
+        readerRef.current.reset();
+        readerRef.current = null;
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
       }
     };
-  }, [containerId, selectedCameraId, cooldownMs, continuous, onScan, scanMode]);
+  }, [selectedDeviceId, handleBarcodeDecoded]);
+
+  // Tap-to-Focus on Viewfinder Coordinate
+  const handleViewfinderTap = async (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+
+    const x = (clientX - rect.left) / rect.width;
+    const y = (clientY - rect.top) / rect.height;
+
+    setTapFocusPoint({ x: clientX - rect.left, y: clientY - rect.top });
+    setTimeout(() => setTapFocusPoint(null), 1200);
+
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === "function") {
+      try {
+        await track.applyConstraints({
+          advanced: [
+            {
+              focusMode: "continuous",
+              pointsOfInterest: [{ x, y }],
+            } as any,
+          ],
+        });
+      } catch {
+        // Tap to focus fallback
+      }
+    }
+  };
+
+  // Set Hardware Camera Zoom
+  const applyZoom = async (newZoom: number) => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === "function") {
+      try {
+        await track.applyConstraints({
+          advanced: [{ zoom: newZoom } as any],
+        });
+        setCurrentZoom(newZoom);
+      } catch (err) {
+        console.warn("Zoom not supported:", err);
+      }
+    }
+  };
+
+  // Toggle Torch / Flashlight
+  const toggleTorch = async () => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === "function") {
+      try {
+        const nextState = !torchOn;
+        await track.applyConstraints({
+          advanced: [{ torch: nextState } as any],
+        });
+        setTorchOn(nextState);
+      } catch {
+        setTorchAvailable(false);
+      }
+    }
+  };
 
   // Capture video frame and run OCR to extract printed ISBN text
   const handleSnapAndOcr = async () => {
@@ -252,27 +391,26 @@ export default function CameraBarcodeScanner({
     setOcrStatusText("Capturing frame for text recognition…");
 
     try {
-      // Find the video element inside container
-      const container = document.getElementById(containerId);
-      const video = container?.querySelector("video") as HTMLVideoElement | null;
+      const video = videoRef.current;
       if (!video || video.readyState < 2) {
         setOcrStatusText("Camera preview not ready. Please try again.");
         setIsOcrProcessing(false);
         return;
       }
 
-      // Draw video frame to canvas
+      // Draw high-resolution frame to offscreen canvas
       const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
+      canvas.width = video.videoWidth || 1920;
+      canvas.height = video.videoHeight || 1080;
       const ctx = canvas.getContext("2d");
       if (!ctx) {
         setIsOcrProcessing(false);
         return;
       }
+
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      setOcrStatusText("Running OCR text recognition…");
+      setOcrStatusText("Reading printed text via OCR…");
       const worker = await createWorker("eng");
       const ret = await worker.recognize(canvas);
       await worker.terminate();
@@ -281,7 +419,7 @@ export default function CameraBarcodeScanner({
       const matchedIsbn = extractIsbnFromText(extractedText);
 
       if (matchedIsbn) {
-        setOcrStatusText(`Found ISBN: ${matchedIsbn}!`);
+        setOcrStatusText(`Found ISBN: ${matchedIsbn}! Auto-submitting…`);
         playScanChime();
         triggerHapticFeedback();
         await onScan(matchedIsbn);
@@ -290,28 +428,10 @@ export default function CameraBarcodeScanner({
       }
     } catch (err) {
       console.warn("OCR Error:", err);
-      setOcrStatusText("OCR recognition error. You can type the ISBN below.");
+      setOcrStatusText("OCR recognition error. You can type the ISBN manually below.");
     } finally {
       setIsOcrProcessing(false);
     }
-  };
-
-  const toggleTorch = async () => {
-    if (!scannerRef.current || !torchAvailable) return;
-    try {
-      const nextTorch = !torchOn;
-      await scannerRef.current.applyVideoConstraints({
-        advanced: [{ torch: nextTorch } as any],
-      });
-      setTorchOn(nextTorch);
-    } catch {
-      setTorchAvailable(false);
-    }
-  };
-
-  const handleCameraChange = async (newDeviceId: string) => {
-    if (newDeviceId === selectedCameraId) return;
-    setSelectedCameraId(newDeviceId);
   };
 
   const handleManualSubmit = (e: React.FormEvent) => {
@@ -326,9 +446,9 @@ export default function CameraBarcodeScanner({
   };
 
   return (
-    <div className={`relative flex flex-col items-center overflow-hidden rounded-3xl bg-slate-950 border border-slate-800 shadow-2xl text-white ${className}`}>
-      {/* Top Header Bar with Mode Toggle */}
-      <div className="w-full px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between z-10 flex-wrap gap-2">
+    <div className={`relative flex flex-col items-center overflow-hidden rounded-3xl bg-slate-950 border border-slate-800 shadow-2xl text-white select-none ${className}`}>
+      {/* 1. Header Toolbar */}
+      <div className="w-full px-4 py-3 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between z-20 flex-wrap gap-2">
         {/* Mode Selector Tabs (Barcode vs ISBN Text OCR) */}
         <div className="flex items-center p-1 bg-slate-800 rounded-xl text-xs font-medium border border-slate-700">
           <button
@@ -357,8 +477,8 @@ export default function CameraBarcodeScanner({
           </button>
         </div>
 
+        {/* Quick Tools: Torch, Close */}
         <div className="flex items-center gap-2">
-          {/* Torch / Flash Toggle */}
           {torchAvailable && (
             <button
               type="button"
@@ -373,7 +493,6 @@ export default function CameraBarcodeScanner({
             </button>
           )}
 
-          {/* Close Scanner Button */}
           {onClose && (
             <button
               type="button"
@@ -386,33 +505,82 @@ export default function CameraBarcodeScanner({
         </div>
       </div>
 
-      {/* Video Viewfinder Area */}
-      <div className="relative w-full aspect-[4/3] sm:aspect-[16/10] max-h-[380px] bg-black flex items-center justify-center overflow-hidden">
-        {/* Html5Qrcode rendering target */}
-        <div id={containerId} className="w-full h-full [&_video]:w-full [&_video]:h-full [&_video]:object-cover" />
+      {/* 2. Interactive Video Viewfinder with Tap-To-Focus */}
+      <div
+        onClick={handleViewfinderTap}
+        className="relative w-full aspect-[4/3] sm:aspect-[16/10] max-h-[380px] bg-black flex items-center justify-center overflow-hidden cursor-crosshair"
+      >
+        <video
+          ref={videoRef}
+          playsInline
+          muted
+          autoPlay
+          className="w-full h-full object-cover"
+        />
 
-        {/* Laser Targeting / Viewfinder Overlay */}
+        {/* Tap-to-Focus Animated Ring */}
+        {tapFocusPoint && (
+          <div
+            style={{ left: `${tapFocusPoint.x - 24}px`, top: `${tapFocusPoint.y - 24}px` }}
+            className="absolute pointer-events-none w-12 h-12 border-2 border-amber-400 rounded-full animate-ping z-30"
+          />
+        )}
+
+        {/* Laser Targeting Overlay */}
         {!errorMessage && !isInitializing && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
             {/* Viewfinder Target Box */}
-            <div className={`relative w-64 h-36 sm:w-72 sm:h-40 border-2 rounded-2xl flex items-center justify-center transition duration-300 ${
-              scanMode === "ocr"
-                ? "border-indigo-400/90 shadow-[0_0_20px_rgba(99,102,241,0.4)]"
-                : "border-emerald-400/80 shadow-[0_0_20px_rgba(52,211,153,0.3)]"
-            }`}>
-              {/* Corner accents */}
+            <div
+              className={`relative w-64 h-36 sm:w-72 sm:h-40 border-2 rounded-2xl flex items-center justify-center transition duration-300 ${
+                scanMode === "ocr"
+                  ? "border-indigo-400/90 shadow-[0_0_20px_rgba(99,102,241,0.4)]"
+                  : "border-emerald-400/80 shadow-[0_0_20px_rgba(52,211,153,0.3)]"
+              }`}
+            >
+              {/* Corner brackets */}
               <div className={`absolute -top-1 -left-1 w-4 h-4 border-t-4 border-l-4 rounded-tl-lg ${scanMode === "ocr" ? "border-indigo-400" : "border-emerald-400"}`} />
               <div className={`absolute -top-1 -right-1 w-4 h-4 border-t-4 border-r-4 rounded-tr-lg ${scanMode === "ocr" ? "border-indigo-400" : "border-emerald-400"}`} />
               <div className={`absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 rounded-bl-lg ${scanMode === "ocr" ? "border-indigo-400" : "border-emerald-400"}`} />
               <div className={`absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 rounded-br-lg ${scanMode === "ocr" ? "border-indigo-400" : "border-emerald-400"}`} />
 
               {/* Animated Laser Scanning Line */}
-              <div className={`w-full h-0.5 bg-gradient-to-r from-transparent ${scanMode === "ocr" ? "via-indigo-400" : "via-rose-500"} to-transparent shadow-[0_0_8px_rgba(244,63,94,0.9)] animate-pulse`} />
+              <div
+                className={`w-full h-0.5 bg-gradient-to-r from-transparent ${
+                  scanMode === "ocr" ? "via-indigo-400" : "via-rose-500"
+                } to-transparent shadow-[0_0_8px_rgba(244,63,94,0.9)] animate-pulse`}
+              />
             </div>
 
-            <p className="mt-3 text-[11px] font-medium text-slate-300 bg-slate-950/70 px-3 py-1 rounded-full backdrop-blur-xs">
-              {scanMode === "ocr" ? "Align printed 'ISBN 978...' text in box & tap Snap" : "Align book barcode in frame"}
+            <p className="mt-3 text-[11px] font-medium text-slate-200 bg-slate-950/75 px-3 py-1 rounded-full backdrop-blur-xs shadow-md">
+              {scanMode === "ocr"
+                ? "Align printed ISBN text & tap Snap"
+                : "Continuous autofocus active · Tap screen to refocus"}
             </p>
+          </div>
+        )}
+
+        {/* Hardware Zoom Quick Controls (1x, 2x, 3x) */}
+        {zoomRange && (
+          <div className="absolute right-3 top-3 z-20 flex flex-col gap-1.5 pointer-events-auto">
+            {[1, 1.5, 2, 3]
+              .filter((z) => z <= (zoomRange?.max || 3))
+              .map((z) => (
+                <button
+                  key={z}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void applyZoom(z);
+                  }}
+                  className={`w-8 h-8 rounded-full text-[11px] font-black transition backdrop-blur-md shadow-md border cursor-pointer ${
+                    Math.abs(currentZoom - z) < 0.2
+                      ? "bg-amber-400 text-slate-950 border-amber-300 font-bold"
+                      : "bg-slate-900/80 text-white border-slate-700 hover:bg-slate-800"
+                  }`}
+                >
+                  {z}x
+                </button>
+              ))}
           </div>
         )}
 
@@ -421,9 +589,12 @@ export default function CameraBarcodeScanner({
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5 pointer-events-auto">
             <button
               type="button"
-              onClick={handleSnapAndOcr}
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleSnapAndOcr();
+              }}
               disabled={isOcrProcessing}
-              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold text-xs rounded-full shadow-lg transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold text-xs rounded-full shadow-xl transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {isOcrProcessing ? (
                 <>
@@ -442,15 +613,15 @@ export default function CameraBarcodeScanner({
 
         {/* Loading Spinner */}
         {isInitializing && (
-          <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center gap-3 p-4 text-center">
+          <div className="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center gap-3 p-4 text-center z-30">
             <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-xs text-slate-300 font-medium">Opening camera stream…</p>
+            <p className="text-xs text-slate-300 font-medium">Starting HD Camera Feed…</p>
           </div>
         )}
 
         {/* Error Fallback Notice */}
         {errorMessage && (
-          <div className="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center gap-3 p-6 text-center">
+          <div className="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center gap-3 p-6 text-center z-30">
             <span className="text-2xl">📷</span>
             <p className="text-xs font-semibold text-rose-400 max-w-sm leading-relaxed">
               {errorMessage}
@@ -466,8 +637,8 @@ export default function CameraBarcodeScanner({
         </div>
       )}
 
-      {/* Bottom Manual ISBN Input + Camera Switcher */}
-      <div className="w-full p-3 bg-slate-900/90 border-t border-slate-800 space-y-2 text-xs">
+      {/* 3. Manual ISBN Input & Camera Switcher Bar */}
+      <div className="w-full p-3 bg-slate-900/95 border-t border-slate-800 space-y-2 text-xs">
         <form onSubmit={handleManualSubmit} className="flex gap-2">
           <input
             type="text"
@@ -487,15 +658,15 @@ export default function CameraBarcodeScanner({
 
         {cameras.length > 1 && (
           <div className="flex items-center justify-between text-slate-400 pt-1">
-            <span className="text-[11px] font-medium">Camera:</span>
+            <span className="text-[11px] font-medium">Camera Device:</span>
             <select
-              value={selectedCameraId}
-              onChange={(e) => handleCameraChange(e.target.value)}
+              value={selectedDeviceId}
+              onChange={(e) => setSelectedDeviceId(e.target.value)}
               className="bg-slate-800 text-slate-200 text-[11px] rounded-xl px-2 py-0.5 border border-slate-700 cursor-pointer font-medium"
             >
               {cameras.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
+                <option key={c.deviceId} value={c.deviceId}>
+                  {c.label || `Camera ${c.deviceId.substring(0, 5)}`}
                 </option>
               ))}
             </select>
