@@ -58,6 +58,7 @@ import {
   resolveBestCoverUrl,
   fetchAllWorkingCoverCandidates,
 } from "./services/isbn/coverFetcher.service.js";
+import { identifyBookByCoverImage } from "./services/visualBookIdentifier.service.js";
 import {
   listExchangeMarketplace,
   submitLibraryOffer,
@@ -2211,6 +2212,47 @@ export function createApp(): express.Express {
     } catch (error) {
       console.error("Cover lookup error:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "Failed to lookup cover images." });
+    }
+  });
+
+  // Visual Book Cover Recognition & AI Image Identifier
+  app.post("/api/library/identify-cover", async (req, res) => {
+    try {
+      const { imageBase64, imageUrl, mimeType, textHint } = req.body || {};
+      const result = await identifyBookByCoverImage({
+        imageBase64,
+        imageUrl,
+        mimeType: mimeType || "image/jpeg",
+        textHint,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Identify cover error:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to identify book cover image.",
+        candidates: [],
+      });
+    }
+  });
+
+  app.post("/api/books/identify-cover", async (req, res) => {
+    try {
+      const { imageBase64, imageUrl, mimeType, textHint } = req.body || {};
+      const result = await identifyBookByCoverImage({
+        imageBase64,
+        imageUrl,
+        mimeType: mimeType || "image/jpeg",
+        textHint,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Identify cover error:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to identify book cover image.",
+        candidates: [],
+      });
     }
   });
 

@@ -4,7 +4,10 @@ import {
   BarcodeFormat,
   DecodeHintType,
 } from "@zxing/library";
-import { createWorker } from "tesseract.js";
+import {
+  identifyBookByCover,
+  type RecognizedCoverMatch,
+} from "../../services/library.service";
 
 // Synthesizes a fast confirmation chime via Web Audio API
 export function playScanChime(): void {
@@ -47,9 +50,9 @@ export function extractIsbnFromText(rawText: string): string | null {
   if (!rawText) return null;
   const text = rawText.replace(/[\r\n]+/g, " ");
 
-  // 1. Look for explicit ISBN labeled patterns, e.g. "ISBN 978-0-14-143951-8" or "ISBN: 0141439513"
+  // 1. Explicit ISBN labeled patterns, e.g. "ISBN 978-0-14-143951-8" or "ISBN: 0-679-72276-9"
   const explicitMatches = text.matchAll(
-    /ISBN(?:-1[03])?[\s:]*([0-9Xx\s-]{10,22})/gi
+    /ISBN(?:-1[03])?[\s:]*([0-9Xx](?:[-\s]?[0-9Xx]){9,12})/gi
   );
   for (const m of explicitMatches) {
     const cleaned = m[1].replace(/[^0-9Xx]/gi, "").toUpperCase();
@@ -64,8 +67,8 @@ export function extractIsbnFromText(rawText: string): string | null {
     }
   }
 
-  // 2. Look for standalone 13-digit numbers starting with 978 or 979
-  const isbn13Matches = text.matchAll(/\b(97[89][0-9Xx\s-]{10,18})\b/gi);
+  // 2. Standalone 13-digit numbers starting with 978 or 979
+  const isbn13Matches = text.matchAll(/\b(97[89][-\s]?(?:[0-9Xx][-\s]?){10})\b/gi);
   for (const m of isbn13Matches) {
     const cleaned = m[1].replace(/[^0-9Xx]/gi, "").toUpperCase();
     if (cleaned.length === 13) {
@@ -109,14 +112,14 @@ export default function CameraBarcodeScanner({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
-  const scanningLoopIdRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const lastScannedTime = useRef<number>(0);
   const lastScannedCode = useRef<string>("");
   const isProcessingRef = useRef<boolean>(false);
 
-  // Modes: "barcode" (default) or "ocr" (printed text recognition)
-  const [scanMode, setScanMode] = useState<"barcode" | "ocr">("barcode");
+  // Modes: "barcode" | "cover" (visual cover AI) | "ocr" (printed ISBN text)
+  const [scanMode, setScanMode] = useState<"barcode" | "cover" | "ocr">("barcode");
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
@@ -129,8 +132,10 @@ export default function CameraBarcodeScanner({
   const [currentZoom, setCurrentZoom] = useState<number>(1);
   const [tapFocusPoint, setTapFocusPoint] = useState<{ x: number; y: number } | null>(null);
 
-  // OCR state
-  const [isOcrProcessing, setIsOcrProcessing] = useState<boolean>(false);
+  // Cover AI & OCR Recognition state
+  const [isRecognizingCover, setIsRecognizingCover] = useState<boolean>(false);
+  const [coverMatches, setCoverMatches] = useState<RecognizedCoverMatch[]>([]);
+  const [detectedQueryText, setDetectedQueryText] = useState<string | null>(null);
   const [ocrStatusText, setOcrStatusText] = useState<string>("");
   const [manualIsbnInput, setManualIsbnInput] = useState<string>("");
 
@@ -142,7 +147,6 @@ export default function CameraBarcodeScanner({
         const videoInputs = devices.filter((d) => d.kind === "videoinput");
         setCameras(videoInputs);
         if (videoInputs.length > 0) {
-          // Default to environment / back-facing camera
           const backCamera =
             videoInputs.find((d) => /back|rear|environment|macro/i.test(d.label)) ||
             videoInputs[0];
@@ -158,6 +162,7 @@ export default function CameraBarcodeScanner({
   // Handle successful barcode recognition and auto-submission
   const handleBarcodeDecoded = useCallback(
     async (decodedText: string) => {
+      if (scanMode !== "barcode") return; // Only trigger in barcode mode
       const clean = decodedText.replace(/[^0-9X]/gi, "").toUpperCase();
       if (!clean || clean.length < 8) return;
 
@@ -184,7 +189,7 @@ export default function CameraBarcodeScanner({
         }
       }
     },
-    [cooldownMs, continuous, onScan]
+    [cooldownMs, continuous, onScan, scanMode]
   );
 
   // Initialize Camera Stream with Continuous Autofocus & High Definition
@@ -205,7 +210,6 @@ export default function CameraBarcodeScanner({
       }
 
       try {
-        // Build video constraints with full autofocus and macro focus
         const constraints: MediaStreamConstraints = {
           video: {
             deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
@@ -213,7 +217,6 @@ export default function CameraBarcodeScanner({
             width: { ideal: 1920, min: 1280 },
             height: { ideal: 1080, min: 720 },
             frameRate: { ideal: 30, min: 15 },
-            // Advanced WebRTC focus & exposure controls
             advanced: [
               { focusMode: "continuous" } as any,
               { focusDistance: { min: 0.05, ideal: 0.1 } } as any,
@@ -262,7 +265,7 @@ export default function CameraBarcodeScanner({
 
         setIsInitializing(false);
 
-        // 2. Setup ZXing Reader with Try Harder & Multiple 1D/2D Formats
+        // Setup ZXing Reader with Try Harder for Barcode Mode
         const hints = new Map();
         hints.set(DecodeHintType.POSSIBLE_FORMATS, [
           BarcodeFormat.EAN_13,
@@ -279,7 +282,6 @@ export default function CameraBarcodeScanner({
         const codeReader = new BrowserMultiFormatReader(hints, 100);
         readerRef.current = codeReader;
 
-        // 3. Start ZXing continuous decoding loop
         if (videoRef.current) {
           codeReader.decodeContinuously(videoRef.current, (result) => {
             if (result && !isCancelled) {
@@ -310,9 +312,6 @@ export default function CameraBarcodeScanner({
 
     return () => {
       isCancelled = true;
-      if (scanningLoopIdRef.current) {
-        window.cancelAnimationFrame(scanningLoopIdRef.current);
-      }
       if (readerRef.current) {
         readerRef.current.reset();
         readerRef.current = null;
@@ -347,9 +346,7 @@ export default function CameraBarcodeScanner({
             } as any,
           ],
         });
-      } catch {
-        // Tap to focus fallback
-      }
+      } catch {}
     }
   };
 
@@ -384,54 +381,80 @@ export default function CameraBarcodeScanner({
     }
   };
 
-  // Capture video frame and run OCR to extract printed ISBN text
-  const handleSnapAndOcr = async () => {
-    if (isOcrProcessing) return;
-    setIsOcrProcessing(true);
-    setOcrStatusText("Capturing frame for text recognition…");
+  // Capture video frame and identify book by cover image
+  const handleIdentifyCover = async (imageOverrideBase64?: string) => {
+    if (isRecognizingCover) return;
+    setIsRecognizingCover(true);
+    setOcrStatusText("Analyzing cover image & catalog matching…");
+    setCoverMatches([]);
 
     try {
-      const video = videoRef.current;
-      if (!video || video.readyState < 2) {
-        setOcrStatusText("Camera preview not ready. Please try again.");
-        setIsOcrProcessing(false);
-        return;
+      let base64Payload = imageOverrideBase64;
+
+      if (!base64Payload) {
+        const video = videoRef.current;
+        if (!video || video.readyState < 2) {
+          setOcrStatusText("Camera preview not ready. Please try again.");
+          setIsRecognizingCover(false);
+          return;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          setIsRecognizingCover(false);
+          return;
+        }
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        base64Payload = canvas.toDataURL("image/jpeg", 0.85);
       }
 
-      // Draw high-resolution frame to offscreen canvas
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth || 1920;
-      canvas.height = video.videoHeight || 1080;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        setIsOcrProcessing(false);
-        return;
-      }
+      const result = await identifyBookByCover({
+        imageBase64: base64Payload,
+        mimeType: "image/jpeg",
+      });
 
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      setOcrStatusText("Reading printed text via OCR…");
-      const worker = await createWorker("eng");
-      const ret = await worker.recognize(canvas);
-      await worker.terminate();
-
-      const extractedText = ret?.data?.text || "";
-      const matchedIsbn = extractIsbnFromText(extractedText);
-
-      if (matchedIsbn) {
-        setOcrStatusText(`Found ISBN: ${matchedIsbn}! Auto-submitting…`);
+      if (result.success && result.candidates.length > 0) {
+        setCoverMatches(result.candidates);
+        setDetectedQueryText(
+          [result.detectedQuery.title, result.detectedQuery.author].filter(Boolean).join(" · ") ||
+          result.topMatch?.title ||
+          "Book Match Found"
+        );
+        setOcrStatusText(`Identified: "${result.topMatch?.title}" (${result.candidates.length} edition matches)`);
         playScanChime();
         triggerHapticFeedback();
-        await onScan(matchedIsbn);
+
+        // In continuous mode with ultra-high confidence (>90%), auto-submit top match
+        if (continuous && result.topMatch && result.topMatch.isbn && result.topMatch.isbn.length >= 8) {
+          void onScan(result.topMatch.isbn);
+        }
       } else {
-        setOcrStatusText("No clear ISBN text found. Position the printed 'ISBN 978-...' in view and tap again.");
+        setOcrStatusText(result.error || "No matching book found. Try holding the cover under better light.");
       }
     } catch (err) {
-      console.warn("OCR Error:", err);
-      setOcrStatusText("OCR recognition error. You can type the ISBN manually below.");
+      console.warn("Cover identification error:", err);
+      setOcrStatusText(err instanceof Error ? err.message : "Visual cover identification failed.");
     } finally {
-      setIsOcrProcessing(false);
+      setIsRecognizingCover(false);
     }
+  };
+
+  // Upload an image file from disk / photo album
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        void handleIdentifyCover(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleManualSubmit = (e: React.FormEvent) => {
@@ -447,13 +470,26 @@ export default function CameraBarcodeScanner({
 
   return (
     <div className={`relative flex flex-col items-center overflow-hidden rounded-3xl bg-slate-950 border border-slate-800 shadow-2xl text-white select-none ${className}`}>
-      {/* 1. Header Toolbar */}
+      {/* Hidden file input for uploading cover photos */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileUpload}
+        className="hidden"
+      />
+
+      {/* 1. Header Toolbar with 3 Mode Switchers */}
       <div className="w-full px-4 py-3 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between z-20 flex-wrap gap-2">
-        {/* Mode Selector Tabs (Barcode vs ISBN Text OCR) */}
+        {/* Mode Selector Tabs (Barcode vs Cover Vision vs ISBN Text OCR) */}
         <div className="flex items-center p-1 bg-slate-800 rounded-xl text-xs font-medium border border-slate-700">
           <button
             type="button"
-            onClick={() => setScanMode("barcode")}
+            onClick={() => {
+              setScanMode("barcode");
+              setCoverMatches([]);
+              setOcrStatusText("");
+            }}
             className={`px-3 py-1 rounded-lg transition cursor-pointer font-medium flex items-center gap-1.5 ${
               scanMode === "barcode"
                 ? "bg-emerald-600 text-white shadow-xs font-semibold"
@@ -463,22 +499,56 @@ export default function CameraBarcodeScanner({
             <span>📊</span>
             <span>Barcode</span>
           </button>
+
           <button
             type="button"
-            onClick={() => setScanMode("ocr")}
+            onClick={() => {
+              setScanMode("cover");
+              setCoverMatches([]);
+              setOcrStatusText("Aim camera at front cover artwork & tap Snap");
+            }}
+            className={`px-3 py-1 rounded-lg transition cursor-pointer font-medium flex items-center gap-1.5 ${
+              scanMode === "cover"
+                ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-xs font-semibold"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <span>🖼️</span>
+            <span>Identify Cover</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setScanMode("ocr");
+              setCoverMatches([]);
+              setOcrStatusText("Aim at printed ISBN text on copyright page & tap Snap");
+            }}
             className={`px-3 py-1 rounded-lg transition cursor-pointer font-medium flex items-center gap-1.5 ${
               scanMode === "ocr"
-                ? "bg-indigo-600 text-white shadow-xs font-semibold"
+                ? "bg-sky-600 text-white shadow-xs font-semibold"
                 : "text-slate-400 hover:text-white"
             }`}
           >
             <span>🔤</span>
-            <span>Scan ISBN Text (OCR)</span>
+            <span>ISBN Text</span>
           </button>
         </div>
 
-        {/* Quick Tools: Torch, Close */}
+        {/* Quick Tools: Upload Photo, Flash, Close */}
         <div className="flex items-center gap-2">
+          {scanMode === "cover" && (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="px-2.5 py-1 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer flex items-center gap-1"
+              title="Upload cover photo from photo album"
+            >
+              <span>📁</span>
+              <span>Upload Photo</span>
+            </button>
+          )}
+
           {torchAvailable && (
             <button
               type="button"
@@ -531,28 +601,36 @@ export default function CameraBarcodeScanner({
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
             {/* Viewfinder Target Box */}
             <div
-              className={`relative w-64 h-36 sm:w-72 sm:h-40 border-2 rounded-2xl flex items-center justify-center transition duration-300 ${
-                scanMode === "ocr"
-                  ? "border-indigo-400/90 shadow-[0_0_20px_rgba(99,102,241,0.4)]"
-                  : "border-emerald-400/80 shadow-[0_0_20px_rgba(52,211,153,0.3)]"
-              }`}
+              className={`relative ${
+                scanMode === "cover"
+                  ? "w-48 h-64 sm:w-56 sm:h-72 border-2 rounded-2xl border-purple-400/90 shadow-[0_0_25px_rgba(168,85,247,0.4)]"
+                  : scanMode === "ocr"
+                  ? "w-64 h-36 sm:w-72 sm:h-40 border-2 rounded-2xl border-sky-400/90 shadow-[0_0_20px_rgba(56,189,248,0.4)]"
+                  : "w-64 h-36 sm:w-72 sm:h-40 border-2 rounded-2xl border-emerald-400/80 shadow-[0_0_20px_rgba(52,211,153,0.3)]"
+              } flex items-center justify-center transition duration-300`}
             >
               {/* Corner brackets */}
-              <div className={`absolute -top-1 -left-1 w-4 h-4 border-t-4 border-l-4 rounded-tl-lg ${scanMode === "ocr" ? "border-indigo-400" : "border-emerald-400"}`} />
-              <div className={`absolute -top-1 -right-1 w-4 h-4 border-t-4 border-r-4 rounded-tr-lg ${scanMode === "ocr" ? "border-indigo-400" : "border-emerald-400"}`} />
-              <div className={`absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 rounded-bl-lg ${scanMode === "ocr" ? "border-indigo-400" : "border-emerald-400"}`} />
-              <div className={`absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 rounded-br-lg ${scanMode === "ocr" ? "border-indigo-400" : "border-emerald-400"}`} />
+              <div className="absolute -top-1 -left-1 w-4 h-4 border-t-4 border-l-4 border-white/90 rounded-tl-lg" />
+              <div className="absolute -top-1 -right-1 w-4 h-4 border-t-4 border-r-4 border-white/90 rounded-tr-lg" />
+              <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 border-white/90 rounded-bl-lg" />
+              <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 border-white/90 rounded-br-lg" />
 
               {/* Animated Laser Scanning Line */}
               <div
                 className={`w-full h-0.5 bg-gradient-to-r from-transparent ${
-                  scanMode === "ocr" ? "via-indigo-400" : "via-rose-500"
+                  scanMode === "cover"
+                    ? "via-purple-400"
+                    : scanMode === "ocr"
+                    ? "via-sky-400"
+                    : "via-rose-500"
                 } to-transparent shadow-[0_0_8px_rgba(244,63,94,0.9)] animate-pulse`}
               />
             </div>
 
             <p className="mt-3 text-[11px] font-medium text-slate-200 bg-slate-950/75 px-3 py-1 rounded-full backdrop-blur-xs shadow-md">
-              {scanMode === "ocr"
+              {scanMode === "cover"
+                ? "Align book cover artwork inside frame & tap Snap"
+                : scanMode === "ocr"
                 ? "Align printed ISBN text & tap Snap"
                 : "Continuous autofocus active · Tap screen to refocus"}
             </p>
@@ -584,27 +662,31 @@ export default function CameraBarcodeScanner({
           </div>
         )}
 
-        {/* OCR Action Trigger Button (When in OCR mode) */}
-        {scanMode === "ocr" && !isInitializing && !errorMessage && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5 pointer-events-auto">
+        {/* Action Trigger Buttons for Cover Vision & OCR */}
+        {(scanMode === "cover" || scanMode === "ocr") && !isInitializing && !errorMessage && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 pointer-events-auto">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                void handleSnapAndOcr();
+                void handleIdentifyCover();
               }}
-              disabled={isOcrProcessing}
-              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-semibold text-xs rounded-full shadow-xl transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              disabled={isRecognizingCover}
+              className={`px-6 py-2.5 ${
+                scanMode === "cover"
+                  ? "bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500"
+                  : "bg-sky-600 hover:bg-sky-500"
+              } active:scale-95 text-white font-semibold text-xs rounded-full shadow-xl transition flex items-center gap-2 cursor-pointer disabled:opacity-50`}
             >
-              {isOcrProcessing ? (
+              {isRecognizingCover ? (
                 <>
                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Reading Text…</span>
+                  <span>Identifying Book Cover…</span>
                 </>
               ) : (
                 <>
                   <span>📸</span>
-                  <span>Snap & Recognize ISBN</span>
+                  <span>{scanMode === "cover" ? "Snap & Identify Cover" : "Snap & Read ISBN"}</span>
                 </>
               )}
             </button>
@@ -630,14 +712,73 @@ export default function CameraBarcodeScanner({
         )}
       </div>
 
-      {/* OCR Status Banner */}
-      {ocrStatusText && (
+      {/* 3. Recognized Cover Candidates Card (If Cover ID found matches) */}
+      {coverMatches.length > 0 && (
+        <div className="w-full p-3 bg-purple-950/90 border-t border-purple-800/80 space-y-2.5 animate-fadeIn">
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-1.5 font-bold text-purple-200">
+              <span>✨</span>
+              <span>Cover Recognition Matches ({coverMatches.length})</span>
+            </div>
+            {detectedQueryText && (
+              <span className="text-[10px] text-purple-300 truncate max-w-[200px]">
+                {detectedQueryText}
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+            {coverMatches.slice(0, 3).map((match, idx) => (
+              <div
+                key={match.isbn || idx}
+                className="flex items-center justify-between gap-3 p-2.5 bg-slate-900/90 border border-purple-700/60 rounded-2xl hover:border-purple-400 transition"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  {match.coverUrl ? (
+                    <img
+                      src={match.coverUrl}
+                      alt=""
+                      className="w-9 h-12 rounded object-cover shadow-xs shrink-0"
+                    />
+                  ) : (
+                    <div className="w-9 h-12 rounded bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 shrink-0">
+                      📖
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white truncate">{match.title}</p>
+                    <p className="text-[11px] text-slate-300 truncate">
+                      {match.author || "Unknown Author"} {match.publishYear ? `(${match.publishYear})` : ""}
+                    </p>
+                    <p className="text-[10px] text-purple-300 font-mono">ISBN: {match.isbn}</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    playScanChime();
+                    triggerHapticFeedback();
+                    void onScan(match.isbn);
+                  }}
+                  className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 active:scale-95 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer shrink-0"
+                >
+                  Intake Book →
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Status feedback Banner */}
+      {ocrStatusText && coverMatches.length === 0 && (
         <div className="w-full px-4 py-2 bg-indigo-950/80 border-t border-indigo-800/60 text-[11px] font-medium text-indigo-200 text-center animate-fadeIn">
           {ocrStatusText}
         </div>
       )}
 
-      {/* 3. Manual ISBN Input & Camera Switcher Bar */}
+      {/* 4. Manual ISBN Input & Camera Switcher Bar */}
       <div className="w-full p-3 bg-slate-900/95 border-t border-slate-800 space-y-2 text-xs">
         <form onSubmit={handleManualSubmit} className="flex gap-2">
           <input

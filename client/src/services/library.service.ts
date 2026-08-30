@@ -644,4 +644,55 @@ export async function refreshMissingCovers(): Promise<{ totalChecked: number; up
   return res.json() as Promise<{ totalChecked: number; updatedCount: number }>;
 }
 
+export interface RecognizedCoverMatch {
+  isbn: string;
+  title: string;
+  author: string | null;
+  publisher: string | null;
+  publishYear: number | null;
+  coverUrl: string | null;
+  description: string | null;
+  pageCount: number | null;
+  category: string | null;
+  deweyDecimal?: string | null;
+  libraryOfCongress?: string | null;
+  replacementValue: number;
+  confidence: number;
+  matchSource: string;
+}
+
+export interface IdentifyCoverResult {
+  success: boolean;
+  detectedQuery: {
+    title: string | null;
+    author: string | null;
+    publisher?: string | null;
+    publishYear?: number | null;
+    rawText?: string | null;
+  };
+  topMatch: RecognizedCoverMatch | null;
+  candidates: RecognizedCoverMatch[];
+  error?: string;
+}
+
+export async function identifyBookByCover(params: {
+  imageBase64?: string;
+  imageUrl?: string;
+  mimeType?: string;
+  textHint?: string;
+}): Promise<IdentifyCoverResult> {
+  const url = resolveApiUrl("/library/identify-cover");
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to identify book cover image.");
+  }
+  return res.json() as Promise<IdentifyCoverResult>;
+}
+
+
 

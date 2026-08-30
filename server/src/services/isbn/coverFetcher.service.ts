@@ -236,12 +236,15 @@ export async function resolveBestCoverUrl(params: {
   lccn?: string | null;
   isbndbCover?: string | null;
   thriftbooksCover?: string | null;
+  googleCover?: string | null;
 }): Promise<string | null> {
   const cleanIsbn = params.isbn.replace(/[^0-9X]/gi, "").toUpperCase();
   if (!cleanIsbn) return null;
 
   // 1. Simultaneously fetch Google Books cover if not provided
-  const googleCoverPromise = fetchGoogleBooksCover(cleanIsbn, params.title, params.author);
+  const googleCoverPromise = params.googleCover !== undefined
+    ? Promise.resolve(params.googleCover)
+    : fetchGoogleBooksCover(cleanIsbn, params.title, params.author);
 
   const googleCover = await googleCoverPromise.catch(() => null);
 
