@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import SurfaceCard from "../../components/ui/SurfaceCard";
 import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
+import CameraBarcodeScanner from "../../components/common/CameraBarcodeScanner";
 import { useLibrarySpace } from "../../context/LibrarySpaceContext";
 import {
   scanLibraryIsbn,
@@ -404,52 +405,28 @@ export default function LibraryScannerPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
           {/* Left Column: Camera Viewfinder (6 cols) */}
           <div className="lg:col-span-6 space-y-3">
-            <div className="relative w-full h-[280px] bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 flex flex-col items-center justify-center shadow-md">
-              <video
-                ref={videoRef}
-                className={`w-full h-full object-cover ${cameraActive ? "block" : "hidden"}`}
-                playsInline
-                muted
+            {cameraActive ? (
+              <CameraBarcodeScanner
+                onScan={handleProcessIsbn}
+                onClose={() => setCameraActive(false)}
+                className="w-full"
               />
-
-              {!cameraActive && (
-                <div className="text-center p-6 space-y-3 text-slate-400">
-                  <span className="text-4xl block">📷</span>
-                  <p className="text-xs font-bold text-slate-300">Device Camera Scanner</p>
-                  <p className="text-[11px] text-slate-400 max-w-[260px]">
-                    Position your book's barcode in front of the lens for instant auto-intake
-                  </p>
-                  <button
-                    type="button"
-                    onClick={startCamera}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition shadow-sm cursor-pointer"
-                  >
-                    Start Camera
-                  </button>
-                </div>
-              )}
-
-              {cameraActive && (
-                <>
-                  {/* Viewfinder Target Box Overlay */}
-                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                    <div className="w-[70%] h-[40%] border-2 border-dashed border-emerald-400/90 rounded-2xl bg-emerald-500/10 shadow-[0_0_15px_rgba(52,211,153,0.3)] animate-pulse flex items-center justify-center">
-                      <span className="text-[10px] font-bold text-emerald-300 bg-slate-900/80 px-2 py-0.5 rounded-full">
-                        Align Barcode Here
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={stopCamera}
-                    className="absolute top-3 right-3 px-2.5 py-1 bg-slate-900/80 hover:bg-slate-900 text-slate-200 border border-slate-700 text-xs font-bold rounded-lg transition"
-                  >
-                    Stop Camera
-                  </button>
-                </>
-              )}
-            </div>
+            ) : (
+              <div className="relative w-full h-[280px] bg-slate-900 rounded-3xl overflow-hidden border border-slate-800 flex flex-col items-center justify-center shadow-md text-center p-6 space-y-3 text-slate-400">
+                <span className="text-4xl block">📷</span>
+                <p className="text-xs font-semibold text-slate-200">Device Camera Scanner</p>
+                <p className="text-[11px] text-slate-400 max-w-[260px]">
+                  Position your book's barcode in front of the camera for instant auto-intake
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setCameraActive(true)}
+                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium text-xs rounded-2xl transition shadow-xs cursor-pointer"
+                >
+                  Start Camera Scanner
+                </button>
+              </div>
+            )}
 
             {cameraError && (
               <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-xl p-2.5">{cameraError}</p>

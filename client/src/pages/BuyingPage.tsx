@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import SurfaceCard from "../components/ui/SurfaceCard";
 import SyncStatusIndicator from "../components/common/SyncStatusIndicator";
+import CameraBarcodeScanner from "../components/common/CameraBarcodeScanner";
 import {
   searchBuyingEditions,
   evaluateBuyingBook,
@@ -507,14 +508,14 @@ export default function BuyingPage(): JSX.Element {
               <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-bold text-slate-700">WebRTC Camera Scanner</p>
-                    <p className="text-[11px] text-slate-400">{cameraStatus}</p>
+                    <p className="text-xs font-bold text-slate-700">Camera Barcode Scanner</p>
+                    <p className="text-[11px] text-slate-400">Position barcode in front of camera</p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => void handleToggleCamera()}
+                    onClick={() => setCameraActive(!cameraActive)}
                     className={[
-                      "rounded-xl px-3 py-1.5 text-xs font-bold transition",
+                      "rounded-xl px-3 py-1.5 text-xs font-bold transition cursor-pointer",
                       cameraActive
                         ? "bg-rose-600 text-white hover:bg-rose-700"
                         : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
@@ -524,8 +525,15 @@ export default function BuyingPage(): JSX.Element {
                   </button>
                 </div>
                 {cameraActive && (
-                  <div className="mt-3 overflow-hidden rounded-xl bg-black">
-                    <video ref={videoRef} className="h-48 w-full object-cover" muted playsInline />
+                  <div className="mt-3">
+                    <CameraBarcodeScanner
+                      onScan={(isbn) => {
+                        setBarcodeInput(isbn);
+                        setCameraActive(false);
+                        void handleLookupIsbn(isbn);
+                      }}
+                      onClose={() => setCameraActive(false)}
+                    />
                   </div>
                 )}
               </div>

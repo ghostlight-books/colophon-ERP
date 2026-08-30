@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
+import CameraBarcodeScanner from "../../components/common/CameraBarcodeScanner";
 import { useLibrarySpace } from "../../context/LibrarySpaceContext";
 import {
   scanLibraryIsbn,
@@ -349,43 +350,11 @@ export default function LibraryQuickScanPage() {
 
       {/* 2. Main Full-Screen Viewfinder Area */}
       <main className="relative flex-1 flex flex-col items-center justify-center overflow-hidden bg-black">
-        {/* Video Camera Stream */}
-        <video
-          ref={videoRef}
-          className="absolute inset-0 w-full h-full object-cover"
-          playsInline
-          muted
-          autoPlay
+        <CameraBarcodeScanner
+          onScan={handleProcessIsbn}
+          continuous={batchMode}
+          className="w-full h-full max-h-none rounded-none border-none"
         />
-
-        {/* Viewfinder Dark Overlay Vignette */}
-        <div className="absolute inset-0 pointer-events-none bg-radial-[circle_at_center,transparent_40%,rgba(0,0,0,0.65)_90%]" />
-
-        {/* Glowing Rounded Haptic Scan-Box */}
-        <div className="relative w-[76%] max-w-[340px] aspect-[1.4/1] pointer-events-none z-10">
-          <div className="absolute inset-0 rounded-3xl border-2 border-indigo-400/90 shadow-[0_0_30px_rgba(99,102,241,0.5)] flex flex-col items-center justify-between p-3.5 bg-indigo-500/5 backdrop-blur-[1px]">
-            {/* Corner Indicators */}
-            <div className="w-full flex justify-between">
-              <div className="w-4 h-4 border-t-3 border-l-3 border-white rounded-tl-lg" />
-              <div className="w-4 h-4 border-t-3 border-r-3 border-white rounded-tr-lg" />
-            </div>
-
-            {/* Center Laser Line Animation */}
-            <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_#34d399] animate-pulse" />
-
-            <div className="w-full flex justify-between items-end">
-              <div className="w-4 h-4 border-b-3 border-l-3 border-white rounded-bl-lg" />
-              <div className="w-4 h-4 border-b-3 border-r-3 border-white rounded-br-lg" />
-            </div>
-          </div>
-
-          {/* Prompt pill under scan box */}
-          <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap">
-            <span className="text-[10px] font-bold tracking-wide text-slate-200 bg-slate-950/80 border border-slate-700/80 px-3 py-1 rounded-full backdrop-blur-md shadow-md">
-              {isProcessingScan ? "Reading ISBN & Dewey Index..." : "Align Book Barcode Inside Box"}
-            </span>
-          </div>
-        </div>
 
         {/* Processing Spinner Overlay */}
         {isProcessingScan && (

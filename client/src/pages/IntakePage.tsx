@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import SurfaceCard from "../components/ui/SurfaceCard";
 import SyncStatusIndicator from "../components/common/SyncStatusIndicator";
+import CameraBarcodeScanner from "../components/common/CameraBarcodeScanner";
 import { getIntakeContainer, lookupBookByIsbn, receiveInventory, searchBooks, type BookCondition, type BookLookup, type BookSearchResult, type IntakeContainer } from "../services/intake.service";
 
 type ScanHistoryItem = {
@@ -746,9 +747,15 @@ function IntakePage(): JSX.Element {
           </form>
 
           {cameraActive ? (
-            <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-slate-900">
-              <video ref={cameraVideoRef} muted playsInline className="aspect-video max-h-72 w-full object-cover" />
-              <p className="px-3 py-2 text-xs text-slate-300">{cameraMessage}</p>
+            <div className="mt-3">
+              <CameraBarcodeScanner
+                onScan={(code) => {
+                  setBarcode(code);
+                  stopCamera();
+                  void handleBarcodeLookup(code);
+                }}
+                onClose={() => stopCamera()}
+              />
             </div>
           ) : null}
 
