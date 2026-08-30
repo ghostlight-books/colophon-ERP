@@ -59,6 +59,7 @@ export default function LibraryCatalogPage() {
   const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "ALL");
   const [conditionFilter] = useState(searchParams.get("condition") || "ALL");
   const [shelfFilter] = useState(searchParams.get("shelf") || "");
+  const [sortOption, setSortOption] = useState<"DATE_DESC" | "TITLE_ASC" | "TITLE_DESC" | "AUTHOR_ASC" | "DEWEY_ASC" | "VALUE_DESC" | "VALUE_ASC">("DATE_DESC");
 
   // Data
   const [volumes, setVolumes] = useState<LibraryVolume[]>([]);
@@ -71,6 +72,7 @@ export default function LibraryCatalogPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [targetSpaceId, setTargetSpaceId] = useState("");
   const [targetShelfId, setTargetShelfId] = useState("");
   const [isSubmittingBulk, setIsSubmittingBulk] = useState(false);
@@ -205,6 +207,100 @@ export default function LibraryCatalogPage() {
     e.preventDefault();
     void loadVolumes();
   };
+
+  const sortedVolumes = useMemo(() => {
+    return [...volumes].sort((a, b) => {
+      switch (sortOption) {
+        case "TITLE_ASC":
+          return (a.title || "").localeCompare(b.title || "");
+        case "TITLE_DESC":
+          return (b.title || "").localeCompare(a.title || "");
+        case "AUTHOR_ASC":
+          return (a.author || "").localeCompare(b.author || "");
+        case "DEWEY_ASC":
+          return (a.deweyDecimal || "999").localeCompare(b.deweyDecimal || "999", undefined, { numeric: true });
+        case "VALUE_DESC": {
+          const valA = a.rareMarketValue || a.replacementValue || 0;
+          const valB = b.rareMarketValue || b.replacementValue || 0;
+          return valB - valA;
+        }
+        case "VALUE_ASC": {
+          const valA = a.rareMarketValue || a.replacementValue || 0;
+          const valB = b.rareMarketValue || b.replacementValue || 0;
+          return valA - valB;
+        }
+        case "DATE_DESC":
+        default:
+          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      }
+    });
+  }, [volumes, sortOption]);
+
+  const handleExport = (format: "csv" | "json" | "bibtex") => {
+    if (sortedVolumes.length === 0) return;
+
+    if (format === "csv") {
+      const headers = [
+        "ISBN",
+        "Title",
+        "Author",
+        "Publisher",
+        "Year",
+        "Dewey Call #",
+        "LOC Call #",
+        "Space",
+        "Room",
+        "Shelf",
+        "Reading Status",
+        "Condition",
+        "Market Value ($)",
+        "Acquisition ($)",
+        "Notes",
+      ];
+      const rows = sortedVolumes.map((v) => [
+        `"${v.isbn || ""}"`,
+        `"${(v.title || "").replace(/"/g, '""')}"`,
+        `"${(v.author || "").replace(/"/g, '""')}"`,
+        `"${(v.publisher || "").replace(/"/g, '""')}"`,
+        `"${v.publishYear || ""}"`,
+        `"${v.deweyDecimal || ""}"`,
+        `"${v.locClassification || ""}"`,
+        `"${v.librarySpace?.name || "Main"}"`,
+        `"${v.shelfLocation?.roomName || "Unassigned"}"`,
+        `"${v.shelfLocation?.shelfName || "Unassigned"}"`,
+        `"${v.readingStatus || "UNREAD"}"`,
+        `"${getConditionLabel(v.condition)}"`,
+        (v.rareMarketValue || v.replacementValue || 0).toFixed(2),
+        (v.acquisitionPrice || 0).toFixed(2),
+        `"${(v.personalNotes || "").replace(/"/g, '""')}"`,
+      ]);
+      const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+      downloadFile(csv, `colophon_catalog_${new Date().toISOString().slice(0, 10)}.csv`, "text/csv;charset=utf-8;");
+    } else if (format === "json") {
+      const json = JSON.stringify(sortedVolumes, null, 2);
+      downloadFile(json, `colophon_catalog_backup_${new Date().toISOString().slice(0, 10)}.json`, "application/json;charset=utf-8;");
+    } else if (format === "bibtex") {
+      const bibtex = sortedVolumes.map((v) => {
+        const citeKey = (v.author?.split(" ").pop() || "book").toLowerCase().replace(/[^a-z0-9]/g, "") + (v.publishYear || new Date().getFullYear());
+        return `@book{${citeKey},\n  title = {${v.title}},\n  author = {${v.author || "Unknown"}},\n  year = {${v.publishYear || ""}},\n  isbn = {${v.isbn || ""}},\n  publisher = {${v.publisher || ""}},\n  note = {Dewey: ${v.deweyDecimal || "N/A"}, LOC: ${v.locClassification || "N/A"}}\n}`;
+      }).join("\n\n");
+      downloadFile(bibtex, `colophon_bibliography_${new Date().toISOString().slice(0, 10)}.bib`, "text/plain;charset=utf-8;");
+    }
+    setIsExportMenuOpen(false);
+    setActionMessage(`Exported ${sortedVolumes.length} books in ${format.toUpperCase()} format.`);
+  };
+
+  function downloadFile(content: string, fileName: string, mimeType: string) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   const openBookDetail = (volume: LibraryVolume) => {
     if (isSelectionMode) {
@@ -419,25 +515,90 @@ export default function LibraryCatalogPage() {
         </div>
       </form>
 
-      {/* 3. Fast Category Filter Pills (Lightish Blue-Grey) */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-        {CATEGORY_PILLS.map((pill) => {
-          const isActive = statusFilter === pill.key;
-          return (
-            <button
-              key={pill.key}
-              type="button"
-              onClick={() => setStatusFilter(pill.key)}
-              className={`px-4 py-1.5 rounded-full text-xs font-medium tracking-tight shrink-0 transition active:scale-95 cursor-pointer ${
-                isActive
-                  ? "bg-slate-800 dark:bg-indigo-600 text-white shadow-sm"
-                  : "bg-[#e2e8f0] hover:bg-[#cbd5e1] dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-2xs"
-              }`}
+      {/* 3. Filter Pills + Sort Dropdown + Export Hub Toolbar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+        {/* Fast Category Filter Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none flex-1">
+          {CATEGORY_PILLS.map((pill) => {
+            const isActive = statusFilter === pill.key;
+            return (
+              <button
+                key={pill.key}
+                type="button"
+                onClick={() => setStatusFilter(pill.key)}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-medium tracking-tight shrink-0 transition active:scale-95 cursor-pointer ${
+                  isActive
+                    ? "bg-slate-800 dark:bg-indigo-600 text-white shadow-sm font-semibold"
+                    : "bg-[#e2e8f0] hover:bg-[#cbd5e1] dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-2xs"
+                }`}
+              >
+                {pill.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Sort Dropdown & Export Hub */}
+        <div className="flex items-center gap-2 shrink-0 justify-end">
+          {/* Sort Selector */}
+          <div className="relative">
+            <select
+              value={sortOption}
+              onChange={(e) => setSortOption(e.target.value as any)}
+              className="bg-[#e8eef5] dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-2xl px-3 py-1.5 shadow-2xs focus:outline-none cursor-pointer"
+              title="Sort collection"
             >
-              {pill.label}
+              <option value="DATE_DESC">📅 Recently Added</option>
+              <option value="TITLE_ASC">🔤 Title (A → Z)</option>
+              <option value="TITLE_DESC">🔤 Title (Z → A)</option>
+              <option value="AUTHOR_ASC">👤 Author (A → Z)</option>
+              <option value="DEWEY_ASC">🏷️ Dewey Call #</option>
+              <option value="VALUE_DESC">💰 Value (High → Low)</option>
+              <option value="VALUE_ASC">💰 Value (Low → High)</option>
+            </select>
+          </div>
+
+          {/* Export Hub Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+              className="px-3 py-1.5 rounded-2xl border text-xs font-medium transition cursor-pointer shadow-2xs bg-[#e8eef5] dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-[#dce4ee] dark:hover:bg-slate-700 flex items-center gap-1.5"
+            >
+              <span>Export</span>
+              <span className="text-[10px]">▼</span>
             </button>
-          );
-        })}
+
+            {isExportMenuOpen && (
+              <div className="absolute right-0 top-9 z-50 w-48 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 text-xs space-y-1 animate-scaleUp">
+                <button
+                  type="button"
+                  onClick={() => handleExport("csv")}
+                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 font-medium text-slate-800 dark:text-slate-200 transition cursor-pointer flex items-center justify-between"
+                >
+                  <span>Export as CSV</span>
+                  <span className="text-[10px] text-slate-400 font-mono">.csv</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExport("json")}
+                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 font-medium text-slate-800 dark:text-slate-200 transition cursor-pointer flex items-center justify-between"
+                >
+                  <span>Backup as JSON</span>
+                  <span className="text-[10px] text-slate-400 font-mono">.json</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExport("bibtex")}
+                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 font-medium text-slate-800 dark:text-slate-200 transition cursor-pointer flex items-center justify-between"
+                >
+                  <span>BibTeX Citation</span>
+                  <span className="text-[10px] text-slate-400 font-mono">.bib</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* 4. Catalog Display (Grid vs. List) */}
@@ -446,7 +607,7 @@ export default function LibraryCatalogPage() {
           <div className="w-8 h-8 border-3 border-slate-700 dark:border-indigo-600 border-t-transparent rounded-full animate-spin" />
           <span className="text-xs font-normal text-slate-600 dark:text-slate-300">Loading collection...</span>
         </div>
-      ) : volumes.length === 0 ? (
+      ) : sortedVolumes.length === 0 ? (
         <div className="p-16 text-center text-slate-600 dark:text-slate-300 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl shadow-xs border border-slate-300 dark:border-slate-700 space-y-3">
           <p className="text-sm font-semibold text-slate-900 dark:text-white">No books found in this space.</p>
           <Link
@@ -459,7 +620,7 @@ export default function LibraryCatalogPage() {
       ) : viewMode === "grid" ? (
         /* Minimalist Modern Floating Covers Grid */
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 sm:gap-6">
-          {volumes.map((vol, idx) => {
+          {sortedVolumes.map((vol, idx) => {
             const isLiked = likedIds.includes(vol.id);
             const isSelected = selectedIds.includes(vol.id);
             return (
@@ -523,6 +684,13 @@ export default function LibraryCatalogPage() {
                     {isLiked ? "♥" : "♡"}
                   </button>
 
+                  {/* Call Number / Spine Badge */}
+                  {vol.deweyDecimal && (
+                    <div className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-slate-900/85 text-amber-300 font-mono font-bold text-[8px] rounded-md backdrop-blur-md shadow-xs">
+                      {vol.deweyDecimal}
+                    </div>
+                  )}
+
                   {/* Status Badge */}
                   {vol.readingStatus === "READING" && (
                     <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-blue-600 text-white font-medium text-[8px] rounded-full shadow-xs">
@@ -555,7 +723,7 @@ export default function LibraryCatalogPage() {
       ) : (
         /* Ultra-Clean Modern List Items */
         <div className="space-y-2.5">
-          {volumes.map((vol, idx) => {
+          {sortedVolumes.map((vol, idx) => {
             const isLiked = likedIds.includes(vol.id);
             const isSelected = selectedIds.includes(vol.id);
             return (
@@ -597,11 +765,24 @@ export default function LibraryCatalogPage() {
                       {vol.author || "Unknown Author"}
                     </p>
                     <div className="flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400 font-normal mt-1">
-                      <span>{vol.deweyDecimal ? `DDC ${vol.deweyDecimal}` : "General"}</span>
+                      <span className="font-mono font-semibold text-amber-700 dark:text-amber-300">
+                        {vol.deweyDecimal ? `DDC ${vol.deweyDecimal}` : vol.locClassification ? `LOC ${vol.locClassification}` : "General"}
+                      </span>
                       <span>•</span>
                       <span className="text-emerald-700 dark:text-emerald-400 font-medium">
                         {formatCurrency(vol.rareMarketValue || vol.replacementValue)}
                       </span>
+                      {vol.readingStatus && vol.readingStatus !== "UNREAD" && (
+                        <>
+                          <span>•</span>
+                          <span className={`px-1.5 py-0.2 rounded font-medium text-[9px] ${
+                            vol.readingStatus === "COMPLETED" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" :
+                            vol.readingStatus === "READING" ? "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300" : "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
+                          }`}>
+                            {vol.readingStatus}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

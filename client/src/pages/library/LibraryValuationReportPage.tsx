@@ -81,7 +81,25 @@ export default function LibraryValuationReportPage() {
   };
 
   return (
-    <div className="space-y-6 pb-24 font-sans max-w-4xl mx-auto">
+    <div className="space-y-6 pb-24 font-sans max-w-4xl mx-auto print:p-0 print:m-0 print:max-w-none print:space-y-4">
+      {/* Print-Only Insurance Schedule Header */}
+      <div className="hidden print:block border-b-2 border-slate-900 pb-4 mb-6 text-slate-950">
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-xl font-bold uppercase tracking-wider">Colophon Library & Archives</h1>
+            <p className="text-sm font-semibold text-slate-700">Official Insurance Valuation & Asset Schedule</p>
+            <p className="text-xs text-slate-500 mt-1">
+              Appraisal Date: {new Date().toLocaleDateString("en-US", { dateStyle: "full" })}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs uppercase text-slate-500 font-bold">Total Insured Replacement Value</p>
+            <p className="text-2xl font-black text-slate-900">{formatCurrency(report?.totalReplacementValue)}</p>
+            <p className="text-xs text-slate-600">{report?.volumes.length || 0} Registered Catalog Volumes</p>
+          </div>
+        </div>
+      </div>
+
       {/* 1. Header Bar: Location Switcher & Action */}
       <div className="flex items-center justify-between gap-3 pt-1 flex-wrap print:hidden">
         <LibrarySpaceSwitcher />
@@ -107,7 +125,7 @@ export default function LibraryValuationReportPage() {
       </div>
 
       {/* 2. Top Summary Metric Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 print:grid-cols-4 print:gap-2">
         <div className="p-4 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-1">
           <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Total Insured Value

@@ -12,10 +12,27 @@ function formatCurrency(amount: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
 }
 
+function getDueStatus(dueDateStr: string | null | undefined): { text: string; isOverdue: boolean; isSoon: boolean } {
+  if (!dueDateStr) return { text: "No due date", isOverdue: false, isSoon: false };
+  const due = new Date(dueDateStr);
+  const now = new Date();
+  const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0) {
+    return { text: `Overdue by ${Math.abs(diffDays)}d`, isOverdue: true, isSoon: false };
+  } else if (diffDays === 0) {
+    return { text: "Due today", isOverdue: false, isSoon: true };
+  } else if (diffDays <= 3) {
+    return { text: `Due in ${diffDays}d`, isOverdue: false, isSoon: true };
+  }
+  return { text: `Due in ${diffDays}d`, isOverdue: false, isSoon: false };
+}
+
 export default function LibraryLendingPage() {
   const [loanedVolumes, setLoanedVolumes] = useState<LibraryVolume[]>([]);
   const [availableVolumes, setAvailableVolumes] = useState<LibraryVolume[]>([]);
   const [loading, setLoading] = useState(true);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // New Loan Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -83,6 +100,14 @@ export default function LibraryLendingPage() {
     }
   };
 
+  const handleCopyReminder = (vol: LibraryVolume) => {
+    const dueFormatted = vol.dueDate ? new Date(vol.dueDate).toLocaleDateString() : "soon";
+    const text = `Hi ${vol.borrowerName || "friend"}, hope you're enjoying reading "${vol.title}"! Just a friendly reminder that it was scheduled to return on ${dueFormatted}. Let me know whenever you're ready to bring it back. Thanks!`;
+    void navigator.clipboard.writeText(text);
+    setToastMessage(`Copied reminder for "${vol.borrowerName}" to clipboard!`);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
   const filteredAvailable = availableVolumes.filter((v) =>
     bookSearchQuery
       ? v.title.toLowerCase().includes(bookSearchQuery.toLowerCase()) ||
@@ -92,6 +117,14 @@ export default function LibraryLendingPage() {
 
   return (
     <div className="space-y-6 pb-24 font-sans max-w-4xl mx-auto">
+      {/* Toast feedback */}
+      {toastMessage && (
+        <div className="p-3 bg-emerald-100 dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 rounded-2xl text-xs font-semibold shadow-md flex items-center justify-between animate-fadeIn">
+          <span>✓ {toastMessage}</span>
+          <button type="button" onClick={() => setToastMessage(null)} className="font-bold cursor-pointer">✕</button>
+        </div>
+      )}
+
       {/* 1. Header Bar */}
       <div className="flex items-center justify-between gap-3 pt-1 flex-wrap">
         <LibrarySpaceSwitcher />
@@ -183,13 +216,13 @@ export default function LibraryLendingPage() {
                   <th className="py-2.5 px-3">Borrower</th>
                   <th className="py-2.5 px-3">Contact</th>
                   <th className="py-2.5 px-3">Loan Date</th>
-                  <th className="py-2.5 px-3">Due Date</th>
-                  <th className="py-2.5 px-3 text-right">Action</th>
+                  <th className="py-2.5 px-3">Due Status</th>
+                  <th className="py-2.5 px-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                 {loanedVolumes.map((vol) => {
-                  const isOverdue = vol.dueDate ? new Date(vol.dueDate).getTime() < Date.now() : false;
+                  const dueInfo = getDueStatus(vol.dueDate);
 
                   return (
                     <tr key={vol.id} className="hover:bg-white/60 dark:hover:bg-slate-700/60 transition">
@@ -213,24 +246,40 @@ export default function LibraryLendingPage() {
                       </td>
                       <td className="py-2.5 px-3">
                         <div className="flex items-center gap-1.5">
-                          <span className={isOverdue ? "text-rose-600 dark:text-rose-400 font-medium" : "text-slate-700 dark:text-slate-300 font-normal"}>
+                          <span className={dueInfo.isOverdue ? "text-rose-600 dark:text-rose-400 font-semibold" : dueInfo.isSoon ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-slate-700 dark:text-slate-300 font-normal"}>
                             {vol.dueDate ? new Date(vol.dueDate).toLocaleDateString() : "--"}
                           </span>
-                          {isOverdue && (
-                            <span className="px-1.5 py-0.2 bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded text-[9px] font-medium">
-                              Overdue
+                          {vol.dueDate && (
+                            <span className={`px-1.5 py-0.2 rounded text-[9px] font-semibold ${
+                              dueInfo.isOverdue
+                                ? "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800"
+                                : dueInfo.isSoon
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                                : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                            }`}>
+                              {dueInfo.text}
                             </span>
                           )}
                         </div>
                       </td>
                       <td className="py-2.5 px-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleReturnBook(vol)}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl text-xs transition shadow-2xs cursor-pointer"
-                        >
-                          Return to Shelf
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyReminder(vol)}
+                            title="Copy friendly reminder message to clipboard"
+                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium rounded-xl text-xs transition cursor-pointer border border-slate-200 dark:border-slate-600"
+                          >
+                            💬 Reminder
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleReturnBook(vol)}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl text-xs transition shadow-2xs cursor-pointer"
+                          >
+                            Return
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

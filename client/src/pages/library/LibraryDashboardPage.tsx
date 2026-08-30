@@ -5,8 +5,10 @@ import { useLibrarySpace } from "../../context/LibrarySpaceContext";
 import {
   fetchLibraryDashboard,
   fetchLibraryVolumes,
+  fetchShelves,
   type LibraryDashboardSummary,
   type LibraryVolume,
+  type LibraryShelfLocation,
 } from "../../services/library.service";
 
 function formatCurrency(amount: number | null | undefined): string {
@@ -28,6 +30,7 @@ export default function LibraryDashboardPage() {
   const { activeSpace, activeSpaceId } = useLibrarySpace();
   const [data, setData] = useState<LibraryDashboardSummary | null>(null);
   const [recentVolumes, setRecentVolumes] = useState<LibraryVolume[]>([]);
+  const [shelves, setShelves] = useState<LibraryShelfLocation[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [, setLoading] = useState(true);
 
@@ -52,15 +55,17 @@ export default function LibraryDashboardPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [summary, volumesRes] = await Promise.all([
+      const [summary, volumesRes, shelvesRes] = await Promise.all([
         fetchLibraryDashboard(),
         fetchLibraryVolumes({
           librarySpaceId: activeSpaceId !== "ALL" ? activeSpaceId : undefined,
           limit: 50,
         }),
+        fetchShelves(activeSpaceId !== "ALL" ? activeSpaceId : undefined).catch(() => []),
       ]);
       setData(summary);
       setRecentVolumes(volumesRes.items);
+      setShelves(shelvesRes);
     } catch (err) {
       console.warn("loadData error:", err);
     } finally {
@@ -99,7 +104,51 @@ export default function LibraryDashboardPage() {
     return { completed, reading, unread, wishlist, readPercentage };
   }, [data, recentVolumes, activeSpaceId, totalBooks]);
 
-  // 3. Top Categories Breakdown Report
+  // 3. Dynamic Curated Rooms
+  const dynamicRooms = useMemo(() => {
+    if (shelves.length === 0) {
+      return [
+        { label: "Study Room", count: 0, initial: "SR", color: "from-blue-600 to-indigo-700" },
+        { label: "Living Room", count: 0, initial: "LR", color: "from-emerald-500 to-teal-700" },
+        { label: "Bedside TBR", count: 0, initial: "TBR", color: "from-amber-500 to-orange-600" },
+        { label: "Rare Stacks", count: 0, initial: "RS", color: "from-purple-600 to-pink-600" },
+      ];
+    }
+    const colors = [
+      "from-blue-600 to-indigo-700",
+      "from-emerald-500 to-teal-700",
+      "from-amber-500 to-orange-600",
+      "from-purple-600 to-pink-600",
+      "from-sky-500 to-blue-700",
+      "from-rose-500 to-rose-700",
+    ];
+    const grouped: Record<string, { label: string; count: number; initial: string; color: string }> = {};
+    shelves.forEach((s) => {
+      const room = s.roomName || "Main Room";
+      if (!grouped[room]) {
+        const words = room.split(" ");
+        const initial = words.length > 1 ? (words[0][0] + words[1][0]).toUpperCase() : room.slice(0, 2).toUpperCase();
+        grouped[room] = {
+          label: room,
+          count: 0,
+          initial,
+          color: colors[Object.keys(grouped).length % colors.length],
+        };
+      }
+      grouped[room].count += (s.volumeCount || 0);
+    });
+    return Object.values(grouped);
+  }, [shelves]);
+
+  // 4. Rare & High Value Editions Spotlight
+  const rareSpotlight = useMemo(() => {
+    return recentVolumes
+      .filter((v) => (v.rareMarketValue || v.replacementValue || 0) >= 30)
+      .sort((a, b) => ((b.rareMarketValue || b.replacementValue || 0) - (a.rareMarketValue || a.replacementValue || 0)))
+      .slice(0, 4);
+  }, [recentVolumes]);
+
+  // 5. Top Categories Breakdown Report
   const categoryReport = useMemo(() => {
     if (activeSpaceId === "ALL" && data?.deweyDistribution && data.deweyDistribution.length > 0) {
       const total = data.totalVolumes || 1;
@@ -407,31 +456,78 @@ export default function LibraryDashboardPage() {
         </div>
 
         <div className="flex items-center gap-4 overflow-x-auto pb-1 scrollbar-none px-1">
-          {[
-            { label: "Study Room", initial: "SR", color: "from-blue-600 to-indigo-700" },
-            { label: "Living Room", initial: "LR", color: "from-emerald-500 to-teal-700" },
-            { label: "Bedside TBR", initial: "TBR", color: "from-amber-500 to-orange-600" },
-            { label: "Rare Stacks", initial: "RS", color: "from-purple-600 to-pink-600" },
-            { label: "Audiobooks", initial: "AB", color: "from-sky-500 to-blue-700" },
-            { label: "Wishlist", initial: "WL", color: "from-rose-500 to-rose-700" },
-          ].map((shelf) => (
+          {dynamicRooms.map((room) => (
             <div
-              key={shelf.label}
+              key={room.label}
               onClick={() => navigate(`/library/shelves`)}
               className="flex flex-col items-center gap-1.5 shrink-0 cursor-pointer group select-none"
             >
-              <div className={`w-14 h-14 rounded-full bg-gradient-to-tr ${shelf.color} text-white text-xs font-semibold flex items-center justify-center shadow-sm group-hover:scale-105 transition duration-200 border-2 border-white dark:border-slate-800`}>
-                {shelf.initial}
+              <div className={`w-14 h-14 rounded-full bg-gradient-to-tr ${room.color} text-white text-xs font-semibold flex items-center justify-center shadow-sm group-hover:scale-105 transition duration-200 border-2 border-white dark:border-slate-800`}>
+                {room.initial}
               </div>
-              <span className="text-[11px] font-medium text-slate-700 dark:text-slate-200 truncate max-w-[70px] text-center">
-                {shelf.label}
-              </span>
+              <div className="text-center min-w-[70px] max-w-[85px]">
+                <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 truncate">
+                  {room.label}
+                </p>
+                <p className="text-[9.5px] text-slate-500 dark:text-slate-400 font-medium">
+                  {room.count} {room.count === 1 ? "book" : "books"}
+                </p>
+              </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* 8. Full Collection List */}
+      {/* 8. Rare & Collectible Spotlight (if any) */}
+      {rareSpotlight.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <span className="text-amber-500 text-sm">✨</span>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white tracking-tight">
+                Valuable & Rare Stacks
+              </h2>
+            </div>
+            <Link
+              to="/library/valuation"
+              className="text-xs font-medium text-slate-600 dark:text-indigo-400 hover:underline"
+            >
+              View Valuation Schedule →
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {rareSpotlight.map((vol) => (
+              <div
+                key={vol.id}
+                onClick={() => navigate(`/library/catalog?query=${encodeURIComponent(vol.title)}`)}
+                className="bg-[#f1f5f9] dark:bg-slate-800 rounded-2xl p-2.5 border border-slate-300 dark:border-slate-700 shadow-2xs hover:shadow-md transition cursor-pointer group space-y-2"
+              >
+                <div className="relative w-full aspect-[2/3] rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+                  {vol.coverUrl ? (
+                    <img src={vol.coverUrl} alt={vol.title} className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-[10px] font-semibold text-slate-400">RARE</span>
+                  )}
+                  <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-emerald-600/90 text-white font-bold text-[8.5px] rounded-md backdrop-blur-md">
+                    {formatCurrency(vol.rareMarketValue || vol.replacementValue)}
+                  </div>
+                </div>
+                <div className="px-0.5 text-center">
+                  <p className="text-xs font-bold text-slate-900 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
+                    {vol.title}
+                  </p>
+                  <p className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate">
+                    {vol.author || "Unknown"}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 9. Full Collection List */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white tracking-tight">
