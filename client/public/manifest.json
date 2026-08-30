@@ -1,0 +1,44 @@
+{
+  "name": "Colophon Library",
+  "short_name": "Colophon",
+  "description": "Personal and professional library management, Dewey/LOC call numbers, camera ISBN scanner & rare book valuations.",
+  "start_url": "/library",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#4f46e5",
+  "orientation": "portrait-primary",
+  "categories": ["books", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Quick Camera Scanner",
+      "short_name": "Scanner",
+      "description": "Instantly scan book barcodes and ISBNs with device camera",
+      "url": "/library/quick-scan",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Library Catalog",
+      "short_name": "Catalog",
+      "description": "Browse and search your collection",
+      "url": "/library/catalog",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Shelves & Rooms",
+      "short_name": "Shelves",
+      "description": "View bookcase locations and shelf organization",
+      "url": "/library/shelves",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "192x192" }]
+    }
+  ]
+}
+

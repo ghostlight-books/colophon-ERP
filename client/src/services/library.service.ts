@@ -1,3 +1,20 @@
+export interface LibrarySpace {
+  id: string;
+  name: string;
+  slug: string | null;
+  description: string | null;
+  location: string | null;
+  icon: string;
+  color: string;
+  isDefault: boolean;
+  storeId: string;
+  createdAt: string;
+  updatedAt: string;
+  volumeCount: number;
+  totalValue: number;
+  shelvesCount: number;
+}
+
 export interface LibraryVolume {
   id: string;
   isbn: string;
@@ -21,13 +38,26 @@ export interface LibraryVolume {
   shelfName: string | null;
   shelfLocationId: string | null;
   shelfLocation?: LibraryShelfLocation | null;
+  librarySpaceId?: string | null;
+  librarySpace?: LibrarySpace | null;
   replacementValue: number;
+  rareMarketValue?: number | null;
+  valuationNotes?: string | null;
+  condition?: "FINE" | "VERY_GOOD" | "GOOD" | "FAIR" | "POOR" | string;
+  isSigned?: boolean;
+  isFirstEdition?: boolean;
+  isFirstPrinting?: boolean;
   acquisitionPrice: number | null;
   acquisitionDate: string | null;
   readingStatus: "UNREAD" | "READING" | "COMPLETED" | "WISHLIST";
   rating: number | null;
   personalNotes: string | null;
   exLibrisTags: string | null;
+  listingStatus: "COLLECTION_ONLY" | "ALLOW_OFFERS" | "OPEN_FOR_TRADE" | "FOR_SALE";
+  askingPrice: number | null;
+  minimumOffer: number | null;
+  tradePreferences: string | null;
+  offers?: LibraryOffer[];
   isLoaned: boolean;
   borrowerName: string | null;
   borrowerContact: string | null;
@@ -36,6 +66,48 @@ export interface LibraryVolume {
   returnDate: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface LibraryOffer {
+  id: string;
+  volumeId: string;
+  volume?: LibraryVolume;
+  offerType: "CASH" | "TRADE" | "BOOKSTORE_BUY_OFFER";
+  offererType: "COLLECTOR" | "BOOKSTORE";
+  offererId: string | null;
+  offererName: string;
+  offererEmail: string;
+  offererStoreName: string | null;
+  cashOfferAmount: number | null;
+  offeredTradeItemsJson: string | null;
+  notes: string | null;
+  status: "PENDING" | "ACCEPTED" | "COUNTERED" | "DECLINED" | "COMPLETED";
+  counterAmount: number | null;
+  counterNotes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LibraryNotification {
+  id: string;
+  title: string;
+  detail: string;
+  type: "OFFER" | "TRADE" | "LOAN_DUE" | "CATALOG";
+  read: boolean;
+  actionUrl: string | null;
+  createdAt: string;
+}
+
+export interface LibraryCollectionHealth {
+  totalVolumes: number;
+  classificationPercent: number;
+  classifiedDeweyCount: number;
+  classifiedLocCount: number;
+  loanedVolumesCount: number;
+  openOffersCount: number;
+  unreadNotificationsCount: number;
+  totalInsuredValue: number;
+  healthStatus: "excellent" | "good" | "needs_attention";
 }
 
 export interface LibraryShelfLocation {
@@ -131,7 +203,7 @@ function resolveApiUrl(endpointPath: string): string {
     }
     return `${cleanBase}${path.startsWith("/api") ? path : `/api${path}`}`;
   }
-  return `http://localhost:4000${path.startsWith("/api") ? path : `/api${path}`}`;
+  return path.startsWith("/api") ? path : `/api${path}`;
 }
 
 const PROVIDER_TIMEOUT_MS = 15000;
@@ -144,6 +216,51 @@ async function fetchWithTimeout(url: string, options?: RequestInit): Promise<Res
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function fetchLibrarySpaces(): Promise<LibrarySpace[]> {
+  const url = resolveApiUrl(`/library/spaces?t=${Date.now()}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to fetch library spaces.");
+  return res.json() as Promise<LibrarySpace[]>;
+}
+
+export async function createLibrarySpace(data: {
+  name: string;
+  description?: string | null;
+  location?: string | null;
+  icon?: string | null;
+  color?: string | null;
+  isDefault?: boolean;
+}): Promise<LibrarySpace> {
+  const url = resolveApiUrl("/library/spaces");
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to create library space.");
+  return res.json() as Promise<LibrarySpace>;
+}
+
+export async function updateLibrarySpace(id: string, data: Partial<LibrarySpace>): Promise<LibrarySpace> {
+  const url = resolveApiUrl(`/library/spaces/${id}`);
+  const res = await fetchWithTimeout(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update library space.");
+  return res.json() as Promise<LibrarySpace>;
+}
+
+export async function deleteLibrarySpace(id: string): Promise<{ success: boolean; movedToDefaultId?: string }> {
+  const url = resolveApiUrl(`/library/spaces/${id}`);
+  const res = await fetchWithTimeout(url, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete library space.");
+  return res.json() as Promise<{ success: boolean; movedToDefaultId?: string }>;
 }
 
 export async function fetchLibraryDashboard(): Promise<LibraryDashboardSummary> {
@@ -160,6 +277,8 @@ export async function fetchLibraryVolumes(params: {
   shelfLocationId?: string;
   roomName?: string;
   readingStatus?: string;
+  condition?: string;
+  librarySpaceId?: string;
   isLoaned?: boolean;
   limit?: number;
   offset?: number;
@@ -171,6 +290,8 @@ export async function fetchLibraryVolumes(params: {
   if (params.shelfLocationId) queryParams.set("shelfLocationId", params.shelfLocationId);
   if (params.roomName) queryParams.set("roomName", params.roomName);
   if (params.readingStatus && params.readingStatus !== "ALL") queryParams.set("readingStatus", params.readingStatus);
+  if (params.condition && params.condition !== "ALL") queryParams.set("condition", params.condition);
+  if (params.librarySpaceId && params.librarySpaceId !== "ALL") queryParams.set("librarySpaceId", params.librarySpaceId);
   if (typeof params.isLoaned === "boolean") queryParams.set("isLoaned", String(params.isLoaned));
   if (params.limit) queryParams.set("limit", String(params.limit));
   if (params.offset) queryParams.set("offset", String(params.offset));
@@ -242,6 +363,31 @@ export async function deleteLibraryVolume(id: string): Promise<void> {
   if (!res.ok) throw new Error("Failed to delete volume.");
 }
 
+export async function bulkDeleteLibraryVolumes(ids: string[]): Promise<{ count: number }> {
+  const url = resolveApiUrl("/library/volumes/bulk-delete");
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error("Failed to bulk delete volumes.");
+  return res.json() as Promise<{ count: number }>;
+}
+
+export async function bulkMoveLibraryVolumes(
+  ids: string[],
+  target: { librarySpaceId?: string | null; shelfLocationId?: string | null }
+): Promise<{ count: number }> {
+  const promises = ids.map((id) =>
+    updateLibraryVolume(id, {
+      librarySpaceId: target.librarySpaceId,
+      shelfLocationId: target.shelfLocationId,
+    })
+  );
+  await Promise.all(promises);
+  return { count: ids.length };
+}
+
 export async function fetchShelves(): Promise<LibraryShelfLocation[]> {
   const url = resolveApiUrl(`/library/shelves?t=${Date.now()}`);
   const res = await fetchWithTimeout(url);
@@ -309,4 +455,193 @@ export async function enrichIsbnPreview(isbn: string): Promise<LibraryEnrichment
   if (!res.ok) throw new Error("Failed to enrich ISBN.");
   return res.json() as Promise<LibraryEnrichmentPreview>;
 }
+
+// Exchange & Offers Marketplace API
+export async function fetchExchangeMarketplace(params: {
+  query?: string;
+  status?: string;
+  deweyPrefix?: string;
+  maxPrice?: number;
+  limit?: number;
+} = {}): Promise<LibraryVolume[]> {
+  const q = new URLSearchParams();
+  if (params.query) q.set("query", params.query);
+  if (params.status) q.set("status", params.status);
+  if (params.deweyPrefix) q.set("deweyPrefix", params.deweyPrefix);
+  if (typeof params.maxPrice === "number") q.set("maxPrice", String(params.maxPrice));
+  if (params.limit) q.set("limit", String(params.limit));
+
+  const url = resolveApiUrl(`/library/exchange/marketplace?${q.toString()}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to load exchange marketplace.");
+  const data = (await res.json()) as { items?: LibraryVolume[] };
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+export async function submitOffer(data: {
+  volumeId: string;
+  offerType: "CASH" | "TRADE" | "BOOKSTORE_BUY_OFFER";
+  offererType?: "COLLECTOR" | "BOOKSTORE";
+  offererName: string;
+  offererEmail: string;
+  offererStoreName?: string;
+  cashOfferAmount?: number;
+  offeredTradeItemsJson?: string;
+  notes?: string;
+}): Promise<LibraryOffer> {
+  const url = resolveApiUrl("/library/exchange/offers");
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any)?.error || "Failed to submit offer.");
+  }
+  return res.json() as Promise<LibraryOffer>;
+}
+
+export async function fetchIncomingOffers(): Promise<LibraryOffer[]> {
+  const url = resolveApiUrl(`/library/exchange/offers?t=${Date.now()}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to fetch incoming offers.");
+  const data = (await res.json()) as { offers?: LibraryOffer[] };
+  return Array.isArray(data.offers) ? data.offers : [];
+}
+
+export async function respondToOffer(
+  offerId: string,
+  action: "ACCEPT" | "COUNTER" | "DECLINE" | "COMPLETE",
+  counterAmount?: number,
+  counterNotes?: string
+): Promise<LibraryOffer> {
+  const url = resolveApiUrl(`/library/exchange/offers/${encodeURIComponent(offerId)}/respond`);
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, counterAmount, counterNotes }),
+  });
+  if (!res.ok) throw new Error("Failed to respond to offer.");
+  return res.json() as Promise<LibraryOffer>;
+}
+
+// Library Notifications Feed API
+export async function fetchLibraryNotifications(limit = 20): Promise<LibraryNotification[]> {
+  const url = resolveApiUrl(`/library/notifications?limit=${limit}&t=${Date.now()}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to fetch notifications.");
+  const data = (await res.json()) as { notifications?: LibraryNotification[] };
+  return Array.isArray(data.notifications) ? data.notifications : [];
+}
+
+export async function markNotificationAsRead(id: string): Promise<void> {
+  const url = resolveApiUrl(`/library/notifications/${encodeURIComponent(id)}/read`);
+  await fetchWithTimeout(url, { method: "POST" });
+}
+export const markLibraryNotificationRead = markNotificationAsRead;
+
+export async function markAllNotificationsAsRead(): Promise<void> {
+  const url = resolveApiUrl("/library/notifications/read-all");
+  await fetchWithTimeout(url, { method: "POST" });
+}
+
+// Collection Health API (for Library Shell)
+export async function fetchCollectionHealth(): Promise<LibraryCollectionHealth> {
+  const url = resolveApiUrl(`/library/collection-health?t=${Date.now()}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to fetch collection health.");
+  return res.json() as Promise<LibraryCollectionHealth>;
+}
+
+export interface RareBookComp {
+  source: string;
+  title: string;
+  price: number;
+  conditionNotes: string;
+  attributes: string[];
+}
+
+export interface RarePricingResult {
+  isbn: string;
+  baselinePrice: number;
+  rareMarketValue: number;
+  suggestedAskingPrice: number;
+  confidenceScore: number;
+  condition?: string;
+  attributes: {
+    isSigned: boolean;
+    isFirstEdition: boolean;
+    isFirstPrinting: boolean;
+  };
+  valuationRationale: string;
+  sources: RareBookComp[];
+}
+
+export async function evaluateRareBookPricing(params: {
+  isbn: string;
+  title?: string;
+  author?: string;
+  condition?: string;
+  isSigned?: boolean;
+  isFirstEdition?: boolean;
+  isFirstPrinting?: boolean;
+  baselinePrice?: number;
+  publishYear?: string | number | null;
+  bindingFormat?: string | null;
+}): Promise<RarePricingResult> {
+  const url = resolveApiUrl("/library/evaluate-rare-pricing");
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to evaluate rare pricing.");
+  }
+  return res.json() as Promise<RarePricingResult>;
+}
+
+export interface CoverCandidate {
+  source: "Google Books" | "Open Library" | "ThriftBooks" | "AbeBooks" | "ISBNdb" | "LibraryThing";
+  url: string;
+  quality: "high" | "medium" | "standard";
+}
+
+export async function fetchCoverCandidates(params: {
+  isbn: string;
+  title?: string;
+  author?: string;
+}): Promise<CoverCandidate[]> {
+  const query = new URLSearchParams();
+  if (params.isbn) query.set("isbn", params.isbn);
+  if (params.title) query.set("title", params.title);
+  if (params.author) query.set("author", params.author);
+
+  const url = resolveApiUrl(`/library/covers/lookup?${query.toString()}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) return [];
+  const data = (await res.json()) as { candidates?: CoverCandidate[] };
+  return Array.isArray(data.candidates) ? data.candidates : [];
+}
+
+export async function updateVolumeCover(volumeId: string, coverUrl: string): Promise<LibraryVolume> {
+  const url = resolveApiUrl(`/library/volumes/${encodeURIComponent(volumeId)}/cover`);
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ coverUrl }),
+  });
+  if (!res.ok) throw new Error("Failed to update cover image.");
+  return res.json() as Promise<LibraryVolume>;
+}
+
+export async function refreshMissingCovers(): Promise<{ totalChecked: number; updatedCount: number }> {
+  const url = resolveApiUrl("/library/volumes/refresh-missing-covers");
+  const res = await fetchWithTimeout(url, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to refresh covers.");
+  return res.json() as Promise<{ totalChecked: number; updatedCount: number }>;
+}
+
 

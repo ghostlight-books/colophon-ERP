@@ -67,3 +67,4 @@ CREATE INDEX IF NOT EXISTS "LibraryVolume_locClassification_idx" ON "LibraryVolu
 CREATE INDEX IF NOT EXISTS "LibraryVolume_readingStatus_idx" ON "LibraryVolume"("readingStatus");
 CREATE INDEX IF NOT EXISTS "LibraryVolume_isLoaned_idx" ON "LibraryVolume"("isLoaned");
 CREATE INDEX IF NOT EXISTS "LibraryVolume_shelfLocationId_idx" ON "LibraryVolume"("shelfLocationId");
+

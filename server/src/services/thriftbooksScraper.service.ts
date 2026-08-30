@@ -19,6 +19,7 @@ export type ThriftbooksDetails = {
   author: string | null;
   category: string | null;
   subcategory: string | null;
+  coverUrl?: string | null;
   offers?: ScrapedOffer[];
   conditionPrices?: Partial<Record<BookCondition, number>>;
 };
@@ -63,6 +64,7 @@ export function extractThriftbooksDetails(html: string): ThriftbooksDetails {
       author: null,
       category: null,
       subcategory: null,
+      coverUrl: null,
       offers: [],
       conditionPrices: {},
     };
@@ -74,6 +76,7 @@ export function extractThriftbooksDetails(html: string): ThriftbooksDetails {
   
   let jsonTitle: string | null = null;
   let jsonAuthor: string | null = null;
+  let jsonCover: string | null = null;
 
   for (const block of jsonLdBlocks) {
     if (block && typeof block === "object") {
@@ -97,6 +100,13 @@ export function extractThriftbooksDetails(html: string): ThriftbooksDetails {
             jsonAuthor = obj.author.trim();
           } else if (typeof obj.author === "object" && obj.author !== null && "name" in obj.author) {
             jsonAuthor = String((obj.author as Record<string, unknown>).name).trim();
+          }
+        }
+        if (!jsonCover) {
+          if (typeof obj.image === "string" && obj.image.startsWith("http")) {
+            jsonCover = obj.image;
+          } else if (Array.isArray(obj.image) && typeof obj.image[0] === "string" && obj.image[0].startsWith("http")) {
+            jsonCover = obj.image[0];
           }
         }
       }
@@ -164,12 +174,17 @@ export function extractThriftbooksDetails(html: string): ThriftbooksDetails {
   const finalTitle = rawTitle ? decodeHtmlEntities(rawTitle) : null;
   const finalAuthor = rawAuthor ? decodeHtmlEntities(rawAuthor) : null;
 
+  const htmlCoverMatch = html.match(/<meta\s+(?:property|name)=["']og:image["']\s+content=["']([^"']+)["']/i)
+    || html.match(/<img[^>]*class=["'][^"']*(?:product-image|work-image|book-cover)[^"']*["'][^>]*src=["']([^"']+)["']/i);
+  const htmlCover = htmlCoverMatch ? htmlCoverMatch[1] : null;
+
   return {
     price: finalPrice,
     title: finalTitle,
     author: finalAuthor,
     category,
     subcategory,
+    coverUrl: jsonCover || htmlCover || null,
     offers: structuredOffers,
     conditionPrices,
   };

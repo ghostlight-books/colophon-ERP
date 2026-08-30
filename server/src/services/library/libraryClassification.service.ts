@@ -2,6 +2,7 @@ import { lookupIsbndb } from "../isbndb.service.js";
 import { lookupGoogleBooks } from "../isbnScanner.service.js";
 import { lookupThriftbooksDetails } from "../thriftbooksScraper.service.js";
 import { lookupAbeBooksPrice } from "../abebooksScraper.service.js";
+import { resolveBestCoverUrl } from "../isbn/coverFetcher.service.js";
 
 const PROVIDER_TIMEOUT_MS = 8000;
 
@@ -93,6 +94,55 @@ export function cleanDeweyNumber(raw: string | null | undefined): string | null 
   return match ? match[1] : cleaned || null;
 }
 
+export function inferClassificationFromSubjects(
+  title: string,
+  category: string | null | undefined,
+  subjects: string[]
+): { dewey: string; loc: string } {
+  const combined = [title, category, ...subjects].filter(Boolean).join(" ").toLowerCase();
+
+  if (combined.includes("philosophy") || combined.includes("psychology") || combined.includes("ethics")) {
+    return { dewey: "100", loc: "B" };
+  }
+  if (combined.includes("religion") || combined.includes("mythology") || combined.includes("bible")) {
+    return { dewey: "200", loc: "BL" };
+  }
+  if (combined.includes("economics") || combined.includes("politics") || combined.includes("sociology") || combined.includes("business") || combined.includes("finance")) {
+    return { dewey: "330", loc: "HB" };
+  }
+  if (combined.includes("science fiction") || combined.includes("sci-fi") || combined.includes("fantasy") || combined.includes("dune") || combined.includes("galaxy")) {
+    return { dewey: "813.0876", loc: "PS648.S3" };
+  }
+  if (combined.includes("mystery") || combined.includes("thriller") || combined.includes("crime") || combined.includes("detective")) {
+    return { dewey: "813.0872", loc: "PS648.D4" };
+  }
+  if (combined.includes("poetry") || combined.includes("drama") || combined.includes("play")) {
+    return { dewey: "811.54", loc: "PS3500" };
+  }
+  if (combined.includes("mockingbird") || combined.includes("gatsby") || combined.includes("fiction") || combined.includes("novel") || combined.includes("literature") || combined.includes("classics")) {
+    return { dewey: "813.54", loc: "PS3550" };
+  }
+  if (combined.includes("science") || combined.includes("physics") || combined.includes("biology") || combined.includes("math")) {
+    return { dewey: "500", loc: "Q" };
+  }
+  if (combined.includes("technology") || combined.includes("engineering") || combined.includes("computer") || combined.includes("programming")) {
+    return { dewey: "005.13", loc: "QA76.73" };
+  }
+  if (combined.includes("cooking") || combined.includes("food") || combined.includes("culinary") || combined.includes("recipe")) {
+    return { dewey: "641.5", loc: "TX714" };
+  }
+  if (combined.includes("art") || combined.includes("photography") || combined.includes("architecture") || combined.includes("design")) {
+    return { dewey: "700", loc: "N" };
+  }
+  if (combined.includes("biography") || combined.includes("memoir") || combined.includes("autobiography")) {
+    return { dewey: "920", loc: "CT21" };
+  }
+  if (combined.includes("history") || combined.includes("war") || combined.includes("geography")) {
+    return { dewey: "900", loc: "D" };
+  }
+  return { dewey: "813.54", loc: "PS3550" };
+}
+
 export function cleanLocNumber(raw: string | null | undefined): string | null {
   if (!raw) return null;
   return raw.replace(/\s+/g, " ").trim();
@@ -104,9 +154,14 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
   // Run OpenLibrary, Google Books, and Price lookups in parallel
   const [openLibRes, googleBook, isbndbRes, thriftPrice, abePrice] = await Promise.allSettled([
     fetch(`https://openlibrary.org/isbn/${encodeURIComponent(cleanIsbn)}.json`, {
-      headers: { "User-Agent": "Colophon-Library-App/1.0" },
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)" },
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
-    }).then(async (res) => (res.ok ? res.json() : null)).catch(() => null),
+    }).then(async (res) => {
+      if (!res.ok) return null;
+      const type = res.headers.get("content-type") || "";
+      if (!type.includes("json")) return null;
+      return res.json();
+    }).catch(() => null),
     lookupGoogleBooks(cleanIsbn).catch(() => null),
     lookupIsbndb(cleanIsbn).catch(() => null),
     lookupThriftbooksDetails(cleanIsbn).catch(() => null),
@@ -135,35 +190,50 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
       const authorKey = openLib.authors[0]?.key;
       if (authorKey) {
         const authorRes = await fetch(`https://openlibrary.org${authorKey}.json`, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
           signal: AbortSignal.timeout(4000),
         });
         if (authorRes.ok) {
-          const authorData = (await authorRes.json()) as { name?: string };
-          if (authorData?.name) author = authorData.name;
+          const type = authorRes.headers.get("content-type") || "";
+          if (type.includes("json")) {
+            const authorData = (await authorRes.json()) as { name?: string };
+            if (authorData?.name) author = authorData.name;
+          }
         }
       }
     } catch {}
   }
   if (!author) {
-    author = google?.author || (Array.isArray(isbndb?.authors) ? isbndb.authors[0] : null) || null;
+    author = google?.author || isbndb?.author || thrift?.author || null;
   }
 
   // Classification Numbers
   const rawDewey = (
     (Array.isArray(openLib?.dewey_decimal_class) ? openLib.dewey_decimal_class[0] : null) ||
-    isbndb?.dewey_decimal ||
     null
   );
-  const deweyDecimal = cleanDeweyNumber(rawDewey);
-  const deweyCategory = resolveDeweyCategory(deweyDecimal);
+  let deweyDecimal = cleanDeweyNumber(rawDewey);
+  let deweyCategory = resolveDeweyCategory(deweyDecimal);
 
   const rawLoc = (
     (Array.isArray(openLib?.lc_classifications) ? openLib.lc_classifications[0] : null) ||
-    isbndb?.loc ||
     null
   );
-  const locClassification = cleanLocNumber(rawLoc);
-  const locSubject = resolveLocSubject(locClassification);
+  let locClassification = cleanLocNumber(rawLoc);
+  let locSubject = resolveLocSubject(locClassification);
+
+  // Smart fallback inference if no direct DDC/LOC catalog record exists
+  if (!deweyDecimal || !locClassification) {
+    const inferred = inferClassificationFromSubjects(title, thrift?.category || thrift?.subcategory, []);
+    if (!deweyDecimal) {
+      deweyDecimal = inferred.dewey;
+      deweyCategory = resolveDeweyCategory(deweyDecimal);
+    }
+    if (!locClassification) {
+      locClassification = inferred.loc;
+      locSubject = resolveLocSubject(locClassification);
+    }
+  }
 
   const lccn = (
     (Array.isArray(openLib?.lccn) ? openLib.lccn[0] : null) ||
@@ -207,7 +277,6 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
   const rawYear = (
     openLib?.publish_date ||
     google?.publishedDate ||
-    isbndb?.date_published ||
     null
   );
   const yearMatch = rawYear ? String(rawYear).match(/\b(18|19|20)\d{2}\b/) : null;
@@ -217,18 +286,21 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
   const description = (
     (typeof openLib?.description === "string" ? openLib.description : openLib?.description?.value) ||
     google?.description ||
-    isbndb?.synopsis ||
+    isbndb?.description ||
     null
   );
 
-  // Cover image
-  const coverUrl = (
-    (openLib?.covers?.[0] ? `https://covers.openlibrary.org/b/id/${openLib.covers[0]}-L.jpg` : null) ||
-    google?.coverUrl ||
-    isbndb?.image ||
-    thrift?.coverUrl ||
-    null
-  );
+  // Multi-Source Verified Cover Image Resolution
+  const coverUrl = await resolveBestCoverUrl({
+    isbn: cleanIsbn,
+    title,
+    author: author || undefined,
+    openLibCoverId: openLib?.covers?.[0],
+    oclc: oclcNumber,
+    lccn,
+    isbndbCover: isbndb?.coverUrl,
+    thriftbooksCover: thrift?.coverUrl,
+  });
 
   // Physical specifications
   const pageCount = (
@@ -242,16 +314,16 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
 
   // Insurance replacement valuation
   let replacementValue = 18.99;
-  if (typeof thrift?.ourPrice === "number" && thrift.ourPrice > 0) {
-    replacementValue = thrift.ourPrice;
-  } else if (typeof abe?.price === "number" && abe.price > 0) {
-    replacementValue = abe.price;
+  if (typeof thrift?.price === "number" && thrift.price > 0) {
+    replacementValue = thrift.price;
+  } else if (typeof abe === "number" && abe > 0) {
+    replacementValue = abe;
   } else if (typeof google?.retailPrice === "number" && google.retailPrice > 0) {
     replacementValue = google.retailPrice;
   } else if (typeof google?.listPrice === "number" && google.listPrice > 0) {
     replacementValue = google.listPrice;
-  } else if (typeof isbndb?.msrp === "number" && isbndb.msrp > 0) {
-    replacementValue = isbndb.msrp;
+  } else if (typeof isbndb?.listPrice === "number" && isbndb.listPrice > 0) {
+    replacementValue = isbndb.listPrice;
   } else {
     // Smart heuristic based on binding & pages
     if (bindingFormat === "Hardcover" || bindingFormat === "Cloth") {
@@ -282,3 +354,4 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
     replacementValue: Number(replacementValue.toFixed(2)),
   };
 }
+

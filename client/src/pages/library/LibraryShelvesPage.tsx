@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import SurfaceCard from "../../components/ui/SurfaceCard";
+import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
 import {
   fetchShelves,
   createShelf,
@@ -15,12 +15,30 @@ function formatCurrency(amount: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
 }
 
+const ROOM_COLORS: Record<string, { bg: string; dot: string; ring: string }> = {
+  "Study Room": { bg: "bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-200 border-blue-200 dark:border-blue-800", dot: "bg-blue-600", ring: "ring-blue-400" },
+  "Living Room": { bg: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800", dot: "bg-emerald-600", ring: "ring-emerald-400" },
+  "Bedside TBR": { bg: "bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-800", dot: "bg-amber-600", ring: "ring-amber-400" },
+  "Rare Stacks": { bg: "bg-purple-50 dark:bg-purple-950/30 text-purple-800 dark:text-purple-200 border-purple-200 dark:border-purple-800", dot: "bg-purple-600", ring: "ring-purple-400" },
+  "Audiobooks": { bg: "bg-sky-50 dark:bg-sky-950/30 text-sky-800 dark:text-sky-200 border-sky-200 dark:border-sky-800", dot: "bg-sky-600", ring: "ring-sky-400" },
+  "Wishlist": { bg: "bg-rose-50 dark:bg-rose-950/30 text-rose-800 dark:text-rose-200 border-rose-200 dark:border-rose-800", dot: "bg-rose-600", ring: "ring-rose-400" },
+};
+
+function getRoomBadge(roomName: string) {
+  return ROOM_COLORS[roomName] || {
+    bg: "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700",
+    dot: "bg-slate-500",
+    ring: "ring-slate-400",
+  };
+}
+
 export default function LibraryShelvesPage() {
   const [shelves, setShelves] = useState<LibraryShelfLocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedShelf, setSelectedShelf] = useState<LibraryShelfLocation | null>(null);
   const [shelfVolumes, setShelfVolumes] = useState<LibraryVolume[]>([]);
   const [loadingVolumes, setLoadingVolumes] = useState(false);
+  const [activeRoomFilter, setActiveRoomFilter] = useState<string>("ALL");
 
   // New Shelf Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -101,7 +119,7 @@ export default function LibraryShelvesPage() {
       await deleteShelf(shelf.id);
       if (selectedShelf?.id === shelf.id) setSelectedShelf(null);
       void loadShelves();
-    } catch (err) {
+    } catch {
       alert("Failed to delete shelf location.");
     }
   };
@@ -113,310 +131,385 @@ export default function LibraryShelvesPage() {
     return acc;
   }, {});
 
+  const roomNames = Object.keys(roomsMap);
+  const filteredShelves = activeRoomFilter === "ALL" 
+    ? shelves 
+    : shelves.filter((s) => s.roomName === activeRoomFilter);
+
+  const totalCapacity = shelves.reduce((sum, s) => sum + (s.capacity || 0), 0);
+  const totalOccupied = shelves.reduce((sum, s) => sum + (s.volumeCount || 0), 0);
+  const totalValueOnShelves = shelves.reduce((sum, s) => sum + (s.totalValue || 0), 0);
+
   return (
-    <div className="space-y-6">
-      {/* Top Header Card */}
-      <SurfaceCard className="space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200/80 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700 text-xl font-bold shadow-sm">
-              🗄️
-            </div>
-            <div>
-              <h1 className="text-xl font-black text-slate-900 tracking-tight">Shelves & Rooms Organizer</h1>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Map your books to physical rooms, bookcases, and shelf levels with visual capacity tracking
-              </p>
-            </div>
-          </div>
+    <div className="space-y-6 pb-24 font-sans max-w-4xl mx-auto">
+      {/* 1. Header Bar: Location Switcher & Action */}
+      <div className="flex items-center justify-between gap-3 pt-1 flex-wrap">
+        <LibrarySpaceSwitcher />
 
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsModalOpen(true)}
+            className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-900 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium text-xs rounded-2xl transition shadow-2xs cursor-pointer flex items-center gap-1.5"
+          >
+            <span>+ Add Shelf</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Top Summary Stat Cards (Matching Home Style) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-4 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-1">
+          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            Total Rooms
+          </p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-white">
+            {roomNames.length}
+          </p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+            Physical spaces
+          </p>
+        </div>
+
+        <div className="p-4 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-1">
+          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            Total Shelves
+          </p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-white">
+            {shelves.length}
+          </p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+            Bookcase tiers
+          </p>
+        </div>
+
+        <div className="p-4 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-1">
+          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            Shelf Capacity
+          </p>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-indigo-400">
+            {totalOccupied} / {totalCapacity}
+          </p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+            {totalCapacity > 0 ? `${Math.round((totalOccupied / totalCapacity) * 100)}% utilized` : "No capacity defined"}
+          </p>
+        </div>
+
+        <div className="p-4 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-1">
+          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            Tracked Value
+          </p>
+          <p className="text-2xl font-semibold text-emerald-700 dark:text-emerald-400">
+            {formatCurrency(totalValueOnShelves)}
+          </p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+            On active shelves
+          </p>
+        </div>
+      </div>
+
+      {/* 3. Room Quick Filters (Pills) */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+        <button
+          type="button"
+          onClick={() => setActiveRoomFilter("ALL")}
+          className={`px-4 py-1.5 rounded-full text-xs font-medium tracking-tight shrink-0 transition cursor-pointer ${
+            activeRoomFilter === "ALL"
+              ? "bg-slate-800 dark:bg-indigo-600 text-white shadow-sm"
+              : "bg-[#e2e8f0] hover:bg-[#cbd5e1] dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-2xs"
+          }`}
+        >
+          All Rooms ({shelves.length})
+        </button>
+        {roomNames.map((room) => {
+          const badge = getRoomBadge(room);
+          const isSelected = activeRoomFilter === room;
+          return (
             <button
+              key={room}
               type="button"
-              onClick={() => setIsModalOpen(true)}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+              onClick={() => setActiveRoomFilter(room)}
+              className={`px-4 py-1.5 rounded-full text-xs font-medium tracking-tight shrink-0 transition cursor-pointer flex items-center gap-1.5 ${
+                isSelected
+                  ? "bg-slate-800 dark:bg-indigo-600 text-white shadow-sm"
+                  : `${badge.bg} border shadow-2xs hover:opacity-90`
+              }`}
             >
-              <span>➕ Add Room / Shelf</span>
+              <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? "bg-white" : badge.dot}`} />
+              <span>{room}</span>
+              <span className="opacity-70 text-[10px]">({roomsMap[room].length})</span>
             </button>
-          </div>
-        </div>
+          );
+        })}
+      </div>
 
-        {/* Quick Summary Pill Bar */}
-        <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
-          <div className="px-3.5 py-1.5 bg-slate-100 rounded-xl border border-slate-200 font-bold text-slate-700">
-            Total Rooms: <span className="text-slate-950 font-black">{Object.keys(roomsMap).length}</span>
-          </div>
-          <div className="px-3.5 py-1.5 bg-indigo-50 rounded-xl border border-indigo-200 font-bold text-indigo-800">
-            Total Shelves: <span className="text-indigo-950 font-black">{shelves.length}</span>
-          </div>
-          <div className="px-3.5 py-1.5 bg-emerald-50 rounded-xl border border-emerald-200 font-bold text-emerald-800">
-            Tracked Value on Shelves:{" "}
-            <span className="text-emerald-950 font-black">
-              {formatCurrency(shelves.reduce((sum, s) => sum + (s.totalValue || 0), 0))}
-            </span>
-          </div>
-        </div>
-      </SurfaceCard>
-
-      {/* Main Grid: Left Shelves Directory, Right Shelf Volumes (5 / 7 cols) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Room & Bookcase Tree (5 cols) */}
-        <div className="lg:col-span-5 space-y-4">
-          <SurfaceCard className="space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
-              <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span>📍</span> Shelf Locations
-              </h2>
-              <span className="text-xs text-slate-400 font-medium">{shelves.length} Total</span>
+      {/* 4. Main Two-Column Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Left Column: Shelves Directory (5 cols) */}
+        <div className="lg:col-span-5 space-y-3">
+          <div className="p-4 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <h3 className="text-xs font-semibold text-slate-800 dark:text-white uppercase tracking-wider">
+                Shelf Locations
+              </h3>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-normal">
+                {filteredShelves.length} Shelves
+              </span>
             </div>
 
             {loading ? (
-              <div className="p-8 text-center text-slate-400 text-xs">Loading shelf directory...</div>
-            ) : shelves.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 border border-dashed border-slate-200 rounded-2xl space-y-2">
-                <span className="text-3xl block">🗄️</span>
-                <p className="text-xs font-bold text-slate-700">No shelf locations created yet.</p>
-                <p className="text-[11px] text-slate-500">Click "Add Room / Shelf" above to organize your physical space!</p>
+              <div className="p-8 text-center text-slate-500 text-xs">Loading shelf directory...</div>
+            ) : filteredShelves.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 dark:text-slate-400 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 space-y-2">
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">No shelf locations created yet.</p>
+                <p className="text-[11px] text-slate-500">Click "+ Add Shelf" above to organize your physical space.</p>
               </div>
             ) : (
-              <div className="space-y-5">
-                {Object.entries(roomsMap).map(([room, roomShelves]) => (
-                  <div key={room} className="space-y-2">
-                    <div className="flex items-center gap-2 text-xs font-black text-slate-900 bg-slate-100/80 px-3 py-1.5 rounded-xl">
-                      <span>🚪</span>
-                      <span>{room}</span>
-                      <span className="text-[10px] text-slate-500 font-normal ml-auto">
-                        {roomShelves.length} {roomShelves.length === 1 ? "shelf" : "shelves"}
-                      </span>
-                    </div>
-
-                    <div className="space-y-2 pl-2">
-                      {roomShelves.map((shelf) => {
-                        const isSelected = selectedShelf?.id === shelf.id;
-                        return (
-                          <div
-                            key={shelf.id}
-                            onClick={() => setSelectedShelf(shelf)}
-                            className={`p-3 rounded-xl border transition cursor-pointer flex flex-col gap-2 ${
-                              isSelected
-                                ? "bg-indigo-50/70 border-indigo-300 shadow-xs"
-                                : "bg-white hover:bg-slate-50 border-slate-200/80"
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <h4 className="text-xs font-bold text-slate-900">
-                                  {shelf.bookcaseName} &gt; {shelf.shelfName}
-                                </h4>
-                                {shelf.description && (
-                                  <p className="text-[10px] text-slate-500 line-clamp-1">{shelf.description}</p>
-                                )}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void handleDeleteShelf(shelf);
-                                }}
-                                className="text-slate-400 hover:text-rose-600 text-xs px-1"
-                                title="Delete shelf"
-                              >
-                                ✕
-                              </button>
-                            </div>
-
-                            {/* Capacity Progress Bar */}
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
-                                <span>{shelf.volumeCount ?? 0} / {shelf.capacity} Books ({shelf.percentFull ?? 0}%)</span>
-                                <span className="font-bold text-emerald-700">{formatCurrency(shelf.totalValue)}</span>
-                              </div>
-                              <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-                                <div
-                                  className={`h-full rounded-full transition-all duration-300 ${
-                                    (shelf.percentFull ?? 0) > 90
-                                      ? "bg-rose-500"
-                                      : (shelf.percentFull ?? 0) > 70
-                                      ? "bg-amber-500"
-                                      : "bg-indigo-600"
-                                  }`}
-                                  style={{ width: `${Math.min(100, shelf.percentFull ?? 0)}%` }}
-                                />
-                              </div>
-                            </div>
+              <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1">
+                {filteredShelves.map((shelf) => {
+                  const isSelected = selectedShelf?.id === shelf.id;
+                  const percent = shelf.percentFull ?? 0;
+                  return (
+                    <div
+                      key={shelf.id}
+                      onClick={() => setSelectedShelf(shelf)}
+                      className={`p-3 rounded-2xl border transition cursor-pointer flex flex-col gap-2 ${
+                        isSelected
+                          ? "bg-white dark:bg-slate-700 border-slate-400 dark:border-indigo-500 shadow-xs ring-1 ring-slate-300 dark:ring-indigo-500"
+                          : "bg-white/70 dark:bg-slate-800/70 hover:bg-white dark:hover:bg-slate-700 border-slate-300 dark:border-slate-700"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-slate-500 font-medium">{shelf.roomName} &bull;</span>
+                            <h4 className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                              {shelf.bookcaseName} &gt; {shelf.shelfName}
+                            </h4>
                           </div>
-                        );
-                      })}
+                          {shelf.description && (
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5">
+                              {shelf.description}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDeleteShelf(shelf);
+                          }}
+                          className="text-slate-400 hover:text-rose-600 text-xs px-1 transition cursor-pointer"
+                          title="Delete shelf"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      {/* Capacity Meter Bar */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                          <span>{shelf.volumeCount ?? 0} / {shelf.capacity} Books ({percent}%)</span>
+                          <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                            {formatCurrency(shelf.totalValue)}
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              percent > 90
+                                ? "bg-rose-500"
+                                : percent > 70
+                                ? "bg-amber-500"
+                                : "bg-emerald-600"
+                            }`}
+                            style={{ width: `${Math.min(100, percent)}%` }}
+                          />
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
-          </SurfaceCard>
+          </div>
         </div>
 
-        {/* Right Column: Volumes currently sitting on selected shelf (7 cols) */}
-        <div className="lg:col-span-7 space-y-4">
+        {/* Right Column: Volumes sitting on selected shelf (7 cols) */}
+        <div className="lg:col-span-7 space-y-3">
           {selectedShelf ? (
-            <SurfaceCard className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+            <div className="p-4 sm:p-5 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-3 flex-wrap gap-2">
                 <div>
-                  <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <span>📖</span> Books in {selectedShelf.fullLocationLabel}
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                    {selectedShelf.fullLocationLabel}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-normal mt-0.5">
                     {shelfVolumes.length} volumes &bull; Total Value: {formatCurrency(selectedShelf.totalValue)}
                   </p>
                 </div>
                 <Link
-                  to={`/library/scan`}
-                  className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs rounded-xl border border-indigo-200"
+                  to="/library/quick-scan"
+                  className="px-3 py-1.5 bg-white dark:bg-slate-700 hover:bg-slate-100 text-slate-800 dark:text-slate-200 font-medium text-xs rounded-xl border border-slate-300 dark:border-slate-600 shadow-2xs transition"
                 >
-                  + Scan into this Shelf
+                  + Scan into Shelf
                 </Link>
               </div>
 
               {loadingVolumes ? (
-                <div className="p-8 text-center text-slate-400 text-xs">Loading shelf books...</div>
+                <div className="p-12 text-center text-slate-500 text-xs">Loading shelf books...</div>
               ) : shelfVolumes.length === 0 ? (
-                <div className="p-12 text-center text-slate-400 border border-dashed border-slate-200 rounded-2xl space-y-2">
-                  <span className="text-3xl block">📚</span>
-                  <p className="text-xs font-bold text-slate-700">This shelf is currently empty.</p>
-                  <p className="text-[11px] text-slate-500">Scan books into this shelf or assign existing volumes in the Catalog!</p>
+                <div className="p-12 text-center text-slate-500 dark:text-slate-400 border border-dashed border-slate-300 dark:border-slate-700 rounded-2xl space-y-2">
+                  <p className="text-xs font-semibold text-slate-800 dark:text-white">This shelf is currently empty.</p>
+                  <p className="text-[11px] text-slate-500">Scan books directly into this shelf or assign existing volumes in the Catalog.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                  {shelfVolumes.map((vol) => (
+                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+                  {shelfVolumes.map((vol, idx) => (
                     <div
                       key={vol.id}
-                      className="p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 flex flex-col justify-between space-y-2"
+                      className="bg-white dark:bg-slate-700/60 rounded-2xl p-2.5 shadow-2xs border border-slate-300 dark:border-slate-600 flex items-center justify-between gap-3 group"
                     >
-                      <div className="w-full aspect-[2/3] bg-white rounded-lg overflow-hidden border border-slate-200 flex items-center justify-center shadow-2xs">
-                        {vol.coverUrl ? (
-                          <img src={vol.coverUrl} alt="" className="w-full h-full object-cover" />
-                        ) : (
-                          <span className="text-2xl">📖</span>
-                        )}
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-12 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 shrink-0 border border-slate-200 dark:border-slate-600 flex items-center justify-center">
+                          {vol.coverUrl ? (
+                            <img src={vol.coverUrl} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-[9px] font-medium text-slate-500">BOOK</span>
+                          )}
+                        </div>
+
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                            {vol.title}
+                          </h4>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 font-normal truncate mt-0.5">
+                            {vol.author || "Unknown Author"}
+                          </p>
+                          <div className="flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400 font-normal mt-0.5">
+                            <span>{vol.deweyDecimal ? `DDC ${vol.deweyDecimal}` : "General"}</span>
+                            <span>•</span>
+                            <span className="text-emerald-700 dark:text-emerald-400 font-medium">
+                              {formatCurrency(vol.rareMarketValue || vol.replacementValue)}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="text-[11px] font-bold text-slate-900 line-clamp-2">{vol.title}</h4>
-                        <p className="text-[10px] text-slate-500 truncate mt-0.5">{vol.author || "Unknown"}</p>
-                      </div>
-                      <div className="pt-1.5 border-t border-slate-200 flex items-center justify-between text-[10px]">
-                        <span className="font-mono font-bold text-indigo-700">
-                          {vol.deweyDecimal ? `DDC ${vol.deweyDecimal}` : "--"}
-                        </span>
-                        <span className="font-bold text-emerald-700">{formatCurrency(vol.replacementValue)}</span>
+
+                      <div className="text-[10px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded-lg shrink-0">
+                        #{idx + 1}
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-            </SurfaceCard>
+            </div>
           ) : (
-            <SurfaceCard className="p-12 text-center text-slate-400 space-y-2">
-              <span className="text-4xl block">🗄️</span>
-              <p className="text-sm font-bold text-slate-700">Select a shelf location from the left</p>
-              <p className="text-xs text-slate-500">Click on any room or bookcase shelf to view all sitting volumes.</p>
-            </SurfaceCard>
+            <div className="p-12 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 text-center text-slate-500 space-y-1 shadow-xs">
+              <p className="text-xs font-semibold text-slate-800 dark:text-white">Select a shelf location from the left</p>
+              <p className="text-[11px] text-slate-500">Click on any shelf to browse all volumes sitting on that tier.</p>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Add Shelf Modal */}
+      {/* 5. Add Shelf Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <form
             onSubmit={handleCreateShelf}
-            className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-4 animate-scaleUp text-xs"
+            className="bg-[#f8fafc] dark:bg-slate-900 rounded-3xl border border-slate-300 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 space-y-4 animate-scaleUp text-xs"
           >
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                <span>🗄️</span> Create New Shelf Location
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                Create New Shelf Location
               </h3>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold"
+                className="text-slate-400 hover:text-slate-600 font-medium cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Room Name *</label>
-              <input
-                type="text"
-                required
-                value={roomName}
-                onChange={(e) => setRoomName(e.target.value)}
-                placeholder="e.g. Living Room, Study, Home Office"
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-medium"
-              />
-            </div>
-
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Bookcase / Unit *</label>
-              <input
-                type="text"
-                required
-                value={bookcaseName}
-                onChange={(e) => setBookcaseName(e.target.value)}
-                placeholder="e.g. Oak Bookcase A, North Wall Unit"
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-medium"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-3">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Shelf Level *</label>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Room Name *</label>
                 <input
                   type="text"
                   required
-                  value={shelfName}
-                  onChange={(e) => setShelfName(e.target.value)}
-                  placeholder="e.g. Shelf 1 (Top), Middle Shelf"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-medium"
+                  placeholder="e.g. Study Room, Living Room, Bedside TBR"
+                  value={roomName}
+                  onChange={(e) => setRoomName(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-400"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Bookcase *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. North Wall Case A"
+                    value={bookcaseName}
+                    onChange={(e) => setBookcaseName(e.target.value)}
+                    className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Shelf Tier *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Shelf 1 (Top)"
+                    value={shelfName}
+                    onChange={(e) => setShelfName(e.target.value)}
+                    className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Capacity (Books)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="500"
+                  value={capacity}
+                  onChange={(e) => setCapacity(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-400"
                 />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Capacity (Books)</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={capacity}
-                  onChange={(e) => setCapacity(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-medium"
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">Notes / Description (Optional)</label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. Vintage leatherbound fiction & philosophy"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-400"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Notes / Genre (Optional)</label>
-              <input
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g. Sci-Fi & Fantasy Hardcovers"
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-medium"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl"
+                className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 font-medium cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium rounded-xl transition cursor-pointer"
               >
-                {isSubmitting ? "Creating..." : "Create Shelf"}
+                {isSubmitting ? "Creating..." : "Create Shelf Location"}
               </button>
             </div>
           </form>
@@ -425,4 +518,3 @@ export default function LibraryShelvesPage() {
     </div>
   );
 }
-

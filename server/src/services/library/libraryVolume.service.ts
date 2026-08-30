@@ -5,6 +5,7 @@ import {
   resolveLocSubject,
   DEWEY_DIVISIONS,
 } from "./libraryClassification.service.js";
+import { ensureLibrarySpacesExist } from "./librarySpace.service.js";
 
 export interface CreateLibraryVolumeInput {
   isbn: string;
@@ -33,6 +34,17 @@ export interface CreateLibraryVolumeInput {
   rating?: number | null;
   personalNotes?: string | null;
   exLibrisTags?: string | null;
+  listingStatus?: "COLLECTION_ONLY" | "ALLOW_OFFERS" | "OPEN_FOR_TRADE" | "FOR_SALE";
+  askingPrice?: number | null;
+  minimumOffer?: number | null;
+  tradePreferences?: string | null;
+  isSigned?: boolean;
+  isFirstEdition?: boolean;
+  isFirstPrinting?: boolean;
+  rareMarketValue?: number | null;
+  valuationNotes?: string | null;
+  condition?: string;
+  librarySpaceId?: string | null;
   storeId?: string;
 }
 
@@ -43,6 +55,8 @@ export interface LibraryFilterOptions {
   shelfLocationId?: string;
   roomName?: string;
   readingStatus?: string;
+  condition?: string;
+  librarySpaceId?: string;
   isLoaned?: boolean;
   limit?: number;
   offset?: number;
@@ -96,6 +110,10 @@ export async function ensureLibraryTablesExist(): Promise<void> {
         "rating" INTEGER,
         "personalNotes" TEXT,
         "exLibrisTags" TEXT,
+        "listingStatus" TEXT NOT NULL DEFAULT 'COLLECTION_ONLY',
+        "askingPrice" REAL,
+        "minimumOffer" REAL,
+        "tradePreferences" TEXT,
         "isLoaned" BOOLEAN NOT NULL DEFAULT false,
         "borrowerName" TEXT,
         "borrowerContact" TEXT,
@@ -107,6 +125,57 @@ export async function ensureLibraryTablesExist(): Promise<void> {
         "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "LibraryOffer" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "volumeId" TEXT NOT NULL,
+        "offerType" TEXT NOT NULL DEFAULT 'CASH',
+        "offererType" TEXT NOT NULL DEFAULT 'COLLECTOR',
+        "offererId" TEXT,
+        "offererName" TEXT NOT NULL,
+        "offererEmail" TEXT NOT NULL,
+        "offererStoreName" TEXT,
+        "cashOfferAmount" REAL,
+        "offeredTradeItemsJson" TEXT,
+        "notes" TEXT,
+        "status" TEXT NOT NULL DEFAULT 'PENDING',
+        "counterAmount" REAL,
+        "counterNotes" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "LibraryNotification" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "title" TEXT NOT NULL,
+        "detail" TEXT NOT NULL,
+        "type" TEXT NOT NULL DEFAULT 'CATALOG',
+        "read" BOOLEAN NOT NULL DEFAULT false,
+        "actionUrl" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Dynamically ensure new columns exist in LibraryVolume
+    const migrations = [
+      `ALTER TABLE "LibraryVolume" ADD COLUMN "isSigned" BOOLEAN NOT NULL DEFAULT 0;`,
+      `ALTER TABLE "LibraryVolume" ADD COLUMN "isFirstEdition" BOOLEAN NOT NULL DEFAULT 0;`,
+      `ALTER TABLE "LibraryVolume" ADD COLUMN "isFirstPrinting" BOOLEAN NOT NULL DEFAULT 0;`,
+      `ALTER TABLE "LibraryVolume" ADD COLUMN "rareMarketValue" REAL;`,
+      `ALTER TABLE "LibraryVolume" ADD COLUMN "valuationNotes" TEXT;`,
+      `ALTER TABLE "LibraryVolume" ADD COLUMN "listingStatus" TEXT NOT NULL DEFAULT 'COLLECTION_ONLY';`,
+      `ALTER TABLE "LibraryVolume" ADD COLUMN "askingPrice" REAL;`,
+      `ALTER TABLE "LibraryVolume" ADD COLUMN "minimumOffer" REAL;`,
+      `ALTER TABLE "LibraryVolume" ADD COLUMN "tradePreferences" TEXT;`,
+      `ALTER TABLE "LibraryVolume" ADD COLUMN "condition" TEXT NOT NULL DEFAULT 'VERY_GOOD';`,
+    ];
+
+    for (const sql of migrations) {
+      await prisma.$executeRawUnsafe(sql).catch(() => null);
+    }
   } catch (err) {
     console.warn("Library tables ensure warning:", err);
   }
@@ -161,6 +230,13 @@ export async function createLibraryVolume(input: CreateLibraryVolumeInput) {
     }
   }
 
+  let librarySpaceId = input.librarySpaceId || null;
+  if (!librarySpaceId) {
+    const defaultSpace = await prisma.librarySpace.findFirst({ where: { isDefault: true } }) ||
+      await prisma.librarySpace.findFirst();
+    if (defaultSpace) librarySpaceId = defaultSpace.id;
+  }
+
   return prisma.libraryVolume.create({
     data: {
       isbn: input.isbn.replace(/[^0-9X]/gi, "").toUpperCase(),
@@ -183,17 +259,29 @@ export async function createLibraryVolume(input: CreateLibraryVolumeInput) {
       bookcaseName: bookcase,
       shelfName: shelf,
       shelfLocationId: input.shelfLocationId || null,
+      librarySpaceId: librarySpaceId,
       replacementValue: Number(finalValue.toFixed(2)),
+      rareMarketValue: input.rareMarketValue !== undefined ? input.rareMarketValue : null,
+      valuationNotes: input.valuationNotes || null,
+      condition: input.condition || "VERY_GOOD",
+      isSigned: Boolean(input.isSigned),
+      isFirstEdition: Boolean(input.isFirstEdition),
+      isFirstPrinting: Boolean(input.isFirstPrinting),
       acquisitionPrice: input.acquisitionPrice ? Number(input.acquisitionPrice.toFixed(2)) : null,
       acquisitionDate: input.acquisitionDate ? new Date(input.acquisitionDate) : new Date(),
       readingStatus: input.readingStatus || "UNREAD",
       rating: input.rating || null,
       personalNotes: input.personalNotes || null,
       exLibrisTags: input.exLibrisTags || null,
+      listingStatus: input.listingStatus || "COLLECTION_ONLY",
+      askingPrice: input.askingPrice || null,
+      minimumOffer: input.minimumOffer || null,
+      tradePreferences: input.tradePreferences || null,
       storeId: input.storeId || "ghostlight-demo",
     },
     include: {
       shelfLocation: true,
+      librarySpace: true,
     },
   });
 }
@@ -222,8 +310,18 @@ export async function scanAndIntakeVolume(
     pageCount: enrichment.pageCount,
     bindingFormat: enrichment.bindingFormat,
     replacementValue: customData?.replacementValue || enrichment.replacementValue,
+    rareMarketValue: customData?.rareMarketValue !== undefined ? customData.rareMarketValue : (enrichment.replacementValue || null),
+    valuationNotes: customData?.valuationNotes || null,
+    condition: customData?.condition || "VERY_GOOD",
+    isSigned: customData?.isSigned || false,
+    isFirstEdition: customData?.isFirstEdition || false,
+    isFirstPrinting: customData?.isFirstPrinting || false,
     shelfLocationId: shelfLocationId || null,
+    librarySpaceId: customData?.librarySpaceId || null,
     readingStatus: customData?.readingStatus || "UNREAD",
+    listingStatus: customData?.listingStatus || "COLLECTION_ONLY",
+    askingPrice: customData?.askingPrice || null,
+    tradePreferences: customData?.tradePreferences || null,
     personalNotes: customData?.personalNotes || null,
     exLibrisTags: customData?.exLibrisTags || null,
     storeId: customData?.storeId || "ghostlight-demo",
@@ -249,6 +347,10 @@ export async function listLibraryVolumes(filters: LibraryFilterOptions = {}) {
     ];
   }
 
+  if (filters.librarySpaceId && filters.librarySpaceId !== "ALL") {
+    where.librarySpaceId = filters.librarySpaceId;
+  }
+
   if (filters.deweyPrefix) {
     where.deweyDecimal = { startsWith: filters.deweyPrefix };
   }
@@ -269,6 +371,10 @@ export async function listLibraryVolumes(filters: LibraryFilterOptions = {}) {
     where.readingStatus = filters.readingStatus;
   }
 
+  if (filters.condition) {
+    where.condition = filters.condition;
+  }
+
   if (typeof filters.isLoaned === "boolean") {
     where.isLoaned = filters.isLoaned;
   }
@@ -279,7 +385,7 @@ export async function listLibraryVolumes(filters: LibraryFilterOptions = {}) {
       where,
       include: { shelfLocation: true },
       orderBy: { createdAt: "desc" },
-      take: filters.limit || 100,
+      take: filters.limit || 50,
       skip: filters.offset || 0,
     }),
   ]);
@@ -299,7 +405,6 @@ export async function updateLibraryVolume(id: string, data: Partial<CreateLibrar
   await ensureLibraryTablesExist();
 
   const updatePayload: Record<string, any> = {};
-
   if (data.title !== undefined) updatePayload.title = data.title;
   if (data.author !== undefined) updatePayload.author = data.author;
   if (data.publisher !== undefined) updatePayload.publisher = data.publisher;
@@ -316,11 +421,22 @@ export async function updateLibraryVolume(id: string, data: Partial<CreateLibrar
   if (data.pageCount !== undefined) updatePayload.pageCount = data.pageCount;
   if (data.bindingFormat !== undefined) updatePayload.bindingFormat = data.bindingFormat;
   if (data.replacementValue !== undefined) updatePayload.replacementValue = data.replacementValue;
+  if (data.rareMarketValue !== undefined) updatePayload.rareMarketValue = data.rareMarketValue;
+  if (data.valuationNotes !== undefined) updatePayload.valuationNotes = data.valuationNotes;
+  if (data.isSigned !== undefined) updatePayload.isSigned = Boolean(data.isSigned);
+  if (data.isFirstEdition !== undefined) updatePayload.isFirstEdition = Boolean(data.isFirstEdition);
+  if (data.isFirstPrinting !== undefined) updatePayload.isFirstPrinting = Boolean(data.isFirstPrinting);
   if (data.acquisitionPrice !== undefined) updatePayload.acquisitionPrice = data.acquisitionPrice;
   if (data.readingStatus !== undefined) updatePayload.readingStatus = data.readingStatus;
   if (data.rating !== undefined) updatePayload.rating = data.rating;
   if (data.personalNotes !== undefined) updatePayload.personalNotes = data.personalNotes;
   if (data.exLibrisTags !== undefined) updatePayload.exLibrisTags = data.exLibrisTags;
+  if (data.listingStatus !== undefined) updatePayload.listingStatus = data.listingStatus;
+  if (data.askingPrice !== undefined) updatePayload.askingPrice = data.askingPrice;
+  if (data.minimumOffer !== undefined) updatePayload.minimumOffer = data.minimumOffer;
+  if (data.tradePreferences !== undefined) updatePayload.tradePreferences = data.tradePreferences;
+  if (data.condition !== undefined) updatePayload.condition = data.condition;
+  if (data.librarySpaceId !== undefined) updatePayload.librarySpaceId = data.librarySpaceId;
 
   if (data.shelfLocationId !== undefined) {
     updatePayload.shelfLocationId = data.shelfLocationId;
@@ -347,7 +463,25 @@ export async function updateLibraryVolume(id: string, data: Partial<CreateLibrar
 
 export async function deleteLibraryVolume(id: string) {
   await ensureLibraryTablesExist();
+  await prisma.$executeRawUnsafe(`DELETE FROM "LibraryOffer" WHERE "volumeId" = ?`, id).catch(() => null);
+  await prisma.$executeRawUnsafe(`DELETE FROM "LibraryLoan" WHERE "volumeId" = ?`, id).catch(() => null);
   return prisma.libraryVolume.delete({ where: { id } });
+}
+
+export async function bulkDeleteLibraryVolumes(ids: string[]) {
+  await ensureLibraryTablesExist();
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return { count: 0 };
+  }
+  for (const id of ids) {
+    await prisma.$executeRawUnsafe(`DELETE FROM "LibraryOffer" WHERE "volumeId" = ?`, id).catch(() => null);
+    await prisma.$executeRawUnsafe(`DELETE FROM "LibraryLoan" WHERE "volumeId" = ?`, id).catch(() => null);
+  }
+  return prisma.libraryVolume.deleteMany({
+    where: {
+      id: { in: ids },
+    },
+  });
 }
 
 // Shelves Management
@@ -594,3 +728,4 @@ export async function generateValuationReport(storeId = "ghostlight-demo") {
     volumes,
   };
 }
+

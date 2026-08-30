@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b" />
+      <stop offset="50%" stop-color="#312e81" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="bookGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="50%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e0e7ff" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#c7d2fe" stop-opacity="0.2" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.5" />
+    </filter>
+  </defs>
+
+  <!-- Background App Rounded Tile -->
+  <rect width="512" height="512" rx="115" fill="url(#bgGrad)" />
+  <rect width="504" height="504" x="4" y="4" rx="111" fill="none" stroke="#6366f1" stroke-opacity="0.3" stroke-width="4" />
+
+  <!-- Library Pillars / Emblem Icon -->
+  <g filter="url(#shadow)">
+    <!-- Base Foundation -->
+    <rect x="96" y="380" width="320" height="24" rx="8" fill="#a5b4fc" />
+    <rect x="76" y="404" width="360" height="20" rx="6" fill="#818cf8" />
+
+    <!-- Columns (Pillars) -->
+    <rect x="120" y="190" width="36" height="190" rx="6" fill="url(#bookGrad)" />
+    <rect x="190" y="190" width="36" height="190" rx="6" fill="url(#bookGrad)" />
+    <rect x="286" y="190" width="36" height="190" rx="6" fill="url(#bookGrad)" />
+    <rect x="356" y="190" width="36" height="190" rx="6" fill="url(#bookGrad)" />
+
+    <!-- Open Book in Center -->
+    <path d="M 256 160 Q 200 130 140 145 L 140 330 Q 200 315 256 345 Q 312 315 372 330 L 372 145 Q 312 130 256 160 Z" fill="url(#glowGrad)" stroke="#ffffff" stroke-width="4" />
+    <line x1="256" y1="160" x2="256" y2="345" stroke="#4f46e5" stroke-width="5" stroke-linecap="round" />
+
+    <!-- Pediment (Triangular Top) -->
+    <polygon points="256,76 80,166 432,166" fill="#e0e7ff" />
+    <polygon points="256,92 104,166 408,166" fill="url(#accentGrad)" opacity="0.4" />
+
+    <!-- Central Camera Scanner Laser Ring Emblem -->
+    <circle cx="256" cy="130" r="18" fill="#4f46e5" stroke="#ffffff" stroke-width="3" />
+    <circle cx="256" cy="130" r="8" fill="#38bdf8" />
+  </g>
+</svg>
+

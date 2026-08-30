@@ -3,6 +3,7 @@ import { lookupAbeBooksPrice } from "./abebooksScraper.service.js";
 import { lookupThriftbooksDetails } from "./thriftbooksScraper.service.js";
 import { lookupIsbndb, extractGenreAndCategory } from "./isbndb.service.js";
 import { resolveBookDimensions, queryGoogleBooksDimensions } from "./isbn/dimensions.service.js";
+import { resolveBestCoverUrl, fetchAllWorkingCoverCandidates } from "./isbn/coverFetcher.service.js";
 import { autoSelectShippingRate, quoteAllShippingRates } from "./shipping/shippingRate.service.js";
 import type { PackageType, ShippingRateQuote, UspsShippingService } from "@colophon/shared";
 
@@ -508,7 +509,12 @@ async function lookupOpenLibrary(isbn: string): Promise<BookLookup | null> {
     description,
     ...seo,
     catalogTags: classification.tags.join(", ") || null,
-    coverUrl: edition.covers?.[0] ? `https://covers.openlibrary.org/b/id/${edition.covers[0]}-L.jpg` : null,
+    coverUrl: (await resolveBestCoverUrl({
+      isbn,
+      title: firstString(edition.title) || undefined,
+      author: author || undefined,
+      openLibCoverId: edition.covers?.[0],
+    })) || null,
     quantityOnHand: 0,
     thriftbooksPrice: null,
     category: classification.category,

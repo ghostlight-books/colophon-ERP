@@ -1,0 +1,26 @@
+<svg id="Capa_1" enable-background="new 0 0 512 512" height="512" viewBox="0 0 512 512" width="512" xmlns="http://www.w3.org/2000/svg">
+  <g fill="currentColor">
+    <!-- Viewfinder Corners (Haptic scan frame) -->
+    <!-- Top-Left -->
+    <path d="M40 140c-8.28 0-15-6.72-15-15V65C25 42.94 42.94 25 65 25h60c8.28 0 15 6.72 15 15s-6.72 15-15 15H65c-6.62 0-12 5.38-12 12v60c0 8.28-6.72 15-15 15z"/>
+    <!-- Top-Right -->
+    <path d="M472 140c-8.28 0-15-6.72-15-15V67c0-6.62-5.38-12-12-12h-60c-8.28 0-15-6.72-15-15s6.72-15 15-15h60c22.06 0 40 17.94 40 40v60c0 8.28-6.72 15-15 15z"/>
+    <!-- Bottom-Left -->
+    <path d="M125 487H65c-22.06 0-40-17.94-40-40v-60c0-8.28 6.72-15 15-15s15 6.72 15 15v60c0 6.62 5.38 12 12 12h60c8.28 0 15 6.72 15 15s-6.72 15-15 15z"/>
+    <!-- Bottom-Right -->
+    <path d="M472 487c-8.28 0-15-6.72-15-15v-60c0-8.28 6.72-15 15-15s15 6.72 15 15v60c0 6.62-5.38 12-12 12h-60c-8.28 0-15-6.72-15-15s6.72-15 15-15h60c22.06 0 40 17.94 40 40z"/>
+
+    <!-- Barcode Vertical Bars -->
+    <rect x="90" y="110" width="22" height="292" rx="6"/>
+    <rect x="136" y="110" width="12" height="292" rx="4"/>
+    <rect x="172" y="110" width="34" height="292" rx="8"/>
+    <rect x="230" y="110" width="16" height="292" rx="5"/>
+    <rect x="268" y="110" width="26" height="292" rx="7"/>
+    <rect x="316" y="110" width="12" height="292" rx="4"/>
+    <rect x="350" y="110" width="32" height="292" rx="8"/>
+    <rect x="402" y="110" width="20" height="292" rx="6"/>
+
+    <!-- Horizontal Laser Scanning Beam with Glow Accents -->
+    <path d="M45 256c0-8.28 6.72-15 15-15h392c8.28 0 15 6.72 15 15s-6.72 15-15 15H60c-8.28 0-15-6.72-15-15z" opacity="0.9"/>
+  </g>
+</svg>

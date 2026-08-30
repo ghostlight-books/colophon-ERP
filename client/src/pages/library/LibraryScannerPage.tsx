@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import SurfaceCard from "../../components/ui/SurfaceCard";
+import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
+import { useLibrarySpace } from "../../context/LibrarySpaceContext";
 import {
   scanLibraryIsbn,
   fetchShelves,
+  deleteLibraryVolume,
+  bulkDeleteLibraryVolumes,
+  updateLibraryVolume,
+  evaluateRareBookPricing,
   type LibraryVolume,
   type LibraryShelfLocation,
+  type RarePricingResult,
 } from "../../services/library.service";
 
 function formatCurrency(amount: number | null | undefined): string {
@@ -31,6 +39,7 @@ function playScanChime() {
 }
 
 export default function LibraryScannerPage() {
+  const { activeSpace, activeSpaceId } = useLibrarySpace();
   const [isbnInput, setIsbnInput] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
@@ -45,6 +54,15 @@ export default function LibraryScannerPage() {
   const [lastScanned, setLastScanned] = useState<LibraryVolume | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Rare Attributes & Collectible Pricing State
+  const [condition, setCondition] = useState<"FINE" | "VERY_GOOD" | "GOOD" | "FAIR" | "POOR">("VERY_GOOD");
+  const [isSigned, setIsSigned] = useState(false);
+  const [isFirstEdition, setIsFirstEdition] = useState(false);
+  const [isFirstPrinting, setIsFirstPrinting] = useState(false);
+  const [takeOffers, setTakeOffers] = useState(false);
+  const [evaluatingPricing, setEvaluatingPricing] = useState(false);
+  const [rarePricing, setRarePricing] = useState<RarePricingResult | null>(null);
 
   // Video feed ref
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -143,9 +161,17 @@ export default function LibraryScannerPage() {
     setIsScanning(true);
     setErrorMessage(null);
     setSuccessMessage(null);
+    setIsSigned(false);
+    setIsFirstEdition(false);
+    setIsFirstPrinting(false);
+    setTakeOffers(false);
+    setRarePricing(null);
 
     try {
-      const volume = await scanLibraryIsbn(clean, selectedShelfId || null);
+      const volume = await scanLibraryIsbn(clean, selectedShelfId || null, {
+        librarySpaceId: activeSpaceId !== "ALL" ? activeSpaceId : undefined,
+        condition,
+      });
       playScanChime();
       setLastScanned(volume);
       setSessionVolumes((prev) => [volume, ...prev]);
@@ -158,10 +184,133 @@ export default function LibraryScannerPage() {
     }
   };
 
+  const handleToggleSpecialOption = async (option: "signed" | "firstEd" | "firstPrint" | "offers") => {
+    if (!lastScanned) return;
+
+    let nextSigned = isSigned;
+    let nextFirstEd = isFirstEdition;
+    let nextFirstPrint = isFirstPrinting;
+    let nextOffers = takeOffers;
+
+    if (option === "signed") {
+      nextSigned = !isSigned;
+      setIsSigned(nextSigned);
+    } else if (option === "firstEd") {
+      nextFirstEd = !isFirstEdition;
+      setIsFirstEdition(nextFirstEd);
+    } else if (option === "firstPrint") {
+      nextFirstPrint = !isFirstPrinting;
+      setIsFirstPrinting(nextFirstPrint);
+    } else if (option === "offers") {
+      nextOffers = !takeOffers;
+      setTakeOffers(nextOffers);
+      await updateLibraryVolume(lastScanned.id, {
+        listingStatus: nextOffers ? "ALLOW_OFFERS" : "COLLECTION_ONLY",
+      });
+      return;
+    }
+
+    setEvaluatingPricing(true);
+    try {
+      const evaluation = await evaluateRareBookPricing({
+        isbn: lastScanned.isbn,
+        title: lastScanned.title,
+        author: lastScanned.author || undefined,
+        condition,
+        isSigned: nextSigned,
+        isFirstEdition: nextFirstEd,
+        isFirstPrinting: nextFirstPrint,
+        baselinePrice: lastScanned.replacementValue || 18.99,
+        publishYear: lastScanned.publishYear,
+        bindingFormat: lastScanned.bindingFormat,
+      });
+
+      setRarePricing(evaluation);
+      await updateLibraryVolume(lastScanned.id, {
+        condition,
+        isSigned: nextSigned,
+        isFirstEdition: nextFirstEd,
+        isFirstPrinting: nextFirstPrint,
+        rareMarketValue: evaluation.rareMarketValue,
+        askingPrice: evaluation.suggestedAskingPrice,
+        valuationNotes: evaluation.valuationRationale,
+      });
+    } catch (err) {
+      console.warn("Pricing evaluation error:", err);
+    } finally {
+      setEvaluatingPricing(false);
+    }
+  };
+
+  const handleConditionChange = async (nextCondition: "FINE" | "VERY_GOOD" | "GOOD" | "FAIR" | "POOR") => {
+    setCondition(nextCondition);
+    if (!lastScanned) return;
+
+    setEvaluatingPricing(true);
+    try {
+      const evaluation = await evaluateRareBookPricing({
+        isbn: lastScanned.isbn,
+        title: lastScanned.title,
+        author: lastScanned.author || undefined,
+        condition: nextCondition,
+        isSigned,
+        isFirstEdition,
+        isFirstPrinting,
+        baselinePrice: lastScanned.replacementValue || 18.99,
+        publishYear: lastScanned.publishYear,
+        bindingFormat: lastScanned.bindingFormat,
+      });
+
+      setRarePricing(evaluation);
+      await updateLibraryVolume(lastScanned.id, {
+        condition: nextCondition,
+        rareMarketValue: evaluation.rareMarketValue,
+        askingPrice: evaluation.suggestedAskingPrice,
+        valuationNotes: evaluation.valuationRationale,
+      });
+    } catch (err) {
+      console.warn("Condition evaluation error:", err);
+    } finally {
+      setEvaluatingPricing(false);
+    }
+  };
+
   const handleManualSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (isbnInput.trim()) {
       void handleProcessIsbn(isbnInput);
+    }
+  };
+
+  const handleRemoveVolume = async (vol: LibraryVolume) => {
+    try {
+      await deleteLibraryVolume(vol.id);
+      setSessionVolumes((prev) => prev.filter((v) => v.id !== vol.id));
+      if (lastScanned?.id === vol.id) {
+        setLastScanned(null);
+      }
+      setSuccessMessage(`Removed "${vol.title}" from library.`);
+      setErrorMessage(null);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Failed to remove volume.");
+    }
+  };
+
+  const handleDeleteAllSessionVolumes = async () => {
+    if (sessionVolumes.length === 0) return;
+    const confirmed = window.confirm(
+      `Remove all ${sessionVolumes.length} volumes scanned this session from your library collection?`
+    );
+    if (!confirmed) return;
+    try {
+      await bulkDeleteLibraryVolumes(sessionVolumes.map((v) => v.id));
+      const count = sessionVolumes.length;
+      setSessionVolumes([]);
+      setLastScanned(null);
+      setSuccessMessage(`Removed ${count} session volumes from library.`);
+      setErrorMessage(null);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Failed to remove session volumes.");
     }
   };
 
@@ -177,15 +326,27 @@ export default function LibraryScannerPage() {
               📷
             </div>
             <div>
-              <h1 className="text-xl font-black text-slate-900 tracking-tight">Camera & ISBN Library Scanner</h1>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl font-black text-slate-900 tracking-tight">
+                  {activeSpaceId === "ALL" ? "All Libraries" : activeSpace?.name || "Library"} Scanner
+                </h1>
+                <LibrarySpaceSwitcher />
+              </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Scan barcodes with device camera to extract Dewey Decimal, LOC Call Numbers, Cover Images & Replacement Valuation
+                Scanning books into <span className="font-bold text-slate-700">{activeSpace?.name || "Primary Library"}</span> &bull; auto-extracts Dewey Decimal, LOC Call Numbers, Cover Images & Rare Valuations
               </p>
             </div>
           </div>
 
-          {/* Session totals pill */}
+          {/* Session totals pill & Quick Scanner Link */}
           <div className="flex items-center gap-3">
+            <Link
+              to="/library/quick-scan"
+              className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 transition"
+            >
+              <span>📱</span>
+              <span>Quick Phone Scanner</span>
+            </Link>
             <div className="px-3.5 py-1.5 bg-indigo-50 rounded-xl border border-indigo-200 text-xs font-bold text-indigo-800">
               Session Scans: <span className="text-indigo-950 font-black">{sessionVolumes.length}</span>
             </div>
@@ -374,7 +535,18 @@ export default function LibraryScannerPage() {
               </span>
               <h2 className="text-sm font-bold text-slate-900">Volume Details & Classification</h2>
             </div>
-            <span className="text-xs font-mono font-bold text-slate-500">ISBN: {lastScanned.isbn}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-mono font-bold text-slate-500">ISBN: {lastScanned.isbn}</span>
+              <button
+                type="button"
+                onClick={() => handleRemoveVolume(lastScanned)}
+                className="px-3 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                title="Remove this book from library"
+              >
+                <span>🗑️</span>
+                <span>Remove (Undo Scan)</span>
+              </button>
+            </div>
           </div>
 
           <div className="flex flex-col md:flex-row gap-5 items-start">
@@ -415,12 +587,138 @@ export default function LibraryScannerPage() {
                   </span>
                 )}
                 <span className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg font-bold">
-                  Insurance Value: {formatCurrency(lastScanned.replacementValue)}
+                  Standard Insurance Value: {formatCurrency(lastScanned.replacementValue)}
                 </span>
                 {lastScanned.roomName && (
                   <span className="px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 rounded-lg font-medium">
                     📍 {lastScanned.roomName} &gt; {lastScanned.shelfName}
                   </span>
+                )}
+              </div>
+
+              {/* Book Condition Selector */}
+              <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+                <span className="text-xs font-bold text-slate-700 block">Condition Grade:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { key: "FINE", label: "💎 Fine / Like New" },
+                    { key: "VERY_GOOD", label: "✨ Very Good" },
+                    { key: "GOOD", label: "📖 Good" },
+                    { key: "FAIR", label: "📑 Fair" },
+                    { key: "POOR", label: "🩹 Poor" },
+                  ].map((c) => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => handleConditionChange(c.key as any)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                        condition === c.key
+                          ? "bg-indigo-600 border-indigo-500 text-white shadow-xs"
+                          : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Special Edition Toggles (Signed, 1st Ed, 1st Print, Take Offers) */}
+              <div className="pt-2 border-t border-slate-200/80 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                  <span className="flex items-center gap-1.5">
+                    <span>🏷️</span>
+                    <span>Special Attributes (Auto Re-Scrapes Rare Market):</span>
+                  </span>
+
+                  {evaluatingPricing && (
+                    <span className="text-indigo-600 font-bold flex items-center gap-1 text-[11px]">
+                      <div className="w-3 h-3 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                      <span>Re-evaluating AbeBooks & Rare Auctions...</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSpecialOption("signed")}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      isSigned
+                        ? "bg-amber-100 border-amber-300 text-amber-900 shadow-xs"
+                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span>✨</span>
+                    <span>Signed Copy</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSpecialOption("firstEd")}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      isFirstEdition
+                        ? "bg-indigo-100 border-indigo-300 text-indigo-900 shadow-xs"
+                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span>🥇</span>
+                    <span>First Edition</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSpecialOption("firstPrint")}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      isFirstPrinting
+                        ? "bg-purple-100 border-purple-300 text-purple-900 shadow-xs"
+                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span>🔢</span>
+                    <span>1st Printing</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSpecialOption("offers")}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      takeOffers
+                        ? "bg-emerald-100 border-emerald-300 text-emerald-900 shadow-xs"
+                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span>🤝</span>
+                    <span>Take Offers / Open to Trade</span>
+                  </button>
+                </div>
+
+                {/* Rare Appraised Pricing Card Banner */}
+                {(isSigned || isFirstEdition || isFirstPrinting || rarePricing) && (
+                  <div className="p-3 bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-indigo-500/10 rounded-xl border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 bg-amber-200 text-amber-900 font-bold rounded text-[10px]">
+                          Rare Collectible Appraisal
+                        </span>
+                        <span className="font-mono font-black text-amber-900 text-sm">
+                          {formatCurrency(rarePricing?.rareMarketValue || lastScanned.rareMarketValue || lastScanned.replacementValue)}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600">
+                        {rarePricing?.valuationRationale || "Appraised based on collectible attributes and verified AbeBooks comps."}
+                      </p>
+                    </div>
+
+                    {rarePricing?.suggestedAskingPrice && (
+                      <div className="shrink-0 text-right">
+                        <span className="text-[10px] text-slate-500 block">Suggested Asking Price</span>
+                        <span className="font-mono font-black text-emerald-700 text-sm">
+                          {formatCurrency(rarePricing.suggestedAskingPrice)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -436,9 +734,22 @@ export default function LibraryScannerPage() {
       {sessionVolumes.length > 0 && (
         <SurfaceCard className="space-y-4">
           <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
-            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <span>📋</span> Current Scanning Session Log ({sessionVolumes.length} Volumes)
-            </h2>
+            <div className="flex items-center gap-2">
+              <span className="text-base">📋</span>
+              <h2 className="text-sm font-bold text-slate-900">
+                Current Scanning Session Log ({sessionVolumes.length} Volumes &bull; Total Value: {formatCurrency(totalSessionValue)})
+              </h2>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleDeleteAllSessionVolumes}
+                className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition cursor-pointer"
+              >
+                🗑️ Delete All Scanned ({sessionVolumes.length})
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -452,6 +763,7 @@ export default function LibraryScannerPage() {
                   <th className="py-2.5 px-3">LOC Call #</th>
                   <th className="py-2.5 px-3">Shelf Location</th>
                   <th className="py-2.5 px-3 text-right">Replacement Value</th>
+                  <th className="py-2.5 px-3 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -482,6 +794,17 @@ export default function LibraryScannerPage() {
                     </td>
                     <td className="py-2 px-3 text-right font-bold text-emerald-700">
                       {formatCurrency(vol.replacementValue)}
+                    </td>
+                    <td className="py-2 px-3 text-center">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveVolume(vol)}
+                        title={`Remove "${vol.title}" from library`}
+                        className="px-2 py-1 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-500 rounded-lg text-[11px] font-bold transition flex items-center gap-1 mx-auto cursor-pointer"
+                      >
+                        <span>🗑️</span>
+                        <span>Remove</span>
+                      </button>
                     </td>
                   </tr>
                 ))}

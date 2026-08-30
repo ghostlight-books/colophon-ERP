@@ -649,9 +649,17 @@ model LibraryVolume {
   shelfName             String?
   shelfLocationId       String?
   shelfLocation         LibraryShelfLocation? @relation(fields: [shelfLocationId], references: [id], onDelete: SetNull)
+  librarySpaceId        String?
+  librarySpace          LibrarySpace?         @relation(fields: [librarySpaceId], references: [id], onDelete: SetNull)
 
   // Valuation & Personal Cataloging
   replacementValue      Float                 @default(0.0)
+  rareMarketValue       Float?
+  valuationNotes        String?
+  condition             String                @default("VERY_GOOD") // "FINE" | "VERY_GOOD" | "GOOD" | "FAIR" | "POOR"
+  isSigned              Boolean               @default(false)
+  isFirstEdition        Boolean               @default(false)
+  isFirstPrinting       Boolean               @default(false)
   acquisitionPrice      Float?
   acquisitionDate       DateTime?
   readingStatus         String                @default("UNREAD") // "UNREAD" | "READING" | "COMPLETED" | "WISHLIST"
@@ -667,6 +675,13 @@ model LibraryVolume {
   dueDate               DateTime?
   returnDate            DateTime?
 
+  // Exchange & Offers Marketplace
+  listingStatus         String                @default("COLLECTION_ONLY") // "COLLECTION_ONLY" | "ALLOW_OFFERS" | "OPEN_FOR_TRADE" | "FOR_SALE"
+  askingPrice           Float?
+  minimumOffer          Float?
+  tradePreferences      String?
+  offers                LibraryOffer[]
+
   storeId               String?
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
@@ -678,7 +693,28 @@ model LibraryVolume {
   @@index([locClassification])
   @@index([readingStatus])
   @@index([isLoaned])
+  @@index([listingStatus])
   @@index([shelfLocationId])
+  @@index([librarySpaceId])
+}
+
+model LibrarySpace {
+  id                    String                @id @default(uuid())
+  name                  String                // e.g. "Main Library", "Downtown Law Office", "Home Study", "Cabin"
+  slug                  String?
+  description           String?
+  location              String?               // e.g. "Suite 400", "Residence, 2nd Floor"
+  icon                  String?               @default("🏛️")
+  color                 String?               @default("#6366f1")
+  isDefault             Boolean               @default(false)
+  storeId               String?               @default("ghostlight-demo")
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  volumes               LibraryVolume[]
+  shelves               LibraryShelfLocation[]
+
+  @@index([storeId])
 }
 
 model LibraryShelfLocation {
@@ -690,12 +726,51 @@ model LibraryShelfLocation {
   description           String?
   capacity              Int?                  @default(30)
   storeId               String?
+  librarySpaceId        String?
+  librarySpace          LibrarySpace?         @relation(fields: [librarySpaceId], references: [id], onDelete: SetNull)
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
   volumes               LibraryVolume[]
 
   @@unique([roomName, bookcaseName, shelfName])
   @@index([roomName])
+  @@index([librarySpaceId])
+}
+
+model LibraryOffer {
+  id                    String                @id @default(uuid())
+  volumeId              String
+  volume                LibraryVolume         @relation(fields: [volumeId], references: [id], onDelete: Cascade)
+  offerType             String                @default("CASH") // "CASH" | "TRADE" | "BOOKSTORE_BUY_OFFER"
+  offererType           String                @default("COLLECTOR") // "COLLECTOR" | "BOOKSTORE"
+  offererId             String?
+  offererName           String
+  offererEmail          String
+  offererStoreName      String?
+  cashOfferAmount       Float?
+  offeredTradeItemsJson String?               // JSON array of offered book items or description
+  notes                 String?
+  status                String                @default("PENDING") // "PENDING" | "ACCEPTED" | "COUNTERED" | "DECLINED" | "COMPLETED"
+  counterAmount         Float?
+  counterNotes          String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@index([volumeId])
+  @@index([status])
+  @@index([offererEmail])
+}
+
+model LibraryNotification {
+  id                    String                @id @default(uuid())
+  title                 String
+  detail                String
+  type                  String                @default("CATALOG") // "OFFER" | "TRADE" | "LOAN_DUE" | "CATALOG"
+  read                  Boolean               @default(false)
+  actionUrl             String?
+  createdAt             DateTime              @default(now())
+
+  @@index([read, createdAt])
 }
 
 

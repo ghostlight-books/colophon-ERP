@@ -37,6 +37,7 @@ import {
   getLibraryVolume,
   updateLibraryVolume,
   deleteLibraryVolume,
+  bulkDeleteLibraryVolumes,
   listShelfLocations,
   createShelfLocation,
   deleteShelfLocation,
@@ -45,7 +46,29 @@ import {
   getLibraryDashboardSummary,
   generateValuationReport,
 } from "./services/library/libraryVolume.service.js";
+import {
+  listLibrarySpaces,
+  getLibrarySpace,
+  createLibrarySpace,
+  updateLibrarySpace,
+  deleteLibrarySpace,
+} from "./services/library/librarySpace.service.js";
 import { enrichLibraryClassification } from "./services/library/libraryClassification.service.js";
+import {
+  resolveBestCoverUrl,
+  fetchAllWorkingCoverCandidates,
+} from "./services/isbn/coverFetcher.service.js";
+import {
+  listExchangeMarketplace,
+  submitLibraryOffer,
+  listIncomingLibraryOffers,
+  respondToLibraryOffer,
+  getLibraryNotifications,
+  markLibraryNotificationRead,
+  markAllLibraryNotificationsRead,
+  getLibraryCollectionHealth,
+} from "./services/library/libraryExchange.service.js";
+import { evaluateRareBookPricing } from "./services/library/libraryRarePricing.service.js";
 
 type OpsConnector = {
   key: string;
@@ -1882,6 +1905,11 @@ export function createApp(): express.Express {
         message: `Successfully synced ${syncedCount} of ${activeBundles.length} active bundles to Shopify.`,
       });
     } catch (error) {
+      console.error("Sync all bundles to Shopify error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to sync bundles to Shopify." });
+    }
+  });
+
   // ==========================================
   // COLOPHON LIBRARY EDITION ROUTES
   // ==========================================
@@ -1898,6 +1926,62 @@ export function createApp(): express.Express {
     }
   });
 
+  // Library Spaces (Multi-Library Management)
+  app.get("/api/library/spaces", async (_req, res) => {
+    try {
+      const spaces = await listLibrarySpaces();
+      res.json(spaces);
+    } catch (error) {
+      console.error("List library spaces error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list library spaces." });
+    }
+  });
+
+  app.post("/api/library/spaces", async (req, res) => {
+    try {
+      const { name, description, location, icon, color, isDefault } = req.body || {};
+      if (!name || typeof name !== "string") {
+        return res.status(400).json({ error: "Library name is required." });
+      }
+      const space = await createLibrarySpace({ name, description, location, icon, color, isDefault });
+      res.json(space);
+    } catch (error) {
+      console.error("Create library space error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to create library space." });
+    }
+  });
+
+  app.get("/api/library/spaces/:id", async (req, res) => {
+    try {
+      const space = await getLibrarySpace(req.params.id);
+      if (!space) return res.status(404).json({ error: "Library space not found." });
+      res.json(space);
+    } catch (error) {
+      console.error("Get library space error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to get library space." });
+    }
+  });
+
+  app.patch("/api/library/spaces/:id", async (req, res) => {
+    try {
+      const updated = await updateLibrarySpace(req.params.id, req.body);
+      res.json(updated);
+    } catch (error) {
+      console.error("Update library space error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to update library space." });
+    }
+  });
+
+  app.delete("/api/library/spaces/:id", async (req, res) => {
+    try {
+      const result = await deleteLibrarySpace(req.params.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Delete library space error:", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to delete library space." });
+    }
+  });
+
   // Volumes list & search
   app.get("/api/library/volumes", async (req, res) => {
     try {
@@ -1907,6 +1991,8 @@ export function createApp(): express.Express {
       const shelfLocationId = typeof req.query?.shelfLocationId === "string" ? req.query.shelfLocationId : undefined;
       const roomName = typeof req.query?.roomName === "string" ? req.query.roomName : undefined;
       const readingStatus = typeof req.query?.readingStatus === "string" ? req.query.readingStatus : undefined;
+      const condition = typeof req.query?.condition === "string" ? req.query.condition : undefined;
+      const librarySpaceId = typeof req.query?.librarySpaceId === "string" ? req.query.librarySpaceId : undefined;
       const isLoaned = req.query?.isLoaned !== undefined ? req.query.isLoaned === "true" : undefined;
       const limit = typeof req.query?.limit === "string" ? parseInt(req.query.limit, 10) : 100;
       const offset = typeof req.query?.offset === "string" ? parseInt(req.query.offset, 10) : 0;
@@ -1918,6 +2004,8 @@ export function createApp(): express.Express {
         shelfLocationId,
         roomName,
         readingStatus,
+        condition,
+        librarySpaceId,
         isLoaned,
         limit,
         offset,
@@ -1986,6 +2074,46 @@ export function createApp(): express.Express {
     } catch (error) {
       console.error("Delete library volume error:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "Failed to delete volume." });
+    }
+  });
+
+  // Bulk delete volumes
+  app.post("/api/library/volumes/bulk-delete", async (req, res) => {
+    try {
+      const { ids } = req.body || {};
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: "ids array is required for bulk delete." });
+      }
+      const result = await bulkDeleteLibraryVolumes(ids);
+      res.json({ success: true, count: result.count });
+    } catch (error) {
+      console.error("Bulk delete library volumes error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to bulk delete volumes." });
+    }
+  });
+
+  // Evaluate rare book pricing & live scraping comps
+  app.post("/api/library/evaluate-rare-pricing", async (req, res) => {
+    try {
+      const { isbn, title, author, isSigned, isFirstEdition, isFirstPrinting, baselinePrice, publishYear, bindingFormat } = req.body || {};
+      if (!isbn) {
+        return res.status(400).json({ error: "ISBN is required for rare pricing evaluation." });
+      }
+      const evaluation = await evaluateRareBookPricing({
+        isbn,
+        title,
+        author,
+        isSigned: Boolean(isSigned),
+        isFirstEdition: Boolean(isFirstEdition),
+        isFirstPrinting: Boolean(isFirstPrinting),
+        baselinePrice: typeof baselinePrice === "number" ? baselinePrice : undefined,
+        publishYear,
+        bindingFormat,
+      });
+      res.json(evaluation);
+    } catch (error) {
+      console.error("Evaluate rare pricing error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to evaluate rare pricing." });
     }
   });
 
@@ -2064,6 +2192,171 @@ export function createApp(): express.Express {
     } catch (error) {
       console.error("Enrich ISBN error:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "Failed to classify ISBN." });
+    }
+  });
+
+  // Multi-Source Cover Lookup & Candidates Picker
+  app.get("/api/library/covers/lookup", async (req, res) => {
+    try {
+      const isbn = typeof req.query?.isbn === "string" ? req.query.isbn : "";
+      const title = typeof req.query?.title === "string" ? req.query.title : undefined;
+      const author = typeof req.query?.author === "string" ? req.query.author : undefined;
+
+      if (!isbn && !title) {
+        return res.status(400).json({ error: "ISBN or title is required to lookup covers." });
+      }
+
+      const candidates = await fetchAllWorkingCoverCandidates({ isbn, title, author });
+      res.json({ candidates });
+    } catch (error) {
+      console.error("Cover lookup error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to lookup cover images." });
+    }
+  });
+
+  // Update volume cover image directly
+  app.post("/api/library/volumes/:id/cover", async (req, res) => {
+    try {
+      const { coverUrl } = req.body || {};
+      const updated = await updateLibraryVolume(req.params.id, { coverUrl: coverUrl || null });
+      res.json(updated);
+    } catch (error) {
+      console.error("Update cover error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to update cover image." });
+    }
+  });
+
+  // Batch refresh missing covers for catalog volumes
+  app.post("/api/library/volumes/refresh-missing-covers", async (req, res) => {
+    try {
+      const volumesWithoutCover = await prisma.libraryVolume.findMany({
+        where: {
+          OR: [{ coverUrl: null }, { coverUrl: "" }],
+        },
+        take: 50,
+      });
+
+      let updatedCount = 0;
+      for (const vol of volumesWithoutCover) {
+        try {
+          const newCover = await resolveBestCoverUrl({
+            isbn: vol.isbn,
+            title: vol.title,
+            author: vol.author || undefined,
+            oclc: vol.oclcNumber,
+            lccn: vol.lccn,
+          });
+
+          if (newCover) {
+            await prisma.libraryVolume.update({
+              where: { id: vol.id },
+              data: { coverUrl: newCover },
+            });
+            updatedCount++;
+          }
+        } catch {}
+      }
+
+      res.json({ success: true, totalChecked: volumesWithoutCover.length, updatedCount });
+    } catch (error) {
+      console.error("Refresh missing covers error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to refresh covers." });
+    }
+  });
+
+  // Library Exchange & Marketplace
+  app.get("/api/library/exchange/marketplace", async (req, res) => {
+    try {
+      const query = typeof req.query?.query === "string" ? req.query.query : undefined;
+      const status = typeof req.query?.status === "string" ? (req.query.status as any) : undefined;
+      const deweyPrefix = typeof req.query?.deweyPrefix === "string" ? req.query.deweyPrefix : undefined;
+      const maxPrice = typeof req.query?.maxPrice === "string" ? parseFloat(req.query.maxPrice) : undefined;
+      const limit = typeof req.query?.limit === "string" ? parseInt(req.query.limit, 10) : undefined;
+
+      const items = await listExchangeMarketplace({ query, status, deweyPrefix, maxPrice, limit });
+      res.json({ items });
+    } catch (error) {
+      console.error("List marketplace error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list marketplace." });
+    }
+  });
+
+  app.post("/api/library/exchange/offers", async (req, res) => {
+    try {
+      const offer = await submitLibraryOffer(req.body);
+      res.json(offer);
+    } catch (error) {
+      console.error("Submit offer error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to submit offer." });
+    }
+  });
+
+  app.get("/api/library/exchange/offers", async (_req, res) => {
+    try {
+      const offers = await listIncomingLibraryOffers();
+      res.json({ offers });
+    } catch (error) {
+      console.error("List incoming offers error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list offers." });
+    }
+  });
+
+  app.post("/api/library/exchange/offers/:id/respond", async (req, res) => {
+    try {
+      const { action, counterAmount, counterNotes } = req.body || {};
+      const updated = await respondToLibraryOffer({
+        offerId: req.params.id,
+        action,
+        counterAmount,
+        counterNotes,
+      });
+      res.json(updated);
+    } catch (error) {
+      console.error("Respond offer error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to respond to offer." });
+    }
+  });
+
+  // Library Notifications & Feed
+  app.get("/api/library/notifications", async (req, res) => {
+    try {
+      const limit = typeof req.query?.limit === "string" ? parseInt(req.query.limit, 10) : 20;
+      const notifications = await getLibraryNotifications(limit);
+      res.json({ notifications });
+    } catch (error) {
+      console.error("Get library notifications error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to get notifications." });
+    }
+  });
+
+  app.post("/api/library/notifications/:id/read", async (req, res) => {
+    try {
+      const updated = await markLibraryNotificationRead(req.params.id);
+      res.json(updated);
+    } catch (error) {
+      console.error("Mark notification read error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to mark read." });
+    }
+  });
+
+  app.post("/api/library/notifications/read-all", async (_req, res) => {
+    try {
+      await markAllLibraryNotificationsRead();
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Mark all read error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to mark all read." });
+    }
+  });
+
+  // Collection Health & Completeness (for Library UI Shell)
+  app.get("/api/library/collection-health", async (_req, res) => {
+    try {
+      const health = await getLibraryCollectionHealth();
+      res.json(health);
+    } catch (error) {
+      console.error("Get collection health error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to get collection health." });
     }
   });
 

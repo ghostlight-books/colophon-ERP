@@ -1,5 +1,9 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Moon, Search, Sun, UserRound } from "lucide-react";
+import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Menu, Moon, Search, Sun, UserRound, X } from "lucide-react";
+import MobileBottomNav from "./MobileBottomNav";
+import InstallAppPrompt from "../common/InstallAppPrompt";
+import LibrarySpaceSwitcher from "../library/LibrarySpaceSwitcher";
+import { fetchLibraryDashboard, type LibraryDashboardSummary } from "../../services/library.service";
 
 export type ShellNavChild = {
   key: string;
@@ -96,8 +100,10 @@ function Shell({
   const [manualNotificationTitle, setManualNotificationTitle] = useState("");
   const [profileDraft, setProfileDraft] = useState<LoggedInUser>(currentUser);
   const [isPosSidebarOpen, setIsPosSidebarOpen] = useState(false);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
   const [serviceHealth, setServiceHealth] = useState<ServiceHealth[]>([]);
+  const [librarySummary, setLibrarySummary] = useState<LibraryDashboardSummary | null>(null);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [reminders, setReminders] = useState<ReminderItem[]>(() => {
     if (typeof window === "undefined") return [];
@@ -138,20 +144,58 @@ function Shell({
       try {
         const rawBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
         const apiBase = rawBase.replace(/\/$/, "").replace(/\/api$/, "") + "/api";
-        const response = await fetch(`${apiBase}/health/services?storeId=ghostlight-demo&updatedAt=${Date.now()}`);
-        if (!response.ok) {
-          return;
-        }
-        const payload = (await response.json()) as { services: ServiceHealth[] };
-        if (!cancelled) {
-          setServiceHealth(payload.services);
-        }
+        const [healthRes, pingRes, dbRes] = await Promise.allSettled([
+          fetch(`${apiBase}/health`, { signal: AbortSignal.timeout(3000) }),
+          fetch(`${apiBase}/ping`, { signal: AbortSignal.timeout(3000) }),
+          fetch(`${apiBase}/db/status`, { signal: AbortSignal.timeout(3000) }),
+        ]);
+
+        if (cancelled) return;
+
+        const results: ServiceHealth[] = [
+          {
+            key: "api",
+            label: "API Server",
+            status: healthRes.status === "fulfilled" && healthRes.value.ok ? "green" : "red",
+            detail: healthRes.status === "fulfilled" && healthRes.value.ok ? "200 OK · :4000" : "Unreachable",
+            path: "/health",
+          },
+          {
+            key: "latency",
+            label: "Ping",
+            status: pingRes.status === "fulfilled" && pingRes.value.ok ? "green" : "yellow",
+            detail: pingRes.status === "fulfilled" && pingRes.value.ok ? "< 5ms" : "Slow / timeout",
+            path: "/ping",
+          },
+          {
+            key: "db",
+            label: "Database",
+            status: dbRes.status === "fulfilled" && dbRes.value.ok ? "green" : "yellow",
+            detail: dbRes.status === "fulfilled" && dbRes.value.ok ? "SQLite Ready" : "Connecting…",
+            path: "/db/status",
+          },
+        ];
+
+        setServiceHealth(results);
       } catch {
         // Keep the health panel quiet until the API is reachable.
       }
     };
+
+    const loadLibHealth = async (): Promise<void> => {
+      try {
+        const h = await fetchLibraryDashboard();
+        if (!cancelled) setLibrarySummary(h);
+      } catch {}
+    };
+
     void loadHealth();
-    const timer = window.setInterval(() => void loadHealth(), 10000);
+    void loadLibHealth();
+    const timer = window.setInterval(() => {
+      void loadHealth();
+      void loadLibHealth();
+    }, 10000);
+
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -220,6 +264,7 @@ function Shell({
   useEffect(() => {
     window.localStorage.setItem("colophon-theme", theme);
     document.documentElement.setAttribute("data-theme", theme);
+    document.documentElement.classList.toggle("dark", theme === "dark");
     document.documentElement.style.colorScheme = theme;
   }, [theme]);
 
@@ -261,27 +306,31 @@ function Shell({
       }
     }
 
-    function onEscape(event: KeyboardEvent): void {
+    function onKeyDown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
         setMenu("none");
       }
     }
 
     document.addEventListener("mousedown", onDocumentClick);
-    document.addEventListener("keydown", onEscape);
+    document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("mousedown", onDocumentClick);
-      document.removeEventListener("keydown", onEscape);
+      document.removeEventListener("keydown", onKeyDown);
     };
   }, []);
 
-  function handleSearchSelect(result: SearchResult): void {
-    if (result.to) {
-      onNavigate(result.to);
-    }
-
+  function handleSearchSelect(item: SearchResult): void {
     setMenu("none");
     setSearchQuery("");
+
+    if (item.to) {
+      onNavigate(item.to);
+    }
+  }
+
+  function markNotificationRead(id: string): void {
+    setManualNotifications((current) => current.map((item) => (item.id === id ? { ...item, unread: false } : item)));
   }
 
   function addManualNotification(): void {
@@ -293,7 +342,7 @@ function Shell({
     const next: NotificationItem = {
       id: `manual-${Date.now()}`,
       title,
-      time: "just now",
+      time: "Just now",
       unread: true,
       source: "Manual",
     };
@@ -322,17 +371,17 @@ function Shell({
 
   return (
     <div className={[
-      "min-h-screen transition-colors duration-300",
+      "min-h-screen transition-colors duration-300 font-sans",
       isPosRoute ? "p-1 md:p-2" : "p-3 md:p-4",
-      isDark ? "bg-[#1a1d24]" : "bg-[#f1f1f3]",
+      isDark ? "bg-[#090d16]" : "bg-[#e2e8f0]",
     ].join(" ")}>
       <div
         className={[
-          "relative min-h-[calc(100vh-1.5rem)] overflow-visible border shadow-[0_20px_50px_rgba(60,70,86,0.16)] transition-colors duration-300",
+          "relative min-h-[calc(100vh-1.5rem)] overflow-visible border shadow-sm transition-colors duration-300",
           isPosRoute ? "rounded-[18px]" : "rounded-[34px]",
           isDark
-            ? "border-white/10 bg-[radial-gradient(circle_at_85%_88%,rgba(47,90,136,0.42)_0%,rgba(27,32,45,0)_35%),radial-gradient(circle_at_66%_70%,rgba(80,62,139,0.36)_0%,rgba(20,22,34,0)_40%),linear-gradient(145deg,#1f2430_0%,#161a23_100%)]"
-            : "border-white/80 bg-[radial-gradient(circle_at_85%_88%,rgba(168,224,255,0.48)_0%,rgba(241,238,255,0)_32%),radial-gradient(circle_at_66%_70%,rgba(225,204,255,0.45)_0%,rgba(238,240,255,0)_38%),linear-gradient(145deg,#ececef_0%,#dfe0e3_100%)]",
+            ? "border-slate-800 bg-[#0f1422] text-slate-100"
+            : "border-slate-300 bg-[#f8fafc] text-slate-900",
         ].join(" ")}
       >
         {isPosRoute ? (
@@ -341,7 +390,7 @@ function Shell({
             onClick={() => setIsPosSidebarOpen((current) => !current)}
             className={[
               "fixed left-1 top-1/2 z-30 -translate-y-1/2 rounded-r-lg border border-l-0 px-1.5 py-5 backdrop-blur transition",
-              isDark ? "border-white/15 bg-white/10 text-slate-100" : "border-white/80 bg-white/80 text-slate-700",
+              isDark ? "border-slate-700 bg-slate-800 text-slate-100" : "border-slate-300 bg-white text-slate-800 shadow-sm",
             ].join(" ")}
             aria-label={isPosSidebarOpen ? "Hide menu" : "Show menu"}
           >
@@ -349,27 +398,28 @@ function Shell({
           </button>
         ) : null}
 
+        {/* Desktop Sidebar */}
         <aside
           className={[
-            "fixed bottom-7 left-7 top-7 z-20 flex w-64 flex-col rounded-[28px] border p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] backdrop-blur-xl transition-all duration-300",
-            shouldHideSidebar ? "-translate-x-[120%] opacity-0 pointer-events-none" : "translate-x-0 opacity-100",
-            isDark ? "border-white/10 bg-white/5" : "border-white/70 bg-white/28",
+            "fixed bottom-7 left-7 top-7 z-20 hidden lg:flex w-64 flex-col rounded-[28px] border p-4 shadow-lg backdrop-blur-xl transition-all duration-300",
+            shouldHideSidebar ? "lg:-translate-x-[120%] lg:opacity-0 lg:pointer-events-none" : "lg:translate-x-0 lg:opacity-100",
+            isDark ? "border-slate-800 bg-[#131927]/95 text-slate-100" : "border-slate-300 bg-[#f1f5f9]/95 text-slate-900",
           ].join(" ")}
         >
           <div className={[
             "flex items-center justify-between gap-2 px-2 py-1.5 transition-colors duration-300",
-            isDark ? "text-slate-100" : "text-slate-700",
+            isDark ? "text-slate-100" : "text-slate-900",
           ].join(" ")}>
             <div className="flex items-center gap-2.5">
               <BrandLogo className="h-9 w-9 shrink-0" />
               <div>
                 <p className={[
-                  "text-[0.7rem] tracking-[0.01em] transition-colors duration-300 font-bold",
-                  isDark ? "text-slate-300" : "text-slate-700",
+                  "text-[0.75rem] tracking-[0.01em] transition-colors duration-300 font-semibold",
+                  isDark ? "text-white" : "text-slate-900",
                 ].join(" ")}>
                   {workspaceMode === "library" ? "Colophon Library" : "Colophon Bookstore"}
                 </p>
-                <p className="text-[9.5px] text-slate-400">
+                <p className="text-[10px] text-slate-500 font-normal">
                   {workspaceMode === "library" ? "Personal & Pro Edition" : "Retail ERP Edition"}
                 </p>
               </div>
@@ -379,19 +429,19 @@ function Shell({
           {/* Workspace Mode Switcher Pill */}
           <div className={[
             "mt-2 mb-1 p-1 rounded-2xl flex items-center gap-1 transition-colors duration-300",
-            isDark ? "bg-white/10" : "bg-slate-200/70",
+            isDark ? "bg-slate-800" : "bg-slate-100",
           ].join(" ")}>
             <button
               type="button"
               onClick={() => onWorkspaceModeChange?.("bookstore")}
               className={[
-                "flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer",
+                "flex-1 py-1.5 px-2 rounded-xl text-[11px] font-medium transition flex items-center justify-center gap-1 cursor-pointer",
                 workspaceMode === "bookstore"
                   ? isDark
-                    ? "bg-amber-500/20 text-amber-300 shadow-sm border border-amber-500/30"
-                    : "bg-white text-amber-900 shadow-sm border border-amber-200/70"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "bg-white text-indigo-950 shadow-sm border border-slate-200"
                   : isDark
-                    ? "text-slate-400 hover:text-slate-200"
+                    ? "text-slate-400 hover:text-white"
                     : "text-slate-600 hover:text-slate-900",
               ].join(" ")}
             >
@@ -405,10 +455,10 @@ function Shell({
                 "flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer",
                 workspaceMode === "library"
                   ? isDark
-                    ? "bg-indigo-500/25 text-indigo-300 shadow-sm border border-indigo-500/30"
-                    : "bg-white text-indigo-950 shadow-sm border border-indigo-200/70"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "bg-white text-indigo-950 shadow-sm border border-slate-200"
                   : isDark
-                    ? "text-slate-400 hover:text-slate-200"
+                    ? "text-slate-400 hover:text-white"
                     : "text-slate-600 hover:text-slate-900",
               ].join(" ")}
             >
@@ -417,9 +467,15 @@ function Shell({
             </button>
           </div>
 
+          {workspaceMode === "library" && (
+            <div className="my-1.5 w-full">
+              <LibrarySpaceSwitcher />
+            </div>
+          )}
+
           <div className={[
             "my-2 h-px transition-colors duration-300",
-            isDark ? "bg-white/15" : "bg-white/70",
+            isDark ? "bg-slate-800" : "bg-slate-200",
           ].join(" ")}></div>
 
           <nav className="mt-0.5 flex flex-1 flex-col gap-1 overflow-y-auto pr-0.5" aria-label="Primary">
@@ -446,33 +502,33 @@ function Shell({
                       }
                     }}
                     className={[
-                      "group flex items-center justify-between rounded-full px-3.5 py-1.5 text-left text-[0.88rem] font-semibold transition",
+                      "group flex items-center justify-between rounded-full px-3.5 py-1.5 text-left text-[0.88rem] font-bold transition cursor-pointer",
                       isDirectActive && !hasChildren
-                        ? "bg-[#e9ff63] text-slate-800 shadow-[inset_0_0_0_1px_rgba(201,224,86,0.48)]"
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
                         : isParentActive
                           ? isDark
-                            ? "bg-white/14 text-slate-100 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
-                            : "bg-white/65 text-slate-800 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]"
+                            ? "bg-indigo-950/60 text-indigo-200 border border-indigo-800"
+                            : "bg-indigo-50 text-indigo-900 border border-indigo-200/80"
                           : isDark
-                            ? "bg-white/8 text-slate-300 hover:bg-white/14 hover:text-white"
-                            : "bg-white/40 text-slate-600 hover:bg-white/72 hover:text-slate-800",
+                            ? "text-slate-200 hover:bg-slate-800 hover:text-white"
+                            : "text-slate-800 hover:bg-slate-100 hover:text-slate-950",
                     ].join(" ")}
                     aria-current={isDirectActive && !hasChildren ? "page" : undefined}
                   >
                     <div className="flex items-center gap-2.5">
                       <span
                         className={[
-                          "grid h-6 w-6 place-items-center rounded-full transition",
+                          "grid h-6 w-6 place-items-center rounded-full transition text-sm",
                           isDirectActive && !hasChildren
-                            ? "bg-black/10 text-slate-700"
+                            ? "bg-white/20 text-white"
                             : isDark
-                              ? "bg-white/15 text-slate-300 group-hover:bg-white/20"
-                              : "bg-white/80 text-slate-500 group-hover:bg-white",
+                              ? "bg-white/10 text-slate-200 group-hover:bg-white/20"
+                              : "bg-slate-100 text-slate-700 group-hover:bg-slate-200",
                         ].join(" ")}
                       >
                         {item.icon}
                       </span>
-                      <span>{item.label}</span>
+                      <span className="font-extrabold">{item.label}</span>
                     </div>
                     {hasChildren ? (
                       <ChevronDown
@@ -480,7 +536,7 @@ function Shell({
                         className={[
                           "transition-transform duration-200",
                           isExpanded ? "rotate-180" : "",
-                          isDark ? "text-slate-400" : "text-slate-400",
+                          isDark ? "text-slate-300" : "text-slate-500",
                         ].join(" ")}
                       />
                     ) : null}
@@ -490,7 +546,7 @@ function Shell({
                   {hasChildren && isExpanded ? (
                     <div className={[
                       "ml-3.5 flex flex-col gap-0.5 border-l-2 pl-2.5 py-0.5 my-0.5 animate-in fade-in slide-in-from-top-1 duration-150",
-                      isDark ? "border-white/15" : "border-slate-300/70",
+                      isDark ? "border-slate-700" : "border-slate-300",
                     ].join(" ")}>
                       {item.children!.map((child) => {
                         const isThisChildActive = activePath === child.to || (child.to !== "/dashboard" && activePath.startsWith(child.to));
@@ -500,12 +556,12 @@ function Shell({
                             type="button"
                             onClick={() => onNavigate(child.to)}
                             className={[
-                              "group flex items-center gap-2 rounded-lg px-2.5 py-1 text-left text-[11.5px] font-semibold transition",
+                              "group flex items-center gap-2 rounded-lg px-2.5 py-1 text-left text-[11.5px] font-bold transition cursor-pointer",
                               isThisChildActive
-                                ? "bg-[#e9ff63] text-slate-900 shadow-sm"
+                                ? "bg-indigo-600 text-white shadow-xs"
                                 : isDark
-                                  ? "text-slate-300 hover:bg-white/10 hover:text-white"
-                                  : "text-slate-600 hover:bg-white/70 hover:text-slate-900",
+                                  ? "text-slate-300 hover:bg-slate-800 hover:text-white"
+                                  : "text-slate-700 hover:bg-slate-100 hover:text-slate-950",
                             ].join(" ")}
                             aria-current={isThisChildActive ? "page" : undefined}
                           >
@@ -515,7 +571,7 @@ function Shell({
                               <span
                                 className={[
                                   "h-1.5 w-1.5 shrink-0 rounded-full",
-                                  isThisChildActive ? "bg-slate-900" : isDark ? "bg-slate-500" : "bg-slate-400",
+                                  isThisChildActive ? "bg-white" : isDark ? "bg-slate-500" : "bg-slate-400",
                                 ].join(" ")}
                               />
                             )}
@@ -530,174 +586,162 @@ function Shell({
             })}
           </nav>
 
-          <div
-            className={[
-              "rounded-2xl p-3 text-xs transition-colors duration-300",
-              isDark ? "bg-white/8 text-slate-300" : "bg-white/50 text-slate-600",
-            ].join(" ")}
-          >
-            <div className="flex items-center justify-between">
-              <p className={[
-                "font-semibold transition-colors duration-300",
-                isDark ? "text-slate-100" : "text-slate-700",
-              ].join(" ")}>Store Health</p>
-              <span className="text-[10px] font-medium text-slate-400">Live</span>
-            </div>
-            <div className="mt-2 space-y-1">
-              {serviceHealth.length === 0 ? <p className="py-1 text-slate-400">Checking services...</p> : serviceHealth.map((service) => (
-                <button
-                  key={service.key}
-                  type="button"
-                  onClick={() => {
-                    if (service.path) onNavigate(service.path);
-                    else if (service.key === "ecommerce") onNavigate("/shopify");
-                    else if (service.key === "payments") onNavigate("/payments");
-                    else if (service.key === "network") onNavigate("/network");
-                    else if (service.key === "marketing") onNavigate("/marketing");
-                  }}
-                  className={[
-                    "group flex w-full items-center justify-between gap-2 rounded-xl px-2 py-1.5 text-left transition",
-                    isDark ? "hover:bg-white/10" : "hover:bg-white/80",
-                  ].join(" ")}
-                  title={`${service.label}: ${service.detail}`}
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <span
-                      className={[
-                        "h-2 w-2 shrink-0 rounded-full transition-all",
-                        service.status === "green"
-                          ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)]"
-                          : service.status === "yellow"
-                            ? "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]"
-                            : "bg-rose-500",
-                      ].join(" ")}
-                      aria-label={`${service.label}: ${service.status}`}
-                    />
-                    <span className="truncate font-medium">{service.label}</span>
-                  </div>
+          {/* Service Health Widget in Sidebar */}
+          <div className={[
+            "mt-auto pt-2 border-t text-[11px] transition-colors duration-300",
+            isDark ? "border-slate-800" : "border-slate-200",
+          ].join(" ")}>
+            <div className="flex items-center justify-between px-1 py-1">
+              <span className="font-bold text-slate-600 dark:text-slate-300">System Status</span>
+              <div className="flex items-center gap-1.5">
+                {serviceHealth.map((s) => (
                   <span
-                    className={[
-                      "text-[10px] font-semibold shrink-0",
-                      service.status === "green"
-                        ? "text-emerald-700"
-                        : service.status === "yellow"
-                          ? "text-amber-700"
-                          : "text-slate-400",
-                    ].join(" ")}
-                  >
-                    {service.status === "green" ? "Active" : service.status === "yellow" ? "Check" : "Off"}
-                  </span>
-                </button>
-              ))}
+                    key={s.key}
+                    className={`h-2 w-2 rounded-full ${
+                      s.status === "green" ? "bg-emerald-500" : s.status === "yellow" ? "bg-amber-500" : "bg-red-500"
+                    }`}
+                    title={`${s.label}: ${s.detail}`}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </aside>
 
+        {/* Main Content Area */}
         <div className={[
           "relative z-10 overflow-visible",
           isPosRoute
             ? isPosSidebarOpen
-              ? "pl-[18rem] pr-3 pt-3"
-              : "pl-3 pr-3 pt-3"
-            : "pl-[18rem] pr-6 pt-6",
+              ? "lg:pl-[18rem] pr-2 pt-2"
+              : "pl-2 pr-2 pt-2"
+            : "lg:pl-[18rem] p-3 sm:p-6",
         ].join(" ")}>
           {isPosRoute ? null : (
             <header
               className={[
-                "relative z-[120] overflow-visible flex items-start justify-between rounded-[26px] border px-7 py-5 backdrop-blur-sm transition-colors duration-300",
-                isDark ? "border-white/12 bg-white/6" : "border-white/70 bg-white/35",
+                "relative z-[120] overflow-visible flex items-center justify-between rounded-[20px] sm:rounded-[26px] border px-3.5 py-3 sm:px-7 sm:py-5 transition-colors duration-300 shadow-xs",
+                isDark ? "border-slate-800 bg-[#131927] text-white" : "border-slate-300 bg-[#f1f5f9] text-slate-900",
               ].join(" ")}
             >
-              <div>
-                <h1 className={[
-                  "text-[2.1rem] font-semibold tracking-tight transition-colors duration-300",
-                  isDark ? "text-slate-100" : "text-slate-700",
-                ].join(" ")}>{greeting}</h1>
-                <p className={[
-                  "mt-1 text-[1rem] transition-colors duration-300",
-                  isDark ? "text-slate-400" : "text-slate-500",
-                ].join(" ")}>{subtitle}</p>
+              {/* Left: Mobile Hamburger + Title + Library Switcher */}
+              <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setIsMobileDrawerOpen(true)}
+                  className={[
+                    "grid lg:hidden h-9 w-9 place-items-center rounded-xl border transition shrink-0 cursor-pointer active:scale-95",
+                    isDark ? "border-slate-700 bg-slate-800 text-slate-100" : "border-slate-300 bg-slate-100 text-slate-800",
+                  ].join(" ")}
+                  aria-label="Open Navigation Menu"
+                  title="Open Navigation"
+                >
+                  <Menu size={18} strokeWidth={2.2} />
+                </button>
+
+                <div className="min-w-0">
+                  <h1 className={[
+                    "text-base sm:text-xl lg:text-[1.75rem] font-semibold tracking-tight transition-colors duration-300 truncate",
+                    isDark ? "text-white" : "text-slate-900",
+                  ].join(" ")}>{greeting}</h1>
+                  <p className={[
+                    "mt-0.5 sm:mt-1 text-xs sm:text-sm font-normal transition-colors duration-300 line-clamp-1 sm:line-clamp-none hidden sm:block",
+                    isDark ? "text-slate-400" : "text-slate-500",
+                  ].join(" ")}>{subtitle}</p>
+                </div>
               </div>
 
-                <div
+              {/* Right: Sleek Toolbar */}
+              <div
                 ref={toolbarRef}
                 className={[
-                  "relative z-[140] mt-1 flex flex-col items-stretch rounded-[20px] border px-2 py-1.5 transition-colors duration-300",
-                  isDark ? "border-white/15 bg-white/8 text-slate-300" : "border-white/80 bg-white/60 text-slate-500",
+                  "relative z-[140] flex flex-col items-stretch rounded-2xl sm:rounded-[20px] border px-1.5 py-1 sm:px-2 sm:py-1.5 transition-colors duration-300 shrink-0",
+                  isDark ? "border-slate-700 bg-slate-800 text-slate-100" : "border-slate-300 bg-[#e2e8f0] text-slate-800 shadow-2xs",
                 ].join(" ")}
               >
-                <div className="flex items-center justify-center gap-2">
-                <button
-                type="button"
-                onClick={() => setMenu((current) => (current === "search" ? "none" : "search"))}
-                className={toolbarButtonClass(isDark, menu === "search")}
-                aria-label="Search"
-                title="Search"
-              >
-                <Search size={15} strokeWidth={2} aria-hidden="true" />
-              </button>
+                <div className="flex items-center justify-center gap-1.5 sm:gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMenu((current) => (current === "search" ? "none" : "search"))}
+                    className={toolbarButtonClass(isDark, menu === "search")}
+                    aria-label="Search"
+                    title="Search"
+                  >
+                    <Search size={15} strokeWidth={2} aria-hidden="true" />
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
-                className={toolbarButtonClass(isDark, false)}
-                aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-                title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-              >
-                {isDark ? <Sun size={15} strokeWidth={2} aria-hidden="true" /> : <Moon size={15} strokeWidth={2} aria-hidden="true" />}
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+                    className={toolbarButtonClass(isDark, false)}
+                    aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                    title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                  >
+                    {isDark ? <Sun size={15} strokeWidth={2} aria-hidden="true" /> : <Moon size={15} strokeWidth={2} aria-hidden="true" />}
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => setMenu((current) => (current === "notifications" ? "none" : "notifications"))}
-                className={toolbarButtonClass(isDark, menu === "notifications")}
-                aria-label="Notifications"
-                title="Notifications"
-              >
-                <Bell size={15} strokeWidth={2} aria-hidden="true" />
-                {unreadCount > 0 ? (
-                  <span className="absolute -right-0.5 -top-0.5 min-w-[16px] rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
-                    {unreadCount}
-                  </span>
-                ) : null}
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => setMenu((current) => (current === "notifications" ? "none" : "notifications"))}
+                    className={toolbarButtonClass(isDark, menu === "notifications")}
+                    aria-label="Notifications"
+                    title="Notifications"
+                  >
+                    <Bell size={15} strokeWidth={2} aria-hidden="true" />
+                    {unreadCount > 0 ? (
+                      <span className="absolute -right-0.5 -top-0.5 min-w-[16px] rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
+                        {unreadCount}
+                      </span>
+                    ) : null}
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => setMenu((current) => (current === "calendar" ? "none" : "calendar"))}
-                className={toolbarButtonClass(isDark, menu === "calendar")}
-                aria-label="Calendar"
-                title="Calendar"
-              >
-                <CalendarDays size={15} strokeWidth={2} aria-hidden="true" />
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => setMenu((current) => (current === "calendar" ? "none" : "calendar"))}
+                    className={[toolbarButtonClass(isDark, menu === "calendar"), "hidden sm:grid"].join(" ")}
+                    aria-label="Calendar"
+                    title="Calendar"
+                  >
+                    <CalendarDays size={15} strokeWidth={2} aria-hidden="true" />
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => setMenu((current) => (current === "account" ? "none" : "account"))}
-                className={[
-                  "relative grid h-8 w-8 place-items-center rounded-full transition",
-                  isDark ? "bg-amber-400 text-slate-900" : "bg-[#f9d94f] text-slate-700",
-                ].join(" ")}
-                aria-label="Account"
-                title="Account"
-              >
-                <UserRound size={15} strokeWidth={2} aria-hidden="true" />
-                <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-emerald-500"></span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => setMenu((current) => (current === "account" ? "none" : "account"))}
+                    className={[
+                      "relative grid h-8 w-8 place-items-center rounded-full transition cursor-pointer",
+                      isDark ? "bg-amber-400 text-slate-900" : "bg-amber-400 text-slate-900",
+                    ].join(" ")}
+                    aria-label="Account"
+                    title="Account"
+                  >
+                    <UserRound size={15} strokeWidth={2} aria-hidden="true" />
+                    <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-emerald-500"></span>
+                  </button>
+                </div>
 
+                {/* Digital Clock */}
+                <p className={[
+                  "mt-1 text-center font-mono text-[10px] tracking-wider transition-colors duration-300 font-bold hidden sm:block",
+                  isDark ? "text-slate-300" : "text-slate-700",
+                ].join(" ")}>
+                  {currentTime.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}
+                </p>
+              </div>
+
+              {/* Menu Popovers */}
               {menu !== "none" ? (
                 <div
                   className={[
-                    "absolute right-0 top-[52px] z-[1000] w-80 rounded-2xl border p-3 shadow-[0_14px_40px_rgba(20,28,40,0.24)]",
-                    isDark ? "border-white/12 bg-[#1f2430] text-slate-100" : "border-white/70 bg-white text-slate-700",
+                    "absolute right-3 top-[65px] z-[1000] w-80 sm:w-96 rounded-2xl border p-4 shadow-2xl animate-scaleUp",
+                    isDark ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-200 bg-white text-slate-800",
                   ].join(" ")}
                   role="dialog"
                   aria-label="Toolbar panel"
                 >
                   {menu === "search" ? (
                     <div>
-                      <p className="text-sm font-semibold">Search</p>
+                      <p className="text-sm font-black text-slate-900 dark:text-white">Search System</p>
                       <input
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
@@ -706,15 +750,10 @@ function Shell({
                             handleSearchSelect(filteredSearchResults[0]);
                           }
                         }}
-                        placeholder="Search books, orders, customers"
-                        className={[
-                          "mt-2 w-full rounded-xl border px-3 py-2 text-sm outline-none",
-                          isDark
-                            ? "border-white/15 bg-white/8 text-slate-100 placeholder:text-slate-400 focus:border-slate-300"
-                            : "border-slate-200 bg-slate-50 text-slate-700 placeholder:text-slate-400 focus:border-slate-400",
-                        ].join(" ")}
+                        placeholder="Search books, orders, customers..."
+                        className="mt-2 w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2.5 text-xs font-semibold focus:outline-none focus:border-indigo-500"
                       />
-                      <div className="mt-3 flex flex-wrap gap-2">
+                      <div className="mt-3 flex flex-wrap gap-1.5">
                         {[
                           { label: "All", value: "all" as const },
                           { label: "Navigation", value: "navigation" as const },
@@ -726,44 +765,30 @@ function Shell({
                             key={chip.label}
                             type="button"
                             onClick={() => setSearchCategory(chip.value)}
-                            className={[
-                              "rounded-full px-3 py-1.5 text-xs font-semibold",
+                            className={`rounded-full px-3 py-1 text-[11px] font-bold transition cursor-pointer ${
                               searchCategory === chip.value
-                                ? "bg-[#e9ff63] text-slate-800"
-                                : isDark
-                                  ? "bg-white/12 text-slate-200"
-                                  : "bg-slate-100 text-slate-600",
-                            ].join(" ")}
+                                ? "bg-indigo-600 text-white"
+                                : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
+                            }`}
                           >
                             {chip.label}
                           </button>
                         ))}
                       </div>
 
-                      <div className="mt-3 max-h-56 overflow-y-auto space-y-2">
+                      <div className="mt-3 max-h-56 overflow-y-auto space-y-1.5">
                         {filteredSearchResults.length === 0 ? (
-                          <p className={[
-                            "rounded-xl px-3 py-2 text-sm",
-                            isDark ? "bg-white/6 text-slate-400" : "bg-slate-50 text-slate-500",
-                          ].join(" ")}>No matches found.</p>
+                          <p className="p-3 text-center text-xs text-slate-500 font-semibold">No matches found.</p>
                         ) : (
                           filteredSearchResults.map((result) => (
                             <button
                               key={result.id}
                               type="button"
                               onClick={() => handleSearchSelect(result)}
-                              className={[
-                                "w-full rounded-xl border px-3 py-2 text-left transition",
-                                isDark
-                                  ? "border-white/10 bg-white/4 hover:bg-white/10"
-                                  : "border-slate-100 bg-slate-50 hover:bg-slate-100",
-                              ].join(" ")}
+                              className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
                             >
-                              <p className="text-sm font-semibold">{result.title}</p>
-                              <p className={[
-                                "text-xs",
-                                isDark ? "text-slate-400" : "text-slate-500",
-                              ].join(" ")}>{result.subtitle}</p>
+                              <p className="text-xs font-black text-slate-900 dark:text-white">{result.title}</p>
+                              <p className="text-[10.5px] text-slate-500 dark:text-slate-400 font-semibold">{result.subtitle}</p>
                             </button>
                           ))
                         )}
@@ -773,285 +798,255 @@ function Shell({
 
                   {menu === "notifications" ? (
                     <div>
-                      <p className="text-sm font-semibold">Notifications</p>
-
-                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">Reminders</p>
-                      <div className="mt-2 space-y-2">
-                        {reminders.length === 0 ? <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">No reminders yet.</p> : reminders.map((reminder) => (
-                          <label key={reminder.id} className="flex items-start gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2.5 text-sm">
-                            <input type="checkbox" checked={reminder.completed} onChange={() => setReminders((current) => current.map((item) => item.id === reminder.id ? { ...item, completed: !item.completed } : item))} className="mt-0.5 accent-emerald-500" />
-                            <span className={reminder.completed ? "text-slate-400 line-through" : "text-slate-700"}><span className="block font-medium">{reminder.title}</span><span className="text-xs text-slate-400">{reminder.due}</span></span>
-                          </label>
-                        ))}
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                        <p className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Notifications</p>
+                        <span className="text-[11px] text-slate-500 font-semibold">{unreadCount} unread</span>
                       </div>
 
-                      <div className="mt-2 rounded-xl border border-emerald-200/40 bg-emerald-100/40 p-2.5">
-                        <p className={[
-                          "text-xs font-semibold",
-                          isDark ? "text-emerald-200" : "text-emerald-800",
-                        ].join(" ")}>Manual Alert</p>
-                        <div className="mt-2 flex gap-2">
-                          <input
-                            value={manualNotificationTitle}
-                            onChange={(event) => setManualNotificationTitle(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                addManualNotification();
-                              }
-                            }}
-                            placeholder="Add note e.g. Call publisher at 3PM"
-                            className={[
-                              "w-full rounded-lg border px-2.5 py-2 text-xs outline-none",
-                              isDark
-                                ? "border-white/15 bg-white/8 text-slate-100 placeholder:text-slate-400"
-                                : "border-slate-200 bg-white text-slate-700 placeholder:text-slate-400",
-                            ].join(" ")}
-                          />
-                          <button
-                            type="button"
-                            onClick={addManualNotification}
-                            className="rounded-lg bg-[#e9ff63] px-3 text-xs font-semibold text-slate-800"
-                          >
-                            Add
-                          </button>
-                        </div>
-                      </div>
-
-                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">Automated</p>
-                      <ul className="mt-2 space-y-2">
-                        {automatedNotifications.map((note) => (
-                          <li
-                            key={note.id}
-                            className={[
-                              "rounded-xl border p-2.5 text-sm",
-                              isDark ? "border-white/10 bg-white/4" : "border-slate-100 bg-slate-50",
-                            ].join(" ")}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <span>{note.title}</span>
-                              {note.unread ? <span className="mt-1 h-2 w-2 rounded-full bg-[#e9ff63]"></span> : null}
-                            </div>
-                            <p className={[
-                              "mt-1 text-xs",
-                              isDark ? "text-slate-400" : "text-slate-500",
-                            ].join(" ")}>{note.time}</p>
-                          </li>
-                        ))}
-                      </ul>
-
-                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">Manual</p>
-                      <ul className="mt-2 space-y-2">
-                        {manualNotifications.length === 0 ? (
-                          <li className={[
-                            "rounded-xl border p-2.5 text-xs",
-                            isDark ? "border-white/10 bg-white/4 text-slate-400" : "border-slate-100 bg-slate-50 text-slate-500",
-                          ].join(" ")}>No manual notifications yet.</li>
-                        ) : (
-                          manualNotifications.map((note) => (
-                            <li
-                              key={note.id}
-                              className={[
-                                "rounded-xl border p-2.5 text-sm",
-                                isDark ? "border-white/10 bg-white/4" : "border-slate-100 bg-slate-50",
-                              ].join(" ")}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <span>{note.title}</span>
-                                {note.unread ? <span className="mt-1 h-2 w-2 rounded-full bg-[#e9ff63]"></span> : null}
-                              </div>
-                              <p className={[
-                                "mt-1 text-xs",
-                                isDark ? "text-slate-400" : "text-slate-500",
-                              ].join(" ")}>{note.time}</p>
-                            </li>
-                          ))
-                        )}
-                      </ul>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setManualNotifications((current) => current.map((note) => ({ ...note, unread: false })));
-                        }}
-                        className={[
-                          "mt-3 rounded-lg px-3 py-2 text-xs font-semibold",
-                          isDark ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-600",
-                        ].join(" ")}
-                      >
-                        Mark Manual as Read
-                      </button>
-                      <p className={[
-                        "mt-2 text-[11px]",
-                        isDark ? "text-slate-400" : "text-slate-500",
-                      ].join(" ")}>Unread total: {unreadCount}</p>
-                    </div>
-                  ) : null}
-
-                  {menu === "calendar" ? (
-                    <div>
-                      <p className="text-sm font-semibold">Calendar</p>
-                      <p className={[
-                        "mt-1 text-xs",
-                        isDark ? "text-slate-400" : "text-slate-500",
-                      ].join(" ")}>Today, Aug 19</p>
-                      <div className="mt-2 space-y-2">
-                        {[
-                          ["10:00", "Team standup"],
-                          ["13:30", "Inventory sync review"],
-                          ["16:00", "POS training"],
-                        ].map(([time, title]) => (
+                      <div className="mt-3 space-y-2 max-h-60 overflow-y-auto">
+                        {notifications.map((note) => (
                           <div
-                            key={time + title}
-                            className={[
-                              "rounded-xl border p-2.5",
-                              isDark ? "border-white/10 bg-white/4" : "border-slate-100 bg-slate-50",
-                            ].join(" ")}
+                            key={note.id}
+                            onClick={() => markNotificationRead(note.id)}
+                            className={`p-2.5 rounded-xl border text-xs cursor-pointer transition ${
+                              note.unread
+                                ? "bg-indigo-50/60 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800"
+                                : "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700"
+                            }`}
                           >
-                            <p className="text-xs font-semibold">{time}</p>
-                            <p className={[
-                              "text-sm",
-                              isDark ? "text-slate-200" : "text-slate-700",
-                            ].join(" ")}>{title}</p>
+                            <p className="font-bold text-slate-900 dark:text-white">{note.title}</p>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-0.5">{note.time}</p>
                           </div>
                         ))}
                       </div>
+
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          addManualNotification();
+                        }}
+                        className="mt-3 flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800"
+                      >
+                        <input
+                          type="text"
+                          value={manualNotificationTitle}
+                          onChange={(e) => setManualNotificationTitle(e.target.value)}
+                          placeholder="Add custom reminder..."
+                          className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2 text-xs font-semibold focus:outline-none"
+                        />
+                        <button
+                          type="submit"
+                          className="px-3 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl shadow-xs"
+                        >
+                          Add
+                        </button>
+                      </form>
                     </div>
                   ) : null}
 
                   {menu === "account" ? (
-                    <div>
-                      <p className="text-sm font-semibold">{currentUser.name}</p>
-                      <p className={[
-                        "mt-1 text-xs",
-                        isDark ? "text-slate-400" : "text-slate-500",
-                      ].join(" ")}>{currentUser.email}</p>
-                      <p className={[
-                        "mt-1 text-[11px]",
-                        isDark ? "text-slate-500" : "text-slate-500",
-                      ].join(" ")}>Role: {currentUser.role}</p>
-
-                      <div className="mt-3 space-y-2 rounded-xl border border-white/20 p-2.5">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Profile Switcher</p>
-                        <input
-                          value={profileDraft.name}
-                          onChange={(event) => setProfileDraft((current) => ({ ...current, name: event.target.value }))}
-                          placeholder="Full name"
-                          className={[
-                            "w-full rounded-lg border px-2.5 py-2 text-xs outline-none",
-                            isDark
-                              ? "border-white/15 bg-white/8 text-slate-100 placeholder:text-slate-400"
-                              : "border-slate-200 bg-white text-slate-700 placeholder:text-slate-400",
-                          ].join(" ")}
-                        />
-                        <input
-                          value={profileDraft.email}
-                          onChange={(event) => setProfileDraft((current) => ({ ...current, email: event.target.value }))}
-                          placeholder="Email"
-                          className={[
-                            "w-full rounded-lg border px-2.5 py-2 text-xs outline-none",
-                            isDark
-                              ? "border-white/15 bg-white/8 text-slate-100 placeholder:text-slate-400"
-                              : "border-slate-200 bg-white text-slate-700 placeholder:text-slate-400",
-                          ].join(" ")}
-                        />
-                        <input
-                          value={profileDraft.role}
-                          onChange={(event) => setProfileDraft((current) => ({ ...current, role: event.target.value }))}
-                          placeholder="Role"
-                          className={[
-                            "w-full rounded-lg border px-2.5 py-2 text-xs outline-none",
-                            isDark
-                              ? "border-white/15 bg-white/8 text-slate-100 placeholder:text-slate-400"
-                              : "border-slate-200 bg-white text-slate-700 placeholder:text-slate-400",
-                          ].join(" ")}
-                        />
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={saveProfileDraft}
-                            className="rounded-lg bg-[#e9ff63] px-3 py-2 text-xs font-semibold text-slate-800"
-                          >
-                            Save
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setProfileDraft(currentUser)}
-                            className={[
-                              "rounded-lg px-3 py-2 text-xs font-semibold",
-                              isDark ? "bg-white/12 text-slate-200" : "bg-slate-100 text-slate-600",
-                            ].join(" ")}
-                          >
-                            Reset
-                          </button>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                        <div className="w-10 h-10 rounded-full bg-amber-400 text-slate-900 font-black flex items-center justify-center text-sm shadow-xs">
+                          {currentUser.name.charAt(0)}
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setProfileDraft({ name: "Sarah", email: "owner@ghostlightbooks.com", role: "Owner" })}
-                            className={[
-                              "rounded-lg px-2 py-1.5 text-[11px] font-semibold",
-                              isDark ? "bg-white/8 text-slate-300" : "bg-slate-100 text-slate-600",
-                            ].join(" ")}
-                          >
-                            Load Owner
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setProfileDraft({ name: "Avery", email: "manager@ghostlightbooks.com", role: "Manager" })}
-                            className={[
-                              "rounded-lg px-2 py-1.5 text-[11px] font-semibold",
-                              isDark ? "bg-white/8 text-slate-300" : "bg-slate-100 text-slate-600",
-                            ].join(" ")}
-                          >
-                            Load Manager
-                          </button>
+                        <div>
+                          <p className="text-xs font-black text-slate-900 dark:text-white">{currentUser.name}</p>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">{currentUser.email}</p>
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800">
+                            {currentUser.role}
+                          </span>
                         </div>
                       </div>
 
-                      <div className="mt-3 grid gap-2">
-                        {[
-                          "Profile",
-                          "Store Settings",
-                          "Help Center",
-                          "Sign Out",
-                        ].map((item) => (
-                          <button
-                            key={item}
-                            type="button"
-                            onClick={() => {
-                              if (item === "Store Settings") {
-                                onNavigate("/shopify");
-                                setMenu("none");
-                              } else if (item === "Help Center") {
-                                setMenu("none");
-                                window.alert("Help Center is coming soon. Use the deployment and connector status panels for live diagnostics.");
-                              } else if (item === "Sign Out") {
-                                window.localStorage.removeItem("colophon-current-user");
-                                onCurrentUserChange({ name: "Sarah", email: "owner@ghostlightbooks.com", role: "Owner" });
-                                setMenu("none");
-                                onNavigate("/login");
-                              }
-                            }}
-                            className={[
-                              "rounded-xl px-3 py-2 text-left text-sm font-medium transition",
-                              isDark ? "bg-white/8 hover:bg-white/12" : "bg-slate-50 hover:bg-slate-100",
-                            ].join(" ")}
+                      <div className="space-y-2 text-xs">
+                        <div>
+                          <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Name</label>
+                          <input
+                            type="text"
+                            value={profileDraft.name}
+                            onChange={(e) => setProfileDraft({ ...profileDraft, name: e.target.value })}
+                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2 font-semibold"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Role</label>
+                          <select
+                            value={profileDraft.role}
+                            onChange={(e) => setProfileDraft({ ...profileDraft, role: e.target.value })}
+                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2 font-semibold"
                           >
-                            {item}
-                          </button>
-                        ))}
+                            <option value="Owner">Owner</option>
+                            <option value="Manager">Manager</option>
+                            <option value="Staff">Staff</option>
+                            <option value="Librarian">Librarian</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.localStorage.removeItem("colophon-current-user");
+                            setMenu("none");
+                            onNavigate("/login");
+                          }}
+                          className="text-xs text-rose-600 hover:text-rose-700 dark:text-rose-400 font-medium cursor-pointer"
+                        >
+                          Sign Out
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            saveProfileDraft();
+                            setMenu("none");
+                          }}
+                          className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium text-xs rounded-xl shadow-xs cursor-pointer transition"
+                        >
+                          Save
+                        </button>
                       </div>
                     </div>
                   ) : null}
                 </div>
               ) : null}
-                </div>
-                <p className={["mt-2 w-full text-center text-lg font-semibold tabular-nums", isDark ? "text-slate-300" : "text-slate-600"].join(" ")}>{currentTime.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</p>
-              </div>
             </header>
           )}
 
-          <main className={isPosRoute ? "pb-2 pt-0" : "pb-8 pt-5"}>{children}</main>
+          <main className={isPosRoute ? "pb-2 pt-0" : "pb-8 pt-4"}>{children}</main>
         </div>
+
+        {/* Mobile Navigation Tab Bar (Phones & Tablets) */}
+        <MobileBottomNav
+          workspaceMode={workspaceMode}
+          loanedCount={librarySummary?.loanedCount}
+        />
+
+        {/* Mobile PWA Install Prompt Banner */}
+        <InstallAppPrompt />
+
+        {/* Mobile Sliding Sidebar Drawer */}
+        {isMobileDrawerOpen && (
+          <div className="fixed inset-0 z-[99999] lg:hidden flex">
+            {/* Backdrop */}
+            <div
+              className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm animate-fadeIn"
+              onClick={() => setIsMobileDrawerOpen(false)}
+            />
+
+            {/* Drawer Panel */}
+            <div
+              className={[
+                "relative w-72 max-w-[85vw] h-full flex flex-col p-4 shadow-2xl border-r z-10 animate-slideRight overflow-y-auto",
+                isDark ? "bg-[#131927] border-slate-800 text-slate-100" : "bg-white border-slate-200 text-slate-800",
+              ].join(" ")}
+            >
+              <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <BrandLogo className="h-8 w-8 shrink-0" />
+                  <div>
+                    <p className="text-xs font-black text-slate-900 dark:text-white">{workspaceMode === "library" ? "Colophon Library" : "Colophon Bookstore"}</p>
+                    <p className="text-[10px] text-slate-500 font-semibold">Mobile Edition</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileDrawerOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 font-bold cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Workspace Mode Switcher */}
+              <div className="mt-3 mb-2 p-1 rounded-2xl flex items-center gap-1 bg-slate-100 dark:bg-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onWorkspaceModeChange?.("bookstore");
+                    setIsMobileDrawerOpen(false);
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                    workspaceMode === "bookstore" ? "bg-white text-indigo-950 shadow-sm" : "text-slate-500"
+                  }`}
+                >
+                  <span>🏪</span>
+                  <span>Store</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onWorkspaceModeChange?.("library");
+                    setIsMobileDrawerOpen(false);
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                    workspaceMode === "library" ? "bg-indigo-600 text-white shadow-sm" : "text-slate-500"
+                  }`}
+                >
+                  <span>🏛️</span>
+                  <span>Library</span>
+                </button>
+              </div>
+
+              {/* Library Space Switcher inside Mobile Drawer */}
+              {workspaceMode === "library" && (
+                <div className="my-2 p-2.5 bg-indigo-50/60 dark:bg-indigo-950/40 rounded-2xl border border-indigo-200/50 dark:border-indigo-800/50 space-y-1.5">
+                  <span className="text-[10px] font-bold text-indigo-900 dark:text-indigo-300 block uppercase tracking-wider">
+                    🏛️ Active Library Space
+                  </span>
+                  <LibrarySpaceSwitcher />
+                </div>
+              )}
+
+              {/* Nav Items List */}
+              <nav className="mt-3 space-y-1 flex-1">
+                {navItems.map((item) => {
+                  const isActive = item.to ? activePath.startsWith(item.to) : false;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => {
+                        if (item.to) {
+                          onNavigate(item.to);
+                          setIsMobileDrawerOpen(false);
+                        }
+                      }}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition text-left cursor-pointer ${
+                        isActive
+                          ? "bg-indigo-600 text-white shadow-sm"
+                          : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                      }`}
+                    >
+                      <span className="text-base">{item.icon}</span>
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+
+              {/* User Account / Sign Out in Drawer */}
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                <div>
+                  <p className="font-semibold text-slate-900 dark:text-white">{currentUser.name}</p>
+                  <p className="text-[10px] text-slate-500 font-normal">{currentUser.role}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.localStorage.removeItem("colophon-current-user");
+                    setIsMobileDrawerOpen(false);
+                    onNavigate("/login");
+                  }}
+                  className="px-2.5 py-1 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg text-xs font-medium cursor-pointer transition"
+                >
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1059,12 +1054,14 @@ function Shell({
 
 function toolbarButtonClass(isDark: boolean, isActive: boolean): string {
   if (isActive) {
-    return "relative grid h-8 w-8 place-items-center rounded-full bg-[#e9ff63] text-slate-800";
+    return "relative grid h-8 w-8 place-items-center rounded-full bg-indigo-600 text-white font-black shadow-xs";
   }
 
   return [
-    "relative grid h-8 w-8 place-items-center rounded-full transition",
-    isDark ? "bg-white/10 text-slate-200 hover:bg-white/16" : "bg-white/70 text-slate-500 hover:bg-white",
+    "relative grid h-8 w-8 place-items-center rounded-full transition cursor-pointer",
+    isDark
+      ? "bg-slate-800 text-slate-100 hover:bg-slate-700 hover:text-white border border-slate-700"
+      : "bg-white text-slate-800 hover:bg-slate-100 hover:text-slate-950 border border-slate-300 shadow-2xs",
   ].join(" ");
 }
 
@@ -1102,12 +1099,6 @@ function BrandLogo({ className }: { className?: string }): JSX.Element {
         d="M60 31V78"
         stroke="currentColor"
         strokeWidth="3"
-        strokeLinecap="round"
-      />
-      <path
-        d="M60 40C63 33 70 33 73 40C70 47 63 47 60 40ZM60 40C57 33 50 33 47 40C50 47 57 47 60 40ZM60 40C67 40 67 47 60 50C53 47 53 40 60 40ZM60 40C67 40 67 33 60 30C53 33 53 40 60 40Z"
-        stroke="currentColor"
-        strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

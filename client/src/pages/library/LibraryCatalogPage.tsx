@@ -1,15 +1,20 @@
-import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import SurfaceCard from "../../components/ui/SurfaceCard";
+import { useEffect, useState, useMemo } from "react";
+import { useSearchParams, Link } from "react-router-dom";
+import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
+import { useLibrarySpace } from "../../context/LibrarySpaceContext";
 import {
   fetchLibraryVolumes,
   updateLibraryVolume,
   deleteLibraryVolume,
+  bulkDeleteLibraryVolumes,
+  bulkMoveLibraryVolumes,
   fetchShelves,
-  loanVolume,
-  returnVolume,
+  fetchCoverCandidates,
+  updateVolumeCover,
+  refreshMissingCovers,
   type LibraryVolume,
   type LibraryShelfLocation,
+  type CoverCandidate,
 } from "../../services/library.service";
 
 function formatCurrency(amount: number | null | undefined): string {
@@ -17,28 +22,43 @@ function formatCurrency(amount: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
 }
 
-const DEWEY_OPTIONS = [
-  { key: "", label: "All Dewey Classes" },
-  { key: "0", label: "000 - Computer Science & Information" },
-  { key: "1", label: "100 - Philosophy & Psychology" },
-  { key: "2", label: "200 - Religion & Mythology" },
-  { key: "3", label: "300 - Social Sciences & Law" },
-  { key: "4", label: "400 - Language & Linguistics" },
-  { key: "5", label: "500 - Pure Science & Mathematics" },
-  { key: "6", label: "600 - Technology & Medicine" },
-  { key: "7", label: "700 - Arts & Recreation" },
-  { key: "8", label: "800 - Literature, Poetry & Drama" },
-  { key: "9", label: "900 - History & Geography" },
+const CATEGORY_PILLS = [
+  { key: "ALL", label: "All Books" },
+  { key: "READING", label: "Currently Reading" },
+  { key: "UNREAD", label: "To Read (TBR)" },
+  { key: "COMPLETED", label: "Completed" },
+  { key: "WISHLIST", label: "Wishlist" },
 ];
 
+function getConditionLabel(cond: string | undefined | null): string {
+  switch (cond?.toUpperCase()) {
+    case "FINE":
+    case "AS_NEW":
+    case "LIKE_NEW":
+      return "Fine";
+    case "VERY_GOOD":
+      return "Very Good";
+    case "GOOD":
+      return "Good";
+    case "FAIR":
+      return "Fair";
+    case "POOR":
+      return "Poor";
+    default:
+      return "Very Good";
+  }
+}
+
 export default function LibraryCatalogPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
+  const { spaces, activeSpace, activeSpaceId } = useLibrarySpace();
 
   // Filters
   const [searchQuery, setSearchQuery] = useState(searchParams.get("query") || "");
-  const [deweyFilter, setDeweyFilter] = useState(searchParams.get("dewey") || "");
+  const [deweyFilter] = useState(searchParams.get("dewey") || "");
   const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "ALL");
-  const [shelfFilter, setShelfFilter] = useState(searchParams.get("shelf") || "");
+  const [conditionFilter] = useState(searchParams.get("condition") || "ALL");
+  const [shelfFilter] = useState(searchParams.get("shelf") || "");
 
   // Data
   const [volumes, setVolumes] = useState<LibraryVolume[]>([]);
@@ -46,10 +66,43 @@ export default function LibraryCatalogPage() {
   const [loading, setLoading] = useState(true);
   const [shelves, setShelves] = useState<LibraryShelfLocation[]>([]);
 
-  // View state
-  const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
+  // Selection & Bulk State
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [targetSpaceId, setTargetSpaceId] = useState("");
+  const [targetShelfId, setTargetShelfId] = useState("");
+  const [isSubmittingBulk, setIsSubmittingBulk] = useState(false);
+
+  // Toast Feedback state
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // View Mode ("grid" | "list")
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+
+  // Book Detail Modal
   const [selectedVolume, setSelectedVolume] = useState<LibraryVolume | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+
+  // Liked items
+  const [likedIds, setLikedIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("colophon_liked_books") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  const toggleLike = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setLikedIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+      localStorage.setItem("colophon_liked_books", JSON.stringify(next));
+      return next;
+    });
+  };
 
   // Edit draft state
   const [editTitle, setEditTitle] = useState("");
@@ -57,17 +110,68 @@ export default function LibraryCatalogPage() {
   const [editDewey, setEditDewey] = useState("");
   const [editLoc, setEditLoc] = useState("");
   const [editShelfId, setEditShelfId] = useState("");
+  const [editLibrarySpaceId, setEditLibrarySpaceId] = useState("");
   const [editStatus, setEditStatus] = useState<"UNREAD" | "READING" | "COMPLETED" | "WISHLIST">("UNREAD");
-  const [editRating, setEditRating] = useState<number | null>(null);
+  const [editCondition, setEditCondition] = useState("VERY_GOOD");
   const [editNotes, setEditNotes] = useState("");
-  const [editTags, setEditTags] = useState("");
   const [editValue, setEditValue] = useState("");
+  const [editAskingPrice, setEditAskingPrice] = useState("");
 
-  // Loan modal state
-  const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
-  const [borrowerName, setBorrowerName] = useState("");
-  const [borrowerContact, setBorrowerContact] = useState("");
-  const [dueDate, setDueDate] = useState("");
+  // Cover Picker State
+  const [isCoverPickerOpen, setIsCoverPickerOpen] = useState(false);
+  const [coverCandidates, setCoverCandidates] = useState<CoverCandidate[]>([]);
+  const [loadingCovers, setLoadingCovers] = useState(false);
+  const [customCoverUrl, setCustomCoverUrl] = useState("");
+  const [isRefreshingMissing, setIsRefreshingMissing] = useState(false);
+
+  const openCoverPicker = async (volume: LibraryVolume) => {
+    setSelectedVolume(volume);
+    setIsCoverPickerOpen(true);
+    setLoadingCovers(true);
+    setCustomCoverUrl("");
+    try {
+      const list = await fetchCoverCandidates({
+        isbn: volume.isbn,
+        title: volume.title,
+        author: volume.author || undefined,
+      });
+      setCoverCandidates(list);
+    } catch {
+      setCoverCandidates([]);
+    } finally {
+      setLoadingCovers(false);
+    }
+  };
+
+  const handleSelectCover = async (coverUrl: string) => {
+    if (!selectedVolume) return;
+    try {
+      const updated = await updateVolumeCover(selectedVolume.id, coverUrl);
+      setSelectedVolume(updated);
+      setIsCoverPickerOpen(false);
+      setActionMessage(`Updated cover image for "${updated.title}".`);
+      void loadVolumes();
+    } catch (err) {
+      setErrorMessage("Failed to update book cover.");
+    }
+  };
+
+  const handleRefreshAllMissingCovers = async () => {
+    setIsRefreshingMissing(true);
+    try {
+      const res = await refreshMissingCovers();
+      if (res.updatedCount > 0) {
+        setActionMessage(`Found and attached covers for ${res.updatedCount} books!`);
+      } else {
+        setActionMessage("All cataloged books already have covers attached.");
+      }
+      void loadVolumes();
+    } catch {
+      setErrorMessage("Failed to refresh covers.");
+    } finally {
+      setIsRefreshingMissing(false);
+    }
+  };
 
   const loadVolumes = async () => {
     setLoading(true);
@@ -77,6 +181,8 @@ export default function LibraryCatalogPage() {
         dewey: deweyFilter || undefined,
         shelfLocationId: shelfFilter || undefined,
         readingStatus: statusFilter !== "ALL" ? statusFilter : undefined,
+        condition: conditionFilter !== "ALL" ? conditionFilter : undefined,
+        librarySpaceId: activeSpaceId !== "ALL" ? activeSpaceId : undefined,
       });
       setVolumes(res.items);
       setTotalCount(res.total);
@@ -93,27 +199,31 @@ export default function LibraryCatalogPage() {
 
   useEffect(() => {
     void loadVolumes();
-  }, [deweyFilter, statusFilter, shelfFilter]);
+  }, [deweyFilter, statusFilter, conditionFilter, shelfFilter, activeSpaceId]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     void loadVolumes();
   };
 
-  const openInspector = (volume: LibraryVolume) => {
+  const openBookDetail = (volume: LibraryVolume) => {
+    if (isSelectionMode) {
+      toggleSelectVolume(volume.id);
+      return;
+    }
     setSelectedVolume(volume);
     setEditTitle(volume.title);
     setEditAuthor(volume.author || "");
     setEditDewey(volume.deweyDecimal || "");
     setEditLoc(volume.locClassification || "");
     setEditShelfId(volume.shelfLocationId || "");
+    setEditLibrarySpaceId(volume.librarySpaceId || (spaces[0]?.id ?? ""));
     setEditStatus(volume.readingStatus);
-    setEditRating(volume.rating);
+    setEditCondition(volume.condition || "VERY_GOOD");
     setEditNotes(volume.personalNotes || "");
-    setEditTags(volume.exLibrisTags || "");
     setEditValue(volume.replacementValue ? String(volume.replacementValue) : "18.99");
+    setEditAskingPrice(volume.askingPrice ? String(volume.askingPrice) : "");
     setIsEditing(false);
-    setIsLoanModalOpen(false);
   };
 
   const handleSaveEdit = async () => {
@@ -125,615 +235,1029 @@ export default function LibraryCatalogPage() {
         deweyDecimal: editDewey || null,
         locClassification: editLoc || null,
         shelfLocationId: editShelfId || null,
+        librarySpaceId: editLibrarySpaceId || null,
         readingStatus: editStatus,
-        rating: editRating,
+        condition: editCondition,
         personalNotes: editNotes || null,
-        exLibrisTags: editTags || null,
         replacementValue: parseFloat(editValue) || 18.99,
+        askingPrice: editAskingPrice ? parseFloat(editAskingPrice) : null,
       });
       setSelectedVolume(updated);
       setIsEditing(false);
+      setActionMessage(`Updated "${updated.title}" successfully.`);
       void loadVolumes();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to update volume.");
+      setErrorMessage(err instanceof Error ? err.message : "Failed to update volume.");
+    }
+  };
+
+  const toggleSelectVolume = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.length === volumes.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(volumes.map((v) => v.id));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    const confirmed = window.confirm(
+      `Remove ${selectedIds.length} selected books from your library collection?`
+    );
+    if (!confirmed) return;
+    try {
+      const res = await bulkDeleteLibraryVolumes(selectedIds);
+      setActionMessage(`Successfully removed ${res.count} books.`);
+      setSelectedIds([]);
+      setIsSelectionMode(false);
+      if (selectedVolume && selectedIds.includes(selectedVolume.id)) {
+        setSelectedVolume(null);
+      }
+      void loadVolumes();
+    } catch {
+      setErrorMessage("Failed to bulk delete books.");
+    }
+  };
+
+  const handleBulkMove = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedIds.length === 0) return;
+    setIsSubmittingBulk(true);
+    try {
+      await bulkMoveLibraryVolumes(selectedIds, {
+        librarySpaceId: targetSpaceId || undefined,
+        shelfLocationId: targetShelfId || undefined,
+      });
+      setActionMessage(`Moved ${selectedIds.length} books successfully.`);
+      setSelectedIds([]);
+      setIsSelectionMode(false);
+      setIsMoveModalOpen(false);
+      void loadVolumes();
+    } catch {
+      setErrorMessage("Failed to move selected books.");
+    } finally {
+      setIsSubmittingBulk(false);
     }
   };
 
   const handleDeleteVolume = async () => {
     if (!selectedVolume) return;
-    const confirmed = window.confirm(`Remove "${selectedVolume.title}" from your library collection?`);
+    const confirmed = window.confirm(`Remove "${selectedVolume.title}" from your library?`);
     if (!confirmed) return;
     try {
       await deleteLibraryVolume(selectedVolume.id);
+      setActionMessage(`Removed "${selectedVolume.title}".`);
       setSelectedVolume(null);
       void loadVolumes();
-    } catch (err) {
-      alert("Failed to delete volume.");
+    } catch {
+      setErrorMessage("Failed to delete volume.");
     }
   };
 
-  const handleLoanSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedVolume || !borrowerName.trim()) return;
-    try {
-      const updated = await loanVolume(selectedVolume.id, borrowerName, borrowerContact || undefined, dueDate || undefined);
-      setSelectedVolume(updated);
-      setIsLoanModalOpen(false);
-      setBorrowerName("");
-      setBorrowerContact("");
-      setDueDate("");
-      void loadVolumes();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to loan volume.");
-    }
-  };
+  const selectedTotalValue = volumes
+    .filter((v) => selectedIds.includes(v.id))
+    .reduce((sum, v) => sum + (v.replacementValue || 0), 0);
 
-  const handleReturnBook = async () => {
-    if (!selectedVolume) return;
-    try {
-      const updated = await returnVolume(selectedVolume.id);
-      setSelectedVolume(updated);
-      void loadVolumes();
-    } catch (err) {
-      alert("Failed to return volume.");
-    }
-  };
+  const selectedVolumesForPrint = useMemo(() => {
+    return volumes.filter((v) => selectedIds.includes(v.id));
+  }, [volumes, selectedIds]);
 
   return (
-    <div className="space-y-6">
-      {/* Header & Filter Controls Card */}
-      <SurfaceCard className="space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200/80 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-700 text-xl font-bold shadow-sm">
-              📚
-            </div>
-            <div>
-              <h1 className="text-xl font-black text-slate-900 tracking-tight">Collection Catalog & Search</h1>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Browse, search and filter your entire library by Dewey Decimal, LOC Call Number, Room & Shelf
-              </p>
-            </div>
-          </div>
-
-          {/* View mode toggle */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center p-0.5 bg-slate-100 rounded-xl border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setViewMode("grid")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                  viewMode === "grid" ? "bg-white text-indigo-700 shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <span>🔲 Grid</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("table")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                  viewMode === "table" ? "bg-white text-indigo-700 shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <span>📋 Table</span>
-              </button>
-            </div>
-          </div>
+    <div className="space-y-6 pb-28 font-sans max-w-4xl mx-auto">
+      {/* Toast Notifications */}
+      {actionMessage && (
+        <div className="p-3 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-xs flex items-center justify-between shadow-2xs font-bold animate-fadeIn">
+          <span>{actionMessage}</span>
+          <button type="button" onClick={() => setActionMessage(null)} className="px-1 text-emerald-700 dark:text-emerald-300 font-bold cursor-pointer">✕</button>
         </div>
-
-        {/* Search & Filter Bar */}
-        <form onSubmit={handleSearchSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 pt-1">
-          <div className="lg:col-span-4">
-            <div className="relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search title, author, ISBN, call #..."
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 focus:bg-white transition"
-              />
-              <span className="absolute left-3 top-2.5 text-xs text-slate-400">🔍</span>
-            </div>
-          </div>
-
-          <div className="lg:col-span-3">
-            <select
-              value={deweyFilter}
-              onChange={(e) => setDeweyFilter(e.target.value)}
-              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-medium focus:outline-none focus:border-indigo-500 shadow-2xs"
-            >
-              {DEWEY_OPTIONS.map((opt) => (
-                <option key={opt.key} value={opt.key}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="lg:col-span-3">
-            <select
-              value={shelfFilter}
-              onChange={(e) => setShelfFilter(e.target.value)}
-              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-medium focus:outline-none focus:border-indigo-500 shadow-2xs"
-            >
-              <option value="">All Rooms & Shelves</option>
-              {shelves.map((shelf) => (
-                <option key={shelf.id} value={shelf.id}>
-                  {shelf.fullLocationLabel}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="lg:col-span-2">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-medium focus:outline-none focus:border-indigo-500 shadow-2xs"
-            >
-              <option value="ALL">All Statuses</option>
-              <option value="UNREAD">To Read (Unread)</option>
-              <option value="READING">Currently Reading</option>
-              <option value="COMPLETED">Completed (Read)</option>
-              <option value="WISHLIST">Wishlist</option>
-            </select>
-          </div>
-        </form>
-      </SurfaceCard>
-
-      {/* Catalog Listing */}
-      {loading ? (
-        <div className="p-12 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col items-center gap-3">
-          <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs font-medium">Loading catalog volumes...</span>
-        </div>
-      ) : volumes.length === 0 ? (
-        <div className="p-12 text-center text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
-          <span className="text-3xl block mb-2">📚</span>
-          <p className="text-sm font-bold text-slate-800">No volumes found matching your criteria.</p>
-          <p className="text-xs text-slate-500 mt-1">Try clearing your filters or scan new books from the Scanner page.</p>
-        </div>
-      ) : viewMode === "grid" ? (
-        /* GRID VIEW */
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {volumes.map((volume) => (
-            <div
-              key={volume.id}
-              onClick={() => openInspector(volume)}
-              className="group p-3 bg-white hover:bg-slate-50/80 rounded-2xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition cursor-pointer flex flex-col justify-between space-y-2.5"
-            >
-              <div className="space-y-2">
-                {/* Cover Image */}
-                <div className="relative w-full aspect-[2/3] bg-slate-100 rounded-xl overflow-hidden border border-slate-200 shadow-2xs flex items-center justify-center">
-                  {volume.coverUrl ? (
-                    <img
-                      src={volume.coverUrl}
-                      alt=""
-                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                    />
-                  ) : (
-                    <span className="text-3xl">📖</span>
-                  )}
-
-                  {/* Badges Overlay */}
-                  {volume.isLoaned && (
-                    <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-rose-600 text-white font-bold text-[9px] rounded shadow-xs">
-                      Loaned
-                    </div>
-                  )}
-
-                  {volume.readingStatus === "COMPLETED" && (
-                    <div className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-emerald-600/90 text-white font-bold text-[9px] rounded shadow-xs">
-                      ✓ Read
-                    </div>
-                  )}
-                </div>
-
-                {/* Title & Author */}
-                <div>
-                  <h3 className="text-xs font-bold text-slate-900 line-clamp-2 leading-snug group-hover:text-indigo-700 transition">
-                    {volume.title}
-                  </h3>
-                  <p className="text-[11px] text-slate-500 truncate mt-0.5">{volume.author || "Unknown Author"}</p>
-                </div>
-              </div>
-
-              {/* Call Number Pill */}
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px]">
-                <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200/60 truncate max-w-[85px]">
-                  {volume.deweyDecimal ? `DDC ${volume.deweyDecimal}` : volume.locClassification ? `LOC ${volume.locClassification.slice(0, 6)}` : "Unclassified"}
-                </span>
-                <span className="text-slate-400 font-medium">
-                  {volume.roomName ? volume.roomName.slice(0, 8) : "--"}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        /* TABLE VIEW */
-        <SurfaceCard className="p-0 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 text-slate-500 font-bold bg-slate-50">
-                  <th className="py-2.5 px-3">Cover</th>
-                  <th className="py-2.5 px-3">Title & Author</th>
-                  <th className="py-2.5 px-3">Dewey (DDC)</th>
-                  <th className="py-2.5 px-3">LOC Call #</th>
-                  <th className="py-2.5 px-3">Shelf Location</th>
-                  <th className="py-2.5 px-3">Status</th>
-                  <th className="py-2.5 px-3 text-right">Replacement Value</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {volumes.map((vol) => (
-                  <tr
-                    key={vol.id}
-                    onClick={() => openInspector(vol)}
-                    className="hover:bg-slate-50/80 transition cursor-pointer"
-                  >
-                    <td className="py-2 px-3">
-                      <div className="w-8 h-11 bg-slate-100 rounded overflow-hidden border border-slate-200 flex items-center justify-center">
-                        {vol.coverUrl ? (
-                          <img src={vol.coverUrl} alt="" className="w-full h-full object-cover" />
-                        ) : (
-                          <span>📖</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-2 px-3 min-w-[200px]">
-                      <p className="font-bold text-slate-900 truncate">{vol.title}</p>
-                      <p className="text-[11px] text-slate-500 truncate">{vol.author || "Unknown"}</p>
-                    </td>
-                    <td className="py-2 px-3 font-mono font-bold text-indigo-700">
-                      {vol.deweyDecimal || "--"}
-                    </td>
-                    <td className="py-2 px-3 font-mono text-slate-700">
-                      {vol.locClassification || "--"}
-                    </td>
-                    <td className="py-2 px-3 text-slate-600">
-                      {vol.roomName ? `${vol.roomName} > ${vol.shelfName}` : "Unassigned"}
-                    </td>
-                    <td className="py-2 px-3">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        vol.readingStatus === "COMPLETED" ? "bg-emerald-50 text-emerald-800 border border-emerald-200" :
-                        vol.readingStatus === "READING" ? "bg-blue-50 text-blue-800 border border-blue-200" :
-                        vol.readingStatus === "WISHLIST" ? "bg-amber-50 text-amber-800 border border-amber-200" :
-                        "bg-slate-100 text-slate-700"
-                      }`}>
-                        {vol.readingStatus}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3 text-right font-bold text-emerald-700">
-                      {formatCurrency(vol.replacementValue)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SurfaceCard>
       )}
 
-      {/* Volume Inspector & Editor Modal Drawer */}
-      {selectedVolume && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-5 animate-scaleUp">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-12 h-16 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shrink-0 flex items-center justify-center">
-                  {selectedVolume.coverUrl ? (
-                    <img src={selectedVolume.coverUrl} alt="" className="w-full h-full object-cover" />
+      {errorMessage && (
+        <div className="p-3 bg-rose-50 text-rose-900 dark:bg-rose-950/60 dark:text-rose-200 border border-rose-200 dark:border-rose-800 rounded-2xl text-xs flex items-center justify-between shadow-2xs font-bold animate-fadeIn">
+          <span>{errorMessage}</span>
+          <button type="button" onClick={() => setErrorMessage(null)} className="px-1 text-rose-700 dark:text-rose-300 font-bold cursor-pointer">✕</button>
+        </div>
+      )}
+
+      {/* 1. Location Bar & View / Select Controls */}
+      <div className="flex items-center justify-between gap-3 pt-1 flex-wrap">
+        <LibrarySpaceSwitcher />
+
+        <div className="flex items-center gap-2">
+          {/* Refresh Missing Covers */}
+          <button
+            type="button"
+            onClick={handleRefreshAllMissingCovers}
+            disabled={isRefreshingMissing}
+            title="Scan multi-source registries (Google, OpenLibrary, ThriftBooks, AbeBooks) for missing book covers"
+            className="px-3 py-1.5 rounded-2xl border text-xs font-medium transition cursor-pointer shadow-2xs bg-[#e8eef5] dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-[#dce4ee] dark:hover:bg-slate-700 disabled:opacity-50"
+          >
+            {isRefreshingMissing ? "Searching Covers…" : "Find Missing Covers"}
+          </button>
+
+          {/* Select Mode Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              setIsSelectionMode(!isSelectionMode);
+              if (isSelectionMode) setSelectedIds([]);
+            }}
+            className={`px-3 py-1.5 rounded-2xl border text-xs font-medium transition cursor-pointer shadow-2xs ${
+              isSelectionMode || selectedIds.length > 0
+                ? "bg-slate-800 text-white border-slate-800 font-semibold"
+                : "bg-[#e8eef5] dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-[#dce4ee] dark:hover:bg-slate-700"
+            }`}
+          >
+            {isSelectionMode || selectedIds.length > 0 ? `Selected (${selectedIds.length})` : "Select"}
+          </button>
+
+          {/* View Mode Toggle */}
+          <div className="flex items-center p-1 bg-[#e8eef5] dark:bg-slate-800 rounded-2xl shadow-2xs border border-slate-300 dark:border-slate-700 text-xs font-medium">
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={`px-3 py-1.5 rounded-xl transition cursor-pointer font-medium ${
+                viewMode === "grid"
+                  ? "bg-slate-800 dark:bg-indigo-600 text-white shadow-xs font-semibold"
+                  : "text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white"
+              }`}
+            >
+              Grid
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("list")}
+              className={`px-3 py-1.5 rounded-xl transition cursor-pointer font-medium ${
+                viewMode === "list"
+                  ? "bg-slate-800 dark:bg-indigo-600 text-white shadow-xs font-semibold"
+                  : "text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white"
+              }`}
+            >
+              List
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Selection Mode Bar (Select All / Clear) */}
+      {(isSelectionMode || selectedIds.length > 0) && (
+        <div className="flex items-center justify-between p-3 bg-[#e2e8f0] dark:bg-indigo-950/40 rounded-2xl border border-slate-300 dark:border-indigo-800 text-xs font-medium">
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="select-all"
+              checked={volumes.length > 0 && selectedIds.length === volumes.length}
+              onChange={handleSelectAll}
+              className="w-4 h-4 rounded text-slate-800 cursor-pointer"
+            />
+            <label htmlFor="select-all" className="cursor-pointer text-slate-800 dark:text-slate-100 font-semibold">
+              Select All {volumes.length} Books
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedIds([]);
+              setIsSelectionMode(false);
+            }}
+            className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-medium"
+          >
+            Cancel Selection
+          </button>
+        </div>
+      )}
+
+      {/* 2. Rounded Pill Search Bar (Lightish Blue-Grey) */}
+      <form onSubmit={handleSearchSubmit} className="relative">
+        <div className="flex items-center bg-[#e8eef5] dark:bg-slate-800 rounded-full px-4 py-3 shadow-xs border border-slate-300 dark:border-slate-700 transition focus-within:ring-2 focus-within:ring-slate-400">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by title, author, category, ISBN..."
+            className="flex-1 bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 font-normal focus:outline-none"
+          />
+        </div>
+      </form>
+
+      {/* 3. Fast Category Filter Pills (Lightish Blue-Grey) */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+        {CATEGORY_PILLS.map((pill) => {
+          const isActive = statusFilter === pill.key;
+          return (
+            <button
+              key={pill.key}
+              type="button"
+              onClick={() => setStatusFilter(pill.key)}
+              className={`px-4 py-1.5 rounded-full text-xs font-medium tracking-tight shrink-0 transition active:scale-95 cursor-pointer ${
+                isActive
+                  ? "bg-slate-800 dark:bg-indigo-600 text-white shadow-sm"
+                  : "bg-[#e2e8f0] hover:bg-[#cbd5e1] dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-2xs"
+              }`}
+            >
+              {pill.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 4. Catalog Display (Grid vs. List) */}
+      {loading ? (
+        <div className="p-16 text-center text-slate-600 dark:text-slate-300 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl shadow-xs border border-slate-300 dark:border-slate-700 flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-3 border-slate-700 dark:border-indigo-600 border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs font-normal text-slate-600 dark:text-slate-300">Loading collection...</span>
+        </div>
+      ) : volumes.length === 0 ? (
+        <div className="p-16 text-center text-slate-600 dark:text-slate-300 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl shadow-xs border border-slate-300 dark:border-slate-700 space-y-3">
+          <p className="text-sm font-semibold text-slate-900 dark:text-white">No books found in this space.</p>
+          <Link
+            to="/library/quick-scan"
+            className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-slate-800 hover:bg-slate-900 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium text-xs rounded-xl shadow-md transition"
+          >
+            Quick Camera Scanner
+          </Link>
+        </div>
+      ) : viewMode === "grid" ? (
+        /* Minimalist Modern Floating Covers Grid */
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 sm:gap-6">
+          {volumes.map((vol, idx) => {
+            const isLiked = likedIds.includes(vol.id);
+            const isSelected = selectedIds.includes(vol.id);
+            return (
+              <div
+                key={vol.id}
+                onClick={() => openBookDetail(vol)}
+                className={`group cursor-pointer space-y-2 select-none relative transition ${
+                  isSelected ? "scale-[0.98]" : ""
+                }`}
+              >
+                {/* Book Cover */}
+                <div
+                  className={`relative w-full aspect-[2/3] rounded-2xl overflow-hidden shadow-[0_8px_20px_rgba(0,0,0,0.06)] group-hover:shadow-[0_12px_28px_rgba(0,0,0,0.12)] group-hover:-translate-y-1 transition duration-300 bg-[#f1f5f9] dark:bg-slate-800 border flex items-center justify-center ${
+                    isSelected
+                      ? "ring-4 ring-slate-700 border-slate-700 shadow-xl"
+                      : "border-slate-300 dark:border-slate-700"
+                  }`}
+                >
+                  {vol.coverUrl ? (
+                    <img
+                      src={vol.coverUrl}
+                      alt={vol.title}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
                   ) : (
-                    <span className="text-xl">📖</span>
+                    <div className="w-full h-full p-3 bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 text-slate-800 dark:text-white flex flex-col justify-between border border-slate-200 dark:border-slate-700">
+                      <span className="text-[10px] font-semibold tracking-widest text-indigo-600 dark:text-indigo-400">COLOPHON</span>
+                      <p className="text-[11px] font-semibold line-clamp-3 leading-tight">{vol.title}</p>
+                    </div>
+                  )}
+
+                  {/* Checkbox (in selection mode or on card hover) */}
+                  {(isSelectionMode || isSelected) ? (
+                    <div
+                      onClick={(e) => toggleSelectVolume(vol.id, e)}
+                      className="absolute top-2 left-2 z-10 w-6 h-6 rounded-lg bg-white/95 dark:bg-slate-900/95 shadow-md flex items-center justify-center border border-slate-300 dark:border-slate-600"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {}}
+                        className="w-4 h-4 rounded text-indigo-600 cursor-pointer"
+                      />
+                    </div>
+                  ) : (
+                    /* Sorting Rank Number Badge */
+                    <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-slate-900/80 text-white font-medium text-[9px] rounded-lg backdrop-blur-md shadow-xs">
+                      #{idx + 1}
+                    </div>
+                  )}
+
+                  {/* Bookmark Heart Button */}
+                  <button
+                    type="button"
+                    onClick={(e) => toggleLike(vol.id, e)}
+                    className={`absolute top-2 right-2 w-7 h-7 rounded-full bg-white/90 dark:bg-slate-900/90 backdrop-blur-md flex items-center justify-center text-xs shadow-md transition active:scale-125 ${
+                      isLiked ? "text-rose-500" : "text-slate-400 hover:text-rose-500"
+                    }`}
+                  >
+                    {isLiked ? "♥" : "♡"}
+                  </button>
+
+                  {/* Status Badge */}
+                  {vol.readingStatus === "READING" && (
+                    <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-blue-600 text-white font-medium text-[8px] rounded-full shadow-xs">
+                      Reading
+                    </div>
+                  )}
+                  {vol.readingStatus === "COMPLETED" && (
+                    <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-emerald-600 text-white font-medium text-[8px] rounded-full shadow-xs">
+                      Read
+                    </div>
                   )}
                 </div>
-                <div className="min-w-0">
-                  <h2 className="text-base font-black text-slate-900 line-clamp-1">{selectedVolume.title}</h2>
-                  <p className="text-xs text-slate-500 truncate mt-0.5">
-                    {selectedVolume.author || "Unknown Author"} &bull; ISBN: {selectedVolume.isbn}
+
+                {/* Typography */}
+                <div className="px-1 text-center">
+                  <h3 className="text-xs font-semibold text-slate-900 dark:text-white line-clamp-1 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
+                    {vol.title}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-normal truncate mt-0.5">
+                    {vol.author || "Unknown"}
+                  </p>
+                  <p className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400 mt-1">
+                    {formatCurrency(vol.rareMarketValue || vol.replacementValue)}
                   </p>
                 </div>
               </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* Ultra-Clean Modern List Items */
+        <div className="space-y-2.5">
+          {volumes.map((vol, idx) => {
+            const isLiked = likedIds.includes(vol.id);
+            const isSelected = selectedIds.includes(vol.id);
+            return (
+              <div
+                key={vol.id}
+                onClick={() => openBookDetail(vol)}
+                className={`bg-[#f1f5f9] dark:bg-slate-800 rounded-2xl p-3 shadow-xs border transition cursor-pointer group flex items-center justify-between gap-3.5 ${
+                  isSelected
+                    ? "ring-2 ring-slate-700 border-slate-700 bg-slate-200/50 dark:bg-indigo-950/30"
+                    : "border-slate-300 dark:border-slate-700 hover:shadow-md"
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  {/* Select Checkbox (in selection mode or if selected) */}
+                  {(isSelectionMode || isSelected) && (
+                    <div onClick={(e) => toggleSelectVolume(vol.id, e)} className="shrink-0 p-1">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {}}
+                        className="w-4 h-4 rounded text-slate-800 cursor-pointer"
+                      />
+                    </div>
+                  )}
+
+                  <div className="w-11 h-15 rounded-xl overflow-hidden bg-white dark:bg-slate-900 shrink-0 border border-slate-300 dark:border-slate-700 flex items-center justify-center shadow-2xs">
+                    {vol.coverUrl ? (
+                      <img src={vol.coverUrl} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-[10px] font-medium text-slate-500">BOOK</span>
+                    )}
+                  </div>
+
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-semibold text-slate-900 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
+                      {vol.title}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-normal truncate mt-0.5">
+                      {vol.author || "Unknown Author"}
+                    </p>
+                    <div className="flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400 font-normal mt-1">
+                      <span>{vol.deweyDecimal ? `DDC ${vol.deweyDecimal}` : "General"}</span>
+                      <span>•</span>
+                      <span className="text-emerald-700 dark:text-emerald-400 font-medium">
+                        {formatCurrency(vol.rareMarketValue || vol.replacementValue)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <div className="text-[11px] font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-700/70 border border-slate-300 dark:border-slate-600 px-2 py-0.5 rounded-lg" title="Sort Rank">
+                    #{idx + 1}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => toggleLike(vol.id, e)}
+                    className={`text-base p-1 transition cursor-pointer active:scale-125 ${
+                      isLiked ? "text-rose-500 scale-110" : "text-slate-400 hover:text-rose-500"
+                    }`}
+                  >
+                    {isLiked ? "♥" : "♡"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Floating Bottom Bulk Action Toolbar */}
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 z-[9990] bg-white dark:bg-slate-900 text-slate-900 dark:text-white px-4 py-3 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 flex items-center gap-2.5 sm:gap-3.5 flex-wrap justify-center animate-slideUp max-w-[95vw]">
+          <span className="text-xs font-black shrink-0">
+            {selectedIds.length} books ({formatCurrency(selectedTotalValue)})
+          </span>
+
+          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
+
+          {/* Move Action */}
+          <button
+            type="button"
+            onClick={() => {
+              setTargetSpaceId(activeSpaceId !== "ALL" ? activeSpaceId : spaces[0]?.id || "");
+              setIsMoveModalOpen(true);
+            }}
+            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-black transition cursor-pointer border border-indigo-200 dark:border-indigo-800"
+          >
+            Move Space / Shelf
+          </button>
+
+          {/* Print Labels Action */}
+          <button
+            type="button"
+            onClick={() => setIsPrintModalOpen(true)}
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-black transition cursor-pointer border border-slate-300 dark:border-slate-600"
+          >
+            Print Labels
+          </button>
+
+          {/* Bulk Delete Action */}
+          <button
+            type="button"
+            onClick={handleBulkDelete}
+            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black transition cursor-pointer shadow-xs"
+          >
+            Delete
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedIds([]);
+              setIsSelectionMode(false);
+            }}
+            className="text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white font-bold px-1"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Move Selected Books Modal */}
+      {isMoveModalOpen && (
+        <div className="fixed inset-0 z-[99999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full animate-scaleUp space-y-4">
+            <div>
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                Move {selectedIds.length} Selected Books
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                Reassign these volumes to a different Library Space or physical shelf.
+              </p>
+            </div>
+
+            <form onSubmit={handleBulkMove} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-black text-slate-900 dark:text-white mb-1">
+                  Destination Library Space
+                </label>
+                <select
+                  value={targetSpaceId}
+                  onChange={(e) => setTargetSpaceId(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-3 font-bold text-slate-900 dark:text-white"
+                >
+                  {spaces.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.location || "Main"})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-black text-slate-900 dark:text-white mb-1">
+                  Destination Shelf (Optional)
+                </label>
+                <select
+                  value={targetShelfId}
+                  onChange={(e) => setTargetShelfId(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-3 font-bold text-slate-900 dark:text-white"
+                >
+                  <option value="">-- Keep Current / Unassigned --</option>
+                  {shelves.map((sh) => (
+                    <option key={sh.id} value={sh.id}>
+                      {sh.fullLocationLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsMoveModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingBulk}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-black rounded-xl shadow-md"
+                >
+                  {isSubmittingBulk ? "Moving…" : `Move ${selectedIds.length} Books`}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Print Spine Labels Modal */}
+      {isPrintModalOpen && (
+        <div className="fixed inset-0 z-[99999] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-200 dark:border-slate-800 max-w-2xl w-full max-h-[90vh] flex flex-col animate-scaleUp space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
+              <div>
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  Spine Labels Preview ({selectedVolumesForPrint.length} items)
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  Standard library spine tags with Dewey/LOC call numbers and barcodes.
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={() => setSelectedVolume(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg font-bold"
+                onClick={() => setIsPrintModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-300"
               >
                 ✕
               </button>
             </div>
 
-            {/* Read / Edit Form */}
-            {!isEditing ? (
-              <div className="space-y-4 text-xs">
-                {/* Classification Badges */}
-                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
-                  <span className="text-[11px] font-bold text-slate-600 block">Catalog Classification Numbers</span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="px-2.5 py-1 bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-lg font-bold font-mono">
-                      Dewey: {selectedVolume.deweyDecimal || "Not Assigned"}
-                    </span>
-                    <span className="px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg font-bold font-mono">
-                      LOC: {selectedVolume.locClassification || "Not Assigned"}
-                    </span>
-                    <span className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg font-bold">
-                      Est. Value: {formatCurrency(selectedVolume.replacementValue)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Location & Status */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <span className="text-[11px] text-slate-500 font-medium block">Shelf Location</span>
-                    <span className="text-xs font-bold text-slate-800 block mt-0.5">
-                      {selectedVolume.roomName ? `${selectedVolume.roomName} > ${selectedVolume.shelfName}` : "Unassigned Shelf"}
-                    </span>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <span className="text-[11px] text-slate-500 font-medium block">Reading Status</span>
-                    <span className="text-xs font-bold text-slate-800 block mt-0.5">
-                      {selectedVolume.readingStatus}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Circulation status */}
-                {selectedVolume.isLoaned ? (
-                  <div className="p-3.5 bg-rose-50 rounded-xl border border-rose-200 text-xs flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-rose-900 block">Currently on Loan</span>
-                      <span className="text-rose-700 mt-0.5 block">
-                        Borrowed by <span className="font-semibold">{selectedVolume.borrowerName}</span> (Due: {selectedVolume.dueDate ? new Date(selectedVolume.dueDate).toLocaleDateString() : "No date"})
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleReturnBook}
-                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg transition"
-                    >
-                      Return Book
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <span className="text-slate-600 font-medium">Available on shelf</span>
-                    <button
-                      type="button"
-                      onClick={() => setIsLoanModalOpen(true)}
-                      className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold rounded-lg transition"
-                    >
-                      👥 Loan Volume
-                    </button>
-                  </div>
-                )}
-
-                {/* Personal notes */}
-                {selectedVolume.personalNotes && (
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <span className="text-[11px] text-slate-500 font-bold block mb-1">Personal Notes & Review</span>
-                    <p className="text-slate-700">{selectedVolume.personalNotes}</p>
-                  </div>
-                )}
-
-                {/* Ex Libris Tags */}
-                {selectedVolume.exLibrisTags && (
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <span className="text-[11px] text-slate-500 font-bold block mb-1">Ex-Libris Tags & Attributes</span>
-                    <span className="px-2 py-0.5 bg-amber-100 text-amber-900 font-bold rounded-md border border-amber-200 inline-block">
-                      🏷️ {selectedVolume.exLibrisTags}
-                    </span>
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div className="flex items-center justify-between pt-2 border-t border-slate-200">
-                  <button
-                    type="button"
-                    onClick={handleDeleteVolume}
-                    className="text-xs text-rose-600 hover:text-rose-700 font-bold"
+            {/* Printable Label Grid */}
+            <div className="overflow-y-auto flex-1 p-2 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-700">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 print:grid-cols-3">
+                {selectedVolumesForPrint.map((vol) => (
+                  <div
+                    key={vol.id}
+                    className="bg-white text-slate-900 p-3 rounded-xl border border-slate-300 shadow-xs flex flex-col justify-between h-36 font-mono text-[11px]"
                   >
-                    🗑️ Remove Volume
-                  </button>
-                  <div className="flex items-center gap-2">
+                    <div className="space-y-0.5">
+                      <div className="font-black text-sm text-indigo-900 leading-tight">
+                        {vol.deweyDecimal ? `DDC ${vol.deweyDecimal}` : (vol.locClassification || "GEN")}
+                      </div>
+                      <div className="font-bold text-slate-700 tracking-wider text-[10px]">
+                        {vol.author ? vol.author.slice(0, 3).toUpperCase() : "COL"}
+                      </div>
+                      <p className="font-sans font-bold text-[10px] text-slate-900 line-clamp-2 leading-tight">
+                        {vol.title}
+                      </p>
+                    </div>
+
+                    <div className="pt-1 border-t border-slate-200 text-[9px] text-slate-500 font-mono">
+                      <div className="font-mono tracking-widest text-[8px] truncate">
+                        ||||| | |||| || |||
+                      </div>
+                      <span className="truncate block font-bold">{vol.isbn || vol.id.slice(0, 10)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsPrintModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl text-xs shadow-md transition"
+              >
+                Print Label Sheet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Authentic "Book Details" Screen / Modal Sheet */}
+      {selectedVolume && (
+        <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col animate-scaleUp border border-slate-200 dark:border-slate-800">
+            {/* Clean Light/Dark Header Bar */}
+            <div className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white px-4 py-3.5 flex items-center justify-between shrink-0">
+              <button
+                type="button"
+                onClick={() => setSelectedVolume(null)}
+                className="w-8 h-8 rounded-full bg-white dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 flex items-center justify-center text-xs font-bold transition cursor-pointer"
+              >
+                ←
+              </button>
+              <h2 className="text-xs font-black tracking-wider uppercase text-slate-700 dark:text-slate-200">
+                Book Details
+              </h2>
+              <button
+                type="button"
+                onClick={() => toggleLike(selectedVolume.id)}
+                className={`w-8 h-8 rounded-full bg-white dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 flex items-center justify-center text-sm transition cursor-pointer ${
+                  likedIds.includes(selectedVolume.id) ? "text-rose-500" : "text-slate-400"
+                }`}
+              >
+                {likedIds.includes(selectedVolume.id) ? "♥" : "♡"}
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-5 flex-1">
+              {!isEditing ? (
+                <>
+                  {/* Top Book Header: Large Cover on Left + Metadata on Right */}
+                  <div className="flex items-start gap-4">
+                    <div className="flex flex-col items-center gap-1.5 shrink-0">
+                      <div
+                        onClick={() => openCoverPicker(selectedVolume)}
+                        className="group relative w-24 sm:w-28 aspect-[2/3] rounded-2xl overflow-hidden shadow-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center cursor-pointer transition hover:shadow-lg"
+                        title="Click to view & select from multiple cover sources"
+                      >
+                        {selectedVolume.coverUrl ? (
+                          <img
+                            src={selectedVolume.coverUrl}
+                            alt={selectedVolume.title}
+                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                          />
+                        ) : (
+                          <div className="w-full h-full p-2 bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900 text-slate-800 dark:text-white flex flex-col justify-between">
+                            <span className="text-[9px] font-semibold text-indigo-600 dark:text-indigo-400">COLOPHON</span>
+                            <p className="text-[10px] font-semibold line-clamp-3 leading-tight">{selectedVolume.title}</p>
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-[10px] font-medium p-1 text-center backdrop-blur-xs">
+                          <span>Change</span>
+                          <span>Cover</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openCoverPicker(selectedVolume)}
+                        className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline font-medium cursor-pointer"
+                      >
+                        Alternate Covers
+                      </button>
+                    </div>
+
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight">
+                        {selectedVolume.title}
+                      </h3>
+                      <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        {selectedVolume.author || "Unknown Author"}
+                      </p>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold">
+                        Published: <strong className="text-slate-900 dark:text-white">{selectedVolume.publishYear || "2020"}</strong> • Pages: <strong className="text-slate-900 dark:text-white">{selectedVolume.pageCount || "320"}</strong>
+                      </p>
+
+                      <div className="flex items-center gap-2 pt-1 flex-wrap">
+                        <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-black text-[10px] rounded-md">
+                          Rank #{volumes.findIndex(v => v.id === selectedVolume.id) + 1 || 1}
+                        </span>
+                        <span className="text-slate-400">•</span>
+                        <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                          {selectedVolume.isLoaned ? "On Loan" : "Available on Shelf"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* About The Book Synopsis */}
+                  <div className="space-y-1.5">
+                    <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                      About The Book
+                    </h4>
+                    <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed font-medium line-clamp-4">
+                      {selectedVolume.description ||
+                        `An acclaimed volume cataloged in the ${activeSpace?.name || "Library"} collection. Features verified Dewey Decimal classification ${selectedVolume.deweyDecimal || "--"} and catalog inventory identification.`}
+                    </p>
+                  </div>
+
+                  {/* Dual Action Buttons */}
+                  <div className="grid grid-cols-2 gap-3 pt-1">
                     <button
                       type="button"
                       onClick={() => setIsEditing(true)}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition"
+                      className="py-2.5 px-4 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-black text-xs rounded-xl shadow-sm transition text-center cursor-pointer uppercase tracking-wider"
                     >
-                      ✏️ Edit Classification & Location
+                      Reading Status
+                    </button>
+
+                    <Link
+                      to="/library/shelves"
+                      className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl shadow-sm transition text-center uppercase tracking-wider"
+                    >
+                      Locate Shelf
+                    </Link>
+                  </div>
+
+                  {/* Shelf Location Cards */}
+                  <div className="space-y-2.5 pt-2">
+                    <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                      Shelf Location
+                    </h4>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1">
+                        <p className="text-xs font-black text-slate-900 dark:text-slate-100">
+                          {selectedVolume.roomName || "Main Study"}
+                        </p>
+                        <p className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold">
+                          {selectedVolume.shelfName || "Main Stacks Row A"}
+                        </p>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1">
+                        <p className="text-xs font-mono font-black text-indigo-600 dark:text-indigo-400">
+                          DDC {selectedVolume.deweyDecimal || "800.1"}
+                        </p>
+                        <p className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold">
+                          {getConditionLabel(selectedVolume.condition)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Remove Button */}
+                  <div className="pt-2 text-center">
+                    <button
+                      type="button"
+                      onClick={handleDeleteVolume}
+                      className="text-xs text-rose-600 hover:text-rose-700 dark:text-rose-400 font-bold cursor-pointer"
+                    >
+                      Remove from Library
+                    </button>
+                  </div>
+                </>
+              ) : (
+                /* Edit Mode */
+                <div className="space-y-4 text-xs">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Title</label>
+                      <input
+                        type="text"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 font-bold text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Author</label>
+                      <input
+                        type="text"
+                        value={editAuthor}
+                        onChange={(e) => setEditAuthor(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Reading Status</label>
+                      <select
+                        value={editStatus}
+                        onChange={(e) => setEditStatus(e.target.value as any)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 font-bold text-slate-900 dark:text-white"
+                      >
+                        <option value="UNREAD">To Read (Unread)</option>
+                        <option value="READING">Currently Reading</option>
+                        <option value="COMPLETED">Completed (Read)</option>
+                        <option value="WISHLIST">Wishlist</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Condition</label>
+                      <select
+                        value={editCondition}
+                        onChange={(e) => setEditCondition(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 font-bold text-slate-900 dark:text-white"
+                      >
+                        <option value="FINE">Fine / Like New</option>
+                        <option value="VERY_GOOD">Very Good</option>
+                        <option value="GOOD">Good</option>
+                        <option value="FAIR">Fair</option>
+                        <option value="POOR">Poor</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Dewey (DDC)</label>
+                      <input
+                        type="text"
+                        value={editDewey}
+                        onChange={(e) => setEditDewey(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 font-mono text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Replacement Value ($)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 font-mono font-bold text-emerald-600 dark:text-emerald-400"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(false)}
+                      className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      onClick={handleSaveEdit}
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md"
+                    >
+                      Save Changes
                     </button>
                   </div>
                 </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Multi-Source Alternate Cover Picker Modal */}
+      {isCoverPickerOpen && selectedVolume && (
+        <div className="fixed inset-0 z-[100000] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col animate-scaleUp border border-slate-200 dark:border-slate-800">
+            {/* Header */}
+            <div className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 px-5 py-4 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  Cover Images & Editions
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-md">
+                  {selectedVolume.title} {selectedVolume.isbn ? `• ISBN ${selectedVolume.isbn}` : ""}
+                </p>
               </div>
-            ) : (
-              /* EDIT MODE */
-              <div className="space-y-4 text-xs">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Title</label>
-                    <input
-                      type="text"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-medium"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Author</label>
-                    <input
-                      type="text"
-                      value={editAuthor}
-                      onChange={(e) => setEditAuthor(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-medium"
-                    />
+              <button
+                type="button"
+                onClick={() => setIsCoverPickerOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center text-xs font-semibold text-slate-600 dark:text-slate-300 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="p-5 overflow-y-auto space-y-5 flex-1 text-xs">
+              {/* Sources searched info */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] text-slate-500 font-medium">Registries:</span>
+                <span className="px-2 py-0.5 bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 rounded-lg text-[10px] font-medium">Google Books HD</span>
+                <span className="px-2 py-0.5 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-lg text-[10px] font-medium">Open Library CDN</span>
+                <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-[10px] font-medium">ThriftBooks</span>
+                <span className="px-2 py-0.5 bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded-lg text-[10px] font-medium">AbeBooks</span>
+                <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-[10px] font-medium">ISBNdb</span>
+              </div>
+
+              {/* Loading State */}
+              {loadingCovers && (
+                <div className="py-12 text-center space-y-3">
+                  <div className="w-8 h-8 border-2 border-slate-800 dark:border-white border-t-transparent rounded-full animate-spin mx-auto" />
+                  <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">
+                    Probing multi-source book cover registries in parallel…
+                  </p>
+                </div>
+              )}
+
+              {/* Candidates Grid */}
+              {!loadingCovers && coverCandidates.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                    Found {coverCandidates.length} Verified Cover {coverCandidates.length === 1 ? "Edition" : "Editions"}:
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {coverCandidates.map((cand, idx) => {
+                      const isCurrent = selectedVolume.coverUrl === cand.url;
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => handleSelectCover(cand.url)}
+                          className={`group relative rounded-2xl border p-2 flex flex-col justify-between items-center text-center cursor-pointer transition ${
+                            isCurrent
+                              ? "border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20 ring-2 ring-emerald-500"
+                              : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:border-slate-400 dark:hover:border-slate-500 hover:shadow-md"
+                          }`}
+                        >
+                          <div className="w-full aspect-[2/3] rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 mb-2 flex items-center justify-center">
+                            <img
+                              src={cand.url}
+                              alt={`Cover candidate from ${cand.source}`}
+                              className="w-full h-full object-cover group-hover:scale-105 transition"
+                            />
+                          </div>
+
+                          <div className="w-full space-y-1">
+                            <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold ${
+                              cand.source === "Google Books"
+                                ? "bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300"
+                                : cand.source === "Open Library"
+                                ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300"
+                                : cand.source === "ThriftBooks"
+                                ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300"
+                                : cand.source === "AbeBooks"
+                                ? "bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300"
+                                : "bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200"
+                            }`}>
+                              {cand.source}
+                            </span>
+
+                            <button
+                              type="button"
+                              className={`w-full py-1 text-[10px] font-medium rounded-lg transition ${
+                                isCurrent
+                                  ? "bg-emerald-600 text-white font-semibold"
+                                  : "bg-slate-800 hover:bg-slate-900 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white"
+                              }`}
+                            >
+                              {isCurrent ? "✓ Active Cover" : "Select Cover"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
+              )}
 
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Dewey Decimal (DDC)</label>
-                    <input
-                      type="text"
-                      value={editDewey}
-                      onChange={(e) => setEditDewey(e.target.value)}
-                      placeholder="813.54"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">LOC Call Number</label>
-                    <input
-                      type="text"
-                      value={editLoc}
-                      onChange={(e) => setEditLoc(e.target.value)}
-                      placeholder="PS3558.E63 D86"
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Replacement Value ($)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-medium"
-                    />
-                  </div>
+              {!loadingCovers && coverCandidates.length === 0 && (
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-700 text-center space-y-1">
+                  <p className="font-semibold text-slate-800 dark:text-slate-200">
+                    No registry covers automatically matched.
+                  </p>
+                  <p className="text-slate-500 dark:text-slate-400 text-[11px]">
+                    You can paste any custom image link below to set a custom book cover.
+                  </p>
                 </div>
+              )}
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Shelf Location</label>
-                    <select
-                      value={editShelfId}
-                      onChange={(e) => setEditShelfId(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-medium"
-                    >
-                      <option value="">-- Unassigned --</option>
-                      {shelves.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.fullLocationLabel}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Reading Status</label>
-                    <select
-                      value={editStatus}
-                      onChange={(e) => setEditStatus(e.target.value as any)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 font-medium"
-                    >
-                      <option value="UNREAD">To Read (Unread)</option>
-                      <option value="READING">Currently Reading</option>
-                      <option value="COMPLETED">Completed (Read)</option>
-                      <option value="WISHLIST">Wishlist</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Ex-Libris Tags (e.g. Signed, 1st Edition, Gift)</label>
+              {/* Custom Image URL Section */}
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                <label className="block font-semibold text-slate-800 dark:text-slate-200">
+                  Or Paste Custom Image URL:
+                </label>
+                <div className="flex gap-2">
                   <input
-                    type="text"
-                    value={editTags}
-                    onChange={(e) => setEditTags(e.target.value)}
-                    placeholder="Signed by Author, First Edition"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2"
+                    type="url"
+                    placeholder="https://example.com/cover.jpg"
+                    value={customCoverUrl}
+                    onChange={(e) => setCustomCoverUrl(e.target.value)}
+                    className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white"
                   />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Personal Notes & Review</label>
-                  <textarea
-                    rows={3}
-                    value={editNotes}
-                    onChange={(e) => setEditNotes(e.target.value)}
-                    placeholder="Add personal reflections, favorite quotes, or condition notes..."
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2"
-                  />
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
                   <button
                     type="button"
-                    onClick={() => setIsEditing(false)}
-                    className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl"
+                    onClick={() => {
+                      if (customCoverUrl.trim()) {
+                        void handleSelectCover(customCoverUrl.trim());
+                      }
+                    }}
+                    disabled={!customCoverUrl.trim()}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-900 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium rounded-xl disabled:opacity-50 transition cursor-pointer"
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSaveEdit}
-                    className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl"
-                  >
-                    Save Changes
+                    Apply URL
                   </button>
                 </div>
               </div>
-            )}
+            </div>
 
-            {/* Loan Book Sub-Modal */}
-            {isLoanModalOpen && (
-              <form onSubmit={handleLoanSubmit} className="p-4 bg-indigo-50/70 border border-indigo-200 rounded-2xl space-y-3 animate-fadeIn text-xs">
-                <span className="font-bold text-indigo-950 block">Loan this Volume to Borrower</span>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Borrower Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={borrowerName}
-                      onChange={(e) => setBorrowerName(e.target.value)}
-                      placeholder="e.g. Jane Doe"
-                      className="w-full bg-white border border-slate-300 rounded-xl p-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-bold mb-1">Contact Email / Phone</label>
-                    <input
-                      type="text"
-                      value={borrowerContact}
-                      onChange={(e) => setBorrowerContact(e.target.value)}
-                      placeholder="jane@example.com"
-                      className="w-full bg-white border border-slate-300 rounded-xl p-2"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Expected Return Due Date</label>
-                  <input
-                    type="date"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-2"
-                  />
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsLoanModalOpen(false)}
-                    className="px-3 py-1.5 bg-slate-200 text-slate-700 font-bold rounded-lg"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-1.5 bg-indigo-600 text-white font-bold rounded-lg"
-                  >
-                    Confirm Loan
-                  </button>
-                </div>
-              </form>
-            )}
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsCoverPickerOpen(false)}
+                className="px-5 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-medium rounded-xl text-xs cursor-pointer transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

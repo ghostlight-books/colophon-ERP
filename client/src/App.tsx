@@ -23,11 +23,14 @@ import BundlesPage from "./pages/BundlesPage";
 import LoginPage from "./pages/LoginPage";
 import LibraryDashboardPage from "./pages/library/LibraryDashboardPage";
 import LibraryScannerPage from "./pages/library/LibraryScannerPage";
+import LibraryQuickScanPage from "./pages/library/LibraryQuickScanPage";
 import LibraryCatalogPage from "./pages/library/LibraryCatalogPage";
 import LibraryShelvesPage from "./pages/library/LibraryShelvesPage";
+import LibraryExchangePage from "./pages/library/LibraryExchangePage";
 import LibraryLendingPage from "./pages/library/LibraryLendingPage";
 import LibraryValuationReportPage from "./pages/library/LibraryValuationReportPage";
 import { WorkspaceProvider, useWorkspace } from "./contexts/WorkspaceContext";
+import { LibrarySpaceProvider } from "./context/LibrarySpaceContext";
 import { hasModuleAccess, normalizeRole, type SystemModule } from "@colophon/shared";
 
 function EbayIcon(): JSX.Element {
@@ -167,43 +170,53 @@ function NetworkIcon(): JSX.Element {
   );
 }
 
+function RootRedirect(): JSX.Element {
+  const { mode } = useWorkspace();
+  return <Navigate to={mode === "library" ? "/library" : "/dashboard"} replace />;
+}
+
 function App(): JSX.Element {
   return (
     <WorkspaceProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/admin" element={<AdminPage />} />
-          <Route path="/" element={<ShellRouteLayout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<DashboardPage />} />
-            <Route path="pos-register" element={<PosRegisterPage />} />
-            <Route path="intake" element={<IntakePage />} />
-            <Route path="buying" element={<BuyingPage />} />
-            <Route path="sales" element={<InventoryPage />} />
-            <Route path="operations" element={<OperationsPage />} />
-            <Route path="marketing" element={<MarketingPage />} />
-            <Route path="calendar" element={<CalendarPage />} />
-            <Route path="lists" element={<ListsPage />} />
-            <Route path="inventory" element={<ActiveInventoryPage />} />
-            <Route path="inventory/product/:isbn" element={<ProductPage />} />
-            <Route path="bundles" element={<BundlesPage />} />
-            <Route path="finance" element={<FinancePage />} />
-            <Route path="shopify" element={<ShopifyPage />} />
-            <Route path="ebay" element={<EbayPage />} />
-            <Route path="open-network" element={<OpenNetworkPage />} />
-            <Route path="open-network/order" element={<NetworkOrderRequestPage />} />
+      <LibrarySpaceProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/admin" element={<AdminPage />} />
+            <Route path="/library/quick-scan" element={<LibraryQuickScanPage />} />
+            <Route path="/" element={<ShellRouteLayout />}>
+              <Route index element={<RootRedirect />} />
+              <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="pos-register" element={<PosRegisterPage />} />
+              <Route path="intake" element={<IntakePage />} />
+              <Route path="buying" element={<BuyingPage />} />
+              <Route path="sales" element={<InventoryPage />} />
+              <Route path="operations" element={<OperationsPage />} />
+              <Route path="marketing" element={<MarketingPage />} />
+              <Route path="calendar" element={<CalendarPage />} />
+              <Route path="lists" element={<ListsPage />} />
+              <Route path="inventory" element={<ActiveInventoryPage />} />
+              <Route path="inventory/product/:isbn" element={<ProductPage />} />
+              <Route path="bundles" element={<BundlesPage />} />
+              <Route path="finance" element={<FinancePage />} />
+              <Route path="shopify" element={<ShopifyPage />} />
+              <Route path="ebay" element={<EbayPage />} />
+              <Route path="open-network" element={<OpenNetworkPage />} />
+              <Route path="open-network/order" element={<NetworkOrderRequestPage />} />
 
-            {/* Colophon Library Edition Routes */}
-            <Route path="library" element={<LibraryDashboardPage />} />
-            <Route path="library/scan" element={<LibraryScannerPage />} />
-            <Route path="library/catalog" element={<LibraryCatalogPage />} />
-            <Route path="library/shelves" element={<LibraryShelvesPage />} />
-            <Route path="library/lending" element={<LibraryLendingPage />} />
-            <Route path="library/valuation" element={<LibraryValuationReportPage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+              {/* Colophon Library Edition Routes */}
+              <Route path="library" element={<LibraryDashboardPage />} />
+              <Route path="library/scan" element={<LibraryScannerPage />} />
+              <Route path="library/quick-scan" element={<LibraryQuickScanPage />} />
+              <Route path="library/catalog" element={<LibraryCatalogPage />} />
+              <Route path="library/shelves" element={<LibraryShelvesPage />} />
+              <Route path="library/exchange" element={<LibraryExchangePage />} />
+              <Route path="library/lending" element={<LibraryLendingPage />} />
+              <Route path="library/valuation" element={<LibraryValuationReportPage />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </LibrarySpaceProvider>
     </WorkspaceProvider>
   );
 }
@@ -212,40 +225,34 @@ function ShellRouteLayout(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const { mode, setMode } = useWorkspace();
-  const [currentUser, setCurrentUser] = useState<LoggedInUser>(() => {
-    if (typeof window === "undefined") {
-      return {
-        name: "Sarah",
-        email: "owner@ghostlightbooks.com",
-        role: "Owner",
-      };
-    }
-
+  const [currentUser, setCurrentUser] = useState<LoggedInUser | null>(() => {
+    if (typeof window === "undefined") return null;
     try {
       const stored = window.localStorage.getItem("colophon-current-user");
       if (stored) {
         const parsed = JSON.parse(stored) as Partial<LoggedInUser>;
-        return {
-          name: parsed.name ?? "Sarah",
-          email: parsed.email ?? "owner@ghostlightbooks.com",
-          role: parsed.role ?? "Owner",
-        };
+        if (parsed.name && parsed.email) {
+          return {
+            name: parsed.name,
+            email: parsed.email,
+            role: parsed.role ?? "Owner",
+          };
+        }
       }
-    } catch {
-      // fall through to default user
-    }
-
-    return {
-      name: "Sarah",
-      email: "owner@ghostlightbooks.com",
-      role: "Owner",
-    };
+    } catch {}
+    return null;
   });
   const [accessWarning, setAccessWarning] = useState("");
 
   useEffect(() => {
-    window.localStorage.setItem("colophon-current-user", JSON.stringify(currentUser));
+    if (currentUser) {
+      window.localStorage.setItem("colophon-current-user", JSON.stringify(currentUser));
+    }
   }, [currentUser]);
+
+  if (!currentUser) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
 
   // Bookstore Nav Items
   const bookstoreNavItems = useMemo<ShellNavItem[]>(() => {
@@ -263,10 +270,6 @@ function ShellRouteLayout(): JSX.Element {
         to: "/pos-register",
         icon: <RegisterIcon />,
         module: "POS",
-        children: [
-          { key: "pos-checkout", label: "Register & Cart", to: "/pos-register", icon: <RegisterIcon /> },
-          { key: "pos-sales", label: "Sales & Orders", to: "/sales", icon: <OrdersIcon /> },
-        ],
       },
       {
         key: "inventory",
@@ -370,6 +373,12 @@ function ShellRouteLayout(): JSX.Element {
         icon: <OperationsIcon />,
       },
       {
+        key: "library-exchange",
+        label: "Exchange & Offers",
+        to: "/library/exchange",
+        icon: <RequestIcon />,
+      },
+      {
         key: "library-lending",
         label: "Lending & Circulation",
         to: "/library/lending",
@@ -385,21 +394,18 @@ function ShellRouteLayout(): JSX.Element {
   }, []);
 
   const activeNavItems = mode === "library" ? libraryNavItems : bookstoreNavItems;
-
   const routeModules: Record<string, SystemModule> = {
     "/dashboard": "DASHBOARD",
     "/pos-register": "POS",
     "/sales": "POS",
     "/calendar": "CALENDAR",
     "/lists": "LISTS",
-    "/intake": "INTAKE",
     "/buying": "INTAKE",
     "/inventory": "INVENTORY",
     "/bundles": "INVENTORY",
     "/ebay": "INVENTORY",
     "/shopify": "INVENTORY",
     "/finance": "ACCOUNTING",
-    "/operations": "DASHBOARD",
     "/marketing": "LISTS",
     "/open-network": "INVENTORY",
     "/open-network/order": "INVENTORY",
@@ -407,7 +413,7 @@ function ShellRouteLayout(): JSX.Element {
 
   const pageMeta: Record<string, { subtitle: string }> = {
     "/dashboard": {
-      subtitle: "Here s what happening in your store.",
+      subtitle: "Here's what is happening in your store.",
     },
     "/pos-register": {
       subtitle: "POS machine and cart are ready for checkout.",
@@ -463,6 +469,9 @@ function ShellRouteLayout(): JSX.Element {
     "/library/shelves": {
       subtitle: "Physical room, bookcase, and shelf organizer with volume capacity meters.",
     },
+    "/library/exchange": {
+      subtitle: "Review incoming cash offers and propose book trades across community libraries and bookstores.",
+    },
     "/library/lending": {
       subtitle: "Track borrowed books, return due dates, and patron contact logs.",
     },
@@ -503,7 +512,7 @@ function ShellRouteLayout(): JSX.Element {
       currentUser={currentUser}
       onCurrentUserChange={setCurrentUser}
     >
-      {accessWarning ? <div className="fixed right-4 top-4 z-50 rounded-xl bg-rose-100 px-4 py-3 text-sm font-semibold text-rose-800 shadow-lg" role="alert">{accessWarning}</div> : null}
+      {accessWarning ? <div className="fixed right-4 top-4 z-[9999] rounded-xl bg-rose-100 px-4 py-3 text-sm font-semibold text-rose-800 shadow-lg" role="alert">{accessWarning}</div> : null}
       <Outlet context={{ currentUser }} />
     </Shell>
   );

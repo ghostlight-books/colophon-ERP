@@ -38,3 +38,4 @@ export default function BrandLogo({ className }: { className?: string }): JSX.El
     </svg>
   );
 }
+
