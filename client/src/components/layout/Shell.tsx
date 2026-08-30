@@ -510,8 +510,8 @@ function Shell({
           <nav className="mt-0.5 flex flex-1 flex-col gap-1 overflow-y-auto pr-0.5" aria-label="Primary">
             {navItems.map((item) => {
               const hasChildren = Boolean(item.children && item.children.length > 0);
-              const isChildActive = hasChildren && (item.children?.some((child) => activePath === child.to || (child.to !== "/dashboard" && activePath.startsWith(child.to))) ?? false);
-              const isDirectActive = activePath === item.to || (!hasChildren && item.to !== "/dashboard" && activePath.startsWith(item.to));
+              const isChildActive = hasChildren && (item.children?.some((child) => activePath === child.to || (child.to !== "/dashboard" && child.to !== "/library" && activePath.startsWith(child.to))) ?? false);
+              const isDirectActive = activePath === item.to || (!hasChildren && item.to !== "/dashboard" && item.to !== "/library" && activePath.startsWith(item.to));
               const isParentActive = isDirectActive || isChildActive;
               const isExpanded = expandedMenus[item.key] ?? isParentActive;
 
@@ -578,7 +578,7 @@ function Shell({
                       isDark ? "border-slate-700" : "border-slate-300",
                     ].join(" ")}>
                       {item.children!.map((child) => {
-                        const isThisChildActive = activePath === child.to || (child.to !== "/dashboard" && activePath.startsWith(child.to));
+                        const isThisChildActive = activePath === child.to || (child.to !== "/dashboard" && child.to !== "/library" && activePath.startsWith(child.to));
                         return (
                           <button
                             key={child.key}
@@ -1309,7 +1309,7 @@ function Shell({
               {/* Nav Items List */}
               <nav className="mt-3 space-y-1 flex-1">
                 {navItems.map((item) => {
-                  const isActive = item.to ? activePath.startsWith(item.to) : false;
+                  const isActive = item.to === activePath || (Boolean(item.to) && item.to !== "/dashboard" && item.to !== "/library" && activePath.startsWith(item.to!));
                   return (
                     <button
                       key={item.key}
