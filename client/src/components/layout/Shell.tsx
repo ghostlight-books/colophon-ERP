@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Menu, Moon, Search, Sun, UserRound, X } from "lucide-react";
+import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Menu, Moon, RefreshCcw, Search, Sun, UserRound, X } from "lucide-react";
 import MobileBottomNav from "./MobileBottomNav";
 import InstallAppPrompt from "../common/InstallAppPrompt";
 import LibrarySpaceSwitcher from "../library/LibrarySpaceSwitcher";
@@ -851,6 +851,31 @@ function Shell({
                             <span className="text-[10px] text-slate-400 font-semibold">
                               {reminders.filter((r) => !r.completed).length} open
                             </span>
+                          </button>
+
+                          {/* 5. Reload App & Check Updates */}
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if ("serviceWorker" in navigator) {
+                                try {
+                                  const registrations = await navigator.serviceWorker.getRegistrations();
+                                  for (const reg of registrations) {
+                                    await reg.update();
+                                  }
+                                } catch {}
+                              }
+                              window.location.reload();
+                            }}
+                            className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition cursor-pointer text-xs font-semibold text-slate-800 dark:text-slate-200"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <span className="p-1.5 rounded-lg bg-sky-50 dark:bg-sky-950 text-sky-600 dark:text-sky-400">
+                                <RefreshCcw size={14} />
+                              </span>
+                              <span>Reload & Check Updates</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-mono">⌘R / F5</span>
                           </button>
                         </div>
 
