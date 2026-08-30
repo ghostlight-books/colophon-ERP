@@ -330,7 +330,7 @@ export default function LibraryCatalogPage() {
   }, [volumes, selectedIds]);
 
   return (
-    <div className="space-y-6 pb-28 font-sans max-w-4xl mx-auto">
+    <div className="space-y-6 pb-36 sm:pb-40 font-sans max-w-4xl mx-auto">
       {/* Toast Notifications */}
       {actionMessage && (
         <div className="p-3 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-xs flex items-center justify-between shadow-2xs font-bold animate-fadeIn">
@@ -371,7 +371,7 @@ export default function LibraryCatalogPage() {
             }}
             className={`px-3 py-1.5 rounded-2xl border text-xs font-medium transition cursor-pointer shadow-2xs ${
               isSelectionMode || selectedIds.length > 0
-                ? "bg-slate-800 text-white border-slate-800 font-semibold"
+                ? "bg-slate-800 text-white border-slate-800 font-semibold shadow-xs"
                 : "bg-[#e8eef5] dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-[#dce4ee] dark:hover:bg-slate-700"
             }`}
           >
@@ -405,34 +405,6 @@ export default function LibraryCatalogPage() {
           </div>
         </div>
       </div>
-
-      {/* Selection Mode Bar (Select All / Clear) */}
-      {(isSelectionMode || selectedIds.length > 0) && (
-        <div className="flex items-center justify-between p-3 bg-[#e2e8f0] dark:bg-indigo-950/40 rounded-2xl border border-slate-300 dark:border-indigo-800 text-xs font-medium">
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="select-all"
-              checked={volumes.length > 0 && selectedIds.length === volumes.length}
-              onChange={handleSelectAll}
-              className="w-4 h-4 rounded text-slate-800 cursor-pointer"
-            />
-            <label htmlFor="select-all" className="cursor-pointer text-slate-800 dark:text-slate-100 font-semibold">
-              Select All {volumes.length} Books
-            </label>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedIds([]);
-              setIsSelectionMode(false);
-            }}
-            className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-medium"
-          >
-            Cancel Selection
-          </button>
-        </div>
-      )}
 
       {/* 2. Rounded Pill Search Bar (Lightish Blue-Grey) */}
       <form onSubmit={handleSearchSubmit} className="relative">
@@ -655,55 +627,87 @@ export default function LibraryCatalogPage() {
         </div>
       )}
 
-      {/* Floating Bottom Bulk Action Toolbar */}
-      {selectedIds.length > 0 && (
-        <div className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 z-[9990] bg-white dark:bg-slate-900 text-slate-900 dark:text-white px-4 py-3 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 flex items-center gap-2.5 sm:gap-3.5 flex-wrap justify-center animate-slideUp max-w-[95vw]">
-          <span className="text-xs font-black shrink-0">
-            {selectedIds.length} books ({formatCurrency(selectedTotalValue)})
-          </span>
+      {/* Docked Full-Width Selection & Bulk Action Bar (Nestled cleanly above Quick Nav) */}
+      {(isSelectionMode || selectedIds.length > 0) && (
+        <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] lg:bottom-4 left-0 right-0 z-[9970] px-3 sm:px-6 pointer-events-none">
+          <div className="max-w-4xl mx-auto w-full bg-[#f8fafc]/98 dark:bg-[#0f172a]/98 backdrop-blur-xl border border-slate-300 dark:border-slate-700 shadow-2xl rounded-3xl p-3 sm:p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-slate-800 dark:text-white animate-slideUp pointer-events-auto">
+            {/* Left: Checkbox + Counter & Value */}
+            <div className="flex items-center justify-between sm:justify-start gap-3">
+              <label className="flex items-center gap-2.5 cursor-pointer font-bold text-xs select-none">
+                <input
+                  type="checkbox"
+                  checked={volumes.length > 0 && selectedIds.length === volumes.length}
+                  onChange={handleSelectAll}
+                  className="w-4 h-4 rounded text-slate-800 dark:text-indigo-500 cursor-pointer accent-slate-800 dark:accent-indigo-500"
+                />
+                <span className="text-slate-900 dark:text-white">
+                  {selectedIds.length === volumes.length ? "All Selected" : "Select All"}
+                </span>
+              </label>
 
-          <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 bg-slate-200 dark:bg-slate-800 rounded-full text-xs font-black text-slate-800 dark:text-slate-200">
+                  {selectedIds.length} of {volumes.length}
+                </span>
+                {selectedIds.length > 0 && (
+                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                    {formatCurrency(selectedTotalValue)}
+                  </span>
+                )}
+              </div>
+            </div>
 
-          {/* Move Action */}
-          <button
-            type="button"
-            onClick={() => {
-              setTargetSpaceId(activeSpaceId !== "ALL" ? activeSpaceId : spaces[0]?.id || "");
-              setIsMoveModalOpen(true);
-            }}
-            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-black transition cursor-pointer border border-indigo-200 dark:border-indigo-800"
-          >
-            Move Space / Shelf
-          </button>
+            {/* Right: Roomy Action Buttons */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-0.5 sm:pb-0 scrollbar-none">
+              {/* Move Action */}
+              <button
+                type="button"
+                disabled={selectedIds.length === 0}
+                onClick={() => {
+                  setTargetSpaceId(activeSpaceId !== "ALL" ? activeSpaceId : spaces[0]?.id || "");
+                  setIsMoveModalOpen(true);
+                }}
+                className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/80 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-bold transition cursor-pointer border border-indigo-200 dark:border-indigo-800 flex items-center gap-1.5 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <span>📦</span>
+                <span>Move Space / Shelf</span>
+              </button>
 
-          {/* Print Labels Action */}
-          <button
-            type="button"
-            onClick={() => setIsPrintModalOpen(true)}
-            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-black transition cursor-pointer border border-slate-300 dark:border-slate-600"
-          >
-            Print Labels
-          </button>
+              {/* Print Labels Action */}
+              <button
+                type="button"
+                disabled={selectedIds.length === 0}
+                onClick={() => setIsPrintModalOpen(true)}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition cursor-pointer border border-slate-300 dark:border-slate-600 flex items-center gap-1.5 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <span>🏷️</span>
+                <span>Print Labels</span>
+              </button>
 
-          {/* Bulk Delete Action */}
-          <button
-            type="button"
-            onClick={handleBulkDelete}
-            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black transition cursor-pointer shadow-xs"
-          >
-            Delete
-          </button>
+              {/* Bulk Delete Action */}
+              <button
+                type="button"
+                disabled={selectedIds.length === 0}
+                onClick={handleBulkDelete}
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-xs flex items-center gap-1.5 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <span>🗑️</span>
+                <span>Delete</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedIds([]);
-              setIsSelectionMode(false);
-            }}
-            className="text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white font-bold px-1"
-          >
-            Clear
-          </button>
+              {/* Done / Close Selection */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedIds([]);
+                  setIsSelectionMode(false);
+                }}
+                className="px-3 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white rounded-xl transition cursor-pointer shrink-0"
+              >
+                ✕ Done
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
