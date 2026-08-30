@@ -282,13 +282,45 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
   const yearMatch = rawYear ? String(rawYear).match(/\b(18|19|20)\d{2}\b/) : null;
   const publishYear = yearMatch ? yearMatch[0] : null;
 
-  // Description
-  const description = (
+  // Description / Book Synopsis (Multi-Source with OpenLibrary Work fallback & HTML strip)
+  let description: string | null = (
     (typeof openLib?.description === "string" ? openLib.description : openLib?.description?.value) ||
     google?.description ||
     isbndb?.description ||
     null
   );
+
+  // If description not on edition, check OpenLibrary Work record
+  if (!description && Array.isArray(openLib?.works) && openLib.works.length > 0) {
+    try {
+      const workKey = openLib.works[0]?.key;
+      if (workKey) {
+        const workRes = await fetch(`https://openlibrary.org${workKey}.json`, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (workRes.ok) {
+          const type = workRes.headers.get("content-type") || "";
+          if (type.includes("json")) {
+            const workData = (await workRes.json()) as { description?: string | { value?: string } };
+            const workDesc = typeof workData?.description === "string" ? workData.description : workData?.description?.value;
+            if (workDesc) description = workDesc;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  if (description) {
+    // Clean common HTML entities / markup
+    description = description
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
 
   // Multi-Source Verified Cover Image Resolution
   const coverUrl = await resolveBestCoverUrl({

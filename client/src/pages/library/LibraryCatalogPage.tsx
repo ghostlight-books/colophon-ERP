@@ -12,6 +12,7 @@ import {
   fetchCoverCandidates,
   updateVolumeCover,
   refreshMissingCovers,
+  enrichVolumeMetadata,
   type LibraryVolume,
   type LibraryShelfLocation,
   type CoverCandidate,
@@ -109,6 +110,12 @@ export default function LibraryCatalogPage() {
   // Edit draft state
   const [editTitle, setEditTitle] = useState("");
   const [editAuthor, setEditAuthor] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editPublisher, setEditPublisher] = useState("");
+  const [editPublishYear, setEditPublishYear] = useState("");
+  const [editPageCount, setEditPageCount] = useState("");
+  const [editBindingFormat, setEditBindingFormat] = useState("Paperback");
+  const [editSubjects, setEditSubjects] = useState("");
   const [editDewey, setEditDewey] = useState("");
   const [editLoc, setEditLoc] = useState("");
   const [editShelfId, setEditShelfId] = useState("");
@@ -118,6 +125,9 @@ export default function LibraryCatalogPage() {
   const [editNotes, setEditNotes] = useState("");
   const [editValue, setEditValue] = useState("");
   const [editAskingPrice, setEditAskingPrice] = useState("");
+  const [editIsSigned, setEditIsSigned] = useState(false);
+  const [editIsFirstEdition, setEditIsFirstEdition] = useState(false);
+  const [isEnrichingMetadata, setIsEnrichingMetadata] = useState(false);
 
   // Cover Picker State
   const [isCoverPickerOpen, setIsCoverPickerOpen] = useState(false);
@@ -310,6 +320,12 @@ export default function LibraryCatalogPage() {
     setSelectedVolume(volume);
     setEditTitle(volume.title);
     setEditAuthor(volume.author || "");
+    setEditDescription(volume.description || "");
+    setEditPublisher(volume.publisher || "");
+    setEditPublishYear(volume.publishYear || "");
+    setEditPageCount(volume.pageCount ? String(volume.pageCount) : "");
+    setEditBindingFormat(volume.bindingFormat || "Paperback");
+    setEditSubjects(volume.subjects || "");
     setEditDewey(volume.deweyDecimal || "");
     setEditLoc(volume.locClassification || "");
     setEditShelfId(volume.shelfLocationId || "");
@@ -319,6 +335,8 @@ export default function LibraryCatalogPage() {
     setEditNotes(volume.personalNotes || "");
     setEditValue(volume.replacementValue ? String(volume.replacementValue) : "18.99");
     setEditAskingPrice(volume.askingPrice ? String(volume.askingPrice) : "");
+    setEditIsSigned(Boolean(volume.isSigned));
+    setEditIsFirstEdition(Boolean(volume.isFirstEdition));
     setIsEditing(false);
   };
 
@@ -328,6 +346,12 @@ export default function LibraryCatalogPage() {
       const updated = await updateLibraryVolume(selectedVolume.id, {
         title: editTitle,
         author: editAuthor || null,
+        description: editDescription || null,
+        publisher: editPublisher || null,
+        publishYear: editPublishYear || null,
+        pageCount: editPageCount ? parseInt(editPageCount, 10) : null,
+        bindingFormat: editBindingFormat || "Paperback",
+        subjects: editSubjects || null,
         deweyDecimal: editDewey || null,
         locClassification: editLoc || null,
         shelfLocationId: editShelfId || null,
@@ -337,6 +361,8 @@ export default function LibraryCatalogPage() {
         personalNotes: editNotes || null,
         replacementValue: parseFloat(editValue) || 18.99,
         askingPrice: editAskingPrice ? parseFloat(editAskingPrice) : null,
+        isSigned: editIsSigned,
+        isFirstEdition: editIsFirstEdition,
       });
       setSelectedVolume(updated);
       setIsEditing(false);
@@ -344,6 +370,28 @@ export default function LibraryCatalogPage() {
       void loadVolumes();
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Failed to update volume.");
+    }
+  };
+
+  const handleFetchMetadata = async () => {
+    if (!selectedVolume) return;
+    setIsEnrichingMetadata(true);
+    try {
+      const result = await enrichVolumeMetadata(selectedVolume.id, true);
+      setSelectedVolume(result.volume);
+      setEditDescription(result.volume.description || "");
+      setEditPublisher(result.volume.publisher || "");
+      setEditPublishYear(result.volume.publishYear || "");
+      setEditPageCount(result.volume.pageCount ? String(result.volume.pageCount) : "");
+      setEditSubjects(result.volume.subjects || "");
+      setEditDewey(result.volume.deweyDecimal || "");
+      setEditLoc(result.volume.locClassification || "");
+      setActionMessage(`Fetched online book description & metadata for "${result.volume.title}"!`);
+      void loadVolumes();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Could not fetch online metadata for this book.");
+    } finally {
+      setIsEnrichingMetadata(false);
     }
   };
 
@@ -1038,28 +1086,48 @@ export default function LibraryCatalogPage() {
       {/* 5. Authentic "Book Details" Screen / Modal Sheet */}
       {selectedVolume && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col animate-scaleUp border border-slate-200 dark:border-slate-800">
-            {/* Clean Light/Dark Header Bar */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl max-w-xl w-full max-h-[92vh] flex flex-col animate-scaleUp border border-slate-200 dark:border-slate-800">
+            {/* Clean Header Bar */}
             <div className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white px-4 py-3.5 flex items-center justify-between shrink-0">
               <button
                 type="button"
                 onClick={() => setSelectedVolume(null)}
                 className="w-8 h-8 rounded-full bg-white dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 flex items-center justify-center text-xs font-bold transition cursor-pointer"
+                title="Close"
               >
                 ←
               </button>
-              <h2 className="text-xs font-black tracking-wider uppercase text-slate-700 dark:text-slate-200">
-                Book Details
-              </h2>
-              <button
-                type="button"
-                onClick={() => toggleLike(selectedVolume.id)}
-                className={`w-8 h-8 rounded-full bg-white dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 flex items-center justify-center text-sm transition cursor-pointer ${
-                  likedIds.includes(selectedVolume.id) ? "text-rose-500" : "text-slate-400"
-                }`}
-              >
-                {likedIds.includes(selectedVolume.id) ? "♥" : "♡"}
-              </button>
+
+              <div className="flex items-center gap-2 min-w-0">
+                <h2 className="text-xs font-black tracking-wider uppercase text-slate-700 dark:text-slate-200 truncate">
+                  {isEditing ? "Edit Book Details" : "Book Details"}
+                </h2>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(!isEditing)}
+                  className={`px-3 py-1 text-xs font-bold rounded-xl transition cursor-pointer border ${
+                    isEditing
+                      ? "bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-600"
+                      : "bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100"
+                  }`}
+                >
+                  {isEditing ? "👁️ View" : "✏️ Edit"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => toggleLike(selectedVolume.id)}
+                  className={`w-8 h-8 rounded-full bg-white dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 flex items-center justify-center text-sm transition cursor-pointer ${
+                    likedIds.includes(selectedVolume.id) ? "text-rose-500" : "text-slate-400"
+                  }`}
+                  title={likedIds.includes(selectedVolume.id) ? "Liked" : "Like"}
+                >
+                  {likedIds.includes(selectedVolume.id) ? "♥" : "♡"}
+                </button>
+              </div>
             </div>
 
             {/* Modal Body */}
@@ -1107,55 +1175,130 @@ export default function LibraryCatalogPage() {
                       <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
                         {selectedVolume.author || "Unknown Author"}
                       </p>
-                      <p className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold">
-                        Published: <strong className="text-slate-900 dark:text-white">{selectedVolume.publishYear || "2020"}</strong> • Pages: <strong className="text-slate-900 dark:text-white">{selectedVolume.pageCount || "320"}</strong>
-                      </p>
+                      
+                      <div className="text-[11px] text-slate-600 dark:text-slate-400 space-y-0.5 pt-0.5">
+                        {selectedVolume.publisher && (
+                          <p>Publisher: <strong className="text-slate-900 dark:text-white">{selectedVolume.publisher}</strong></p>
+                        )}
+                        <p>
+                          Year: <strong className="text-slate-900 dark:text-white">{selectedVolume.publishYear || "N/A"}</strong>
+                          {selectedVolume.pageCount ? ` • ${selectedVolume.pageCount} pages` : ""}
+                          {selectedVolume.bindingFormat ? ` • ${selectedVolume.bindingFormat}` : ""}
+                        </p>
+                        {selectedVolume.isbn && (
+                          <p className="font-mono text-[10px] text-slate-500">ISBN: {selectedVolume.isbn}</p>
+                        )}
+                      </div>
 
-                      <div className="flex items-center gap-2 pt-1 flex-wrap">
+                      <div className="flex items-center gap-1.5 pt-1.5 flex-wrap">
                         <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-black text-[10px] rounded-md">
                           Rank #{volumes.findIndex(v => v.id === selectedVolume.id) + 1 || 1}
                         </span>
-                        <span className="text-slate-400">•</span>
-                        <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                          {selectedVolume.isLoaned ? "On Loan" : "Available on Shelf"}
+                        {selectedVolume.isSigned && (
+                          <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[10px] font-bold rounded-md">
+                            ✍️ Signed
+                          </span>
+                        )}
+                        {selectedVolume.isFirstEdition && (
+                          <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800 text-[10px] font-bold rounded-md">
+                            ⭐ 1st Edition
+                          </span>
+                        )}
+                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                          {selectedVolume.isLoaned ? "• On Loan" : "• Available"}
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* About The Book Synopsis */}
-                  <div className="space-y-1.5">
-                    <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
-                      About The Book
-                    </h4>
-                    <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed font-medium line-clamp-4">
-                      {selectedVolume.description ||
-                        `An acclaimed volume cataloged in the ${activeSpace?.name || "Library"} collection. Features verified Dewey Decimal classification ${selectedVolume.deweyDecimal || "--"} and catalog inventory identification.`}
+                  {/* About The Book / Synopsis Section */}
+                  <div className="space-y-2 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <span>📖</span>
+                        <span>About The Book</span>
+                      </h4>
+
+                      <button
+                        type="button"
+                        disabled={isEnrichingMetadata}
+                        onClick={handleFetchMetadata}
+                        className="px-2.5 py-1 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-indigo-600 dark:text-indigo-300 border border-slate-200 dark:border-slate-600 text-[10px] font-bold rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        title="Fetch synopsis & classification from Google Books & Open Library"
+                      >
+                        {isEnrichingMetadata ? (
+                          <>
+                            <span className="animate-spin text-xs">⏳</span>
+                            <span>Fetching…</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>⚡</span>
+                            <span>{selectedVolume.description ? "Refresh Synopsis" : "Fetch Online Synopsis"}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-medium whitespace-pre-line">
+                      {selectedVolume.description || (
+                        <span className="italic text-slate-500 dark:text-slate-400">
+                          No synopsis available yet. Tap "Fetch Online Synopsis" above or click "Edit" to write a description.
+                        </span>
+                      )}
                     </p>
+
+                    {selectedVolume.subjects && (
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60 flex items-center gap-1 flex-wrap">
+                        <span className="text-[10px] font-bold text-slate-500">Subjects:</span>
+                        {selectedVolume.subjects.split(",").slice(0, 5).map((subj, sIdx) => (
+                          <span
+                            key={sIdx}
+                            className="px-1.5 py-0.5 bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 text-[9px] rounded font-medium"
+                          >
+                            {subj.trim()}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
+
+                  {/* Personal Notes (if present) */}
+                  {selectedVolume.personalNotes && (
+                    <div className="p-3 bg-amber-50/70 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-900/50 space-y-1">
+                      <h4 className="text-[11px] font-black text-amber-900 dark:text-amber-300 uppercase tracking-wider">
+                        📝 Personal Notes & Ex-Libris
+                      </h4>
+                      <p className="text-xs text-amber-950 dark:text-amber-200 font-medium whitespace-pre-line">
+                        {selectedVolume.personalNotes}
+                      </p>
+                    </div>
+                  )}
 
                   {/* Dual Action Buttons */}
                   <div className="grid grid-cols-2 gap-3 pt-1">
                     <button
                       type="button"
                       onClick={() => setIsEditing(true)}
-                      className="py-2.5 px-4 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-black text-xs rounded-xl shadow-sm transition text-center cursor-pointer uppercase tracking-wider"
+                      className="py-2.5 px-4 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-black text-xs rounded-xl shadow-xs transition text-center cursor-pointer uppercase tracking-wider flex items-center justify-center gap-1.5"
                     >
-                      Reading Status
+                      <span>✏️</span>
+                      <span>Edit Book Details</span>
                     </button>
 
                     <Link
                       to="/library/shelves"
-                      className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl shadow-sm transition text-center uppercase tracking-wider"
+                      className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl shadow-xs transition text-center uppercase tracking-wider flex items-center justify-center gap-1.5"
                     >
-                      Locate Shelf
+                      <span>📍</span>
+                      <span>Locate Shelf</span>
                     </Link>
                   </div>
 
-                  {/* Shelf Location Cards */}
-                  <div className="space-y-2.5 pt-2">
+                  {/* Shelf Location & Specifications */}
+                  <div className="space-y-2 pt-1">
                     <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
-                      Shelf Location
+                      Location & Valuation
                     </h4>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1">
@@ -1172,7 +1315,7 @@ export default function LibraryCatalogPage() {
                           DDC {selectedVolume.deweyDecimal || "800.1"}
                         </p>
                         <p className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold">
-                          {getConditionLabel(selectedVolume.condition)}
+                          {getConditionLabel(selectedVolume.condition)} • {formatCurrency(selectedVolume.replacementValue)}
                         </p>
                       </div>
                     </div>
@@ -1183,43 +1326,185 @@ export default function LibraryCatalogPage() {
                     <button
                       type="button"
                       onClick={handleDeleteVolume}
-                      className="text-xs text-rose-600 hover:text-rose-700 dark:text-rose-400 font-bold cursor-pointer"
+                      className="text-xs text-rose-600 hover:text-rose-700 dark:text-rose-400 font-bold cursor-pointer transition hover:underline"
                     >
                       Remove from Library
                     </button>
                   </div>
                 </>
               ) : (
-                /* Edit Mode */
-                <div className="space-y-4 text-xs">
-                  <div className="grid grid-cols-2 gap-3">
+                /* Full Book Details Edit Form */
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void handleSaveEdit();
+                  }}
+                  className="space-y-4 text-xs"
+                >
+                  {/* Header Auto-Fetch Helper */}
+                  <div className="flex items-center justify-between p-2.5 bg-indigo-50 dark:bg-indigo-950/60 rounded-xl border border-indigo-200 dark:border-indigo-800">
+                    <span className="text-[11px] font-bold text-indigo-900 dark:text-indigo-200">
+                      Need metadata?
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isEnrichingMetadata}
+                      onClick={handleFetchMetadata}
+                      className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      {isEnrichingMetadata ? "Fetching…" : "⚡ Auto-Fill from Web (Google/OL)"}
+                    </button>
+                  </div>
+
+                  {/* 1. Title & Author */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Title</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Book Title *
+                      </label>
                       <input
                         type="text"
+                        required
                         value={editTitle}
                         onChange={(e) => setEditTitle(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 font-bold text-slate-900 dark:text-white"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Author</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Author(s)
+                      </label>
                       <input
                         type="text"
                         value={editAuthor}
                         onChange={(e) => setEditAuthor(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  {/* 2. Publisher & Publish Year */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Reading Status</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Publisher / Imprint
+                      </label>
+                      <input
+                        type="text"
+                        value={editPublisher}
+                        onChange={(e) => setEditPublisher(e.target.value)}
+                        placeholder="e.g. Penguin Classics, Scribner"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Publication Year
+                      </label>
+                      <input
+                        type="text"
+                        value={editPublishYear}
+                        onChange={(e) => setEditPublishYear(e.target.value)}
+                        placeholder="e.g. 1925"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 3. Description / Synopsis (Multi-Line Textarea) */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold text-slate-700 dark:text-slate-300">
+                        Book Description / Synopsis
+                      </label>
+                      <span className="text-[10px] text-slate-400">
+                        {editDescription.length} characters
+                      </span>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      placeholder="Summary, plot overview, and historical notes regarding this volume..."
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white leading-relaxed focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-y"
+                    />
+                  </div>
+
+                  {/* 4. Dewey (DDC) & LOC Classification */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Dewey Call # (DDC)
+                      </label>
+                      <input
+                        type="text"
+                        value={editDewey}
+                        onChange={(e) => setEditDewey(e.target.value)}
+                        placeholder="e.g. 813.54"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Library of Congress (LOC)
+                      </label>
+                      <input
+                        type="text"
+                        value={editLoc}
+                        onChange={(e) => setEditLoc(e.target.value)}
+                        placeholder="e.g. PS3558.E63"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 5. Library Space & Physical Shelf */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Library Space
+                      </label>
+                      <select
+                        value={editLibrarySpaceId}
+                        onChange={(e) => setEditLibrarySpaceId(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        {spaces.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} ({s.location || "Main"})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Shelf Location
+                      </label>
+                      <select
+                        value={editShelfId}
+                        onChange={(e) => setEditShelfId(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="">-- Unassigned Shelf --</option>
+                        {shelves.map((sh) => (
+                          <option key={sh.id} value={sh.id}>
+                            {sh.fullLocationLabel}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* 6. Reading Status & Condition */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Reading Status
+                      </label>
                       <select
                         value={editStatus}
                         onChange={(e) => setEditStatus(e.target.value as any)}
-                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 font-bold text-slate-900 dark:text-white"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                       >
                         <option value="UNREAD">To Read (Unread)</option>
                         <option value="READING">Currently Reading</option>
@@ -1228,11 +1513,13 @@ export default function LibraryCatalogPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Condition</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Physical Condition
+                      </label>
                       <select
                         value={editCondition}
                         onChange={(e) => setEditCondition(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 font-bold text-slate-900 dark:text-white"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                       >
                         <option value="FINE">Fine / Like New</option>
                         <option value="VERY_GOOD">Very Good</option>
@@ -1243,45 +1530,133 @@ export default function LibraryCatalogPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  {/* 7. Page Count, Binding, Valuation & Asking Price */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Dewey (DDC)</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Pages
+                      </label>
                       <input
-                        type="text"
-                        value={editDewey}
-                        onChange={(e) => setEditDewey(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 font-mono text-slate-900 dark:text-white"
+                        type="number"
+                        value={editPageCount}
+                        onChange={(e) => setEditPageCount(e.target.value)}
+                        placeholder="320"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Replacement Value ($)</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Binding
+                      </label>
+                      <select
+                        value={editBindingFormat}
+                        onChange={(e) => setEditBindingFormat(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      >
+                        <option value="Paperback">Paperback</option>
+                        <option value="Hardcover">Hardcover</option>
+                        <option value="Leatherbound">Leatherbound</option>
+                        <option value="Mass Market">Mass Market</option>
+                        <option value="Spiral">Spiral</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Value ($)
+                      </label>
                       <input
                         type="number"
                         step="0.01"
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 font-mono font-bold text-emerald-600 dark:text-emerald-400"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-mono font-bold text-emerald-600 dark:text-emerald-400 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Asking ($)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={editAskingPrice}
+                        onChange={(e) => setEditAskingPrice(e.target.value)}
+                        placeholder="Offer price"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                       />
                     </div>
                   </div>
 
+                  {/* 8. Collector Badges (Signed, First Edition) */}
+                  <div className="flex items-center gap-4 pt-1">
+                    <label className="flex items-center gap-2 cursor-pointer font-bold select-none text-slate-800 dark:text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={editIsSigned}
+                        onChange={(e) => setEditIsSigned(e.target.checked)}
+                        className="w-4 h-4 rounded text-indigo-600 cursor-pointer accent-indigo-600"
+                      />
+                      <span>✍️ Signed by Author</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer font-bold select-none text-slate-800 dark:text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={editIsFirstEdition}
+                        onChange={(e) => setEditIsFirstEdition(e.target.checked)}
+                        className="w-4 h-4 rounded text-indigo-600 cursor-pointer accent-indigo-600"
+                      />
+                      <span>⭐ First Edition / Printing</span>
+                    </label>
+                  </div>
+
+                  {/* 9. Subjects & Personal Notes */}
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Subjects / Keywords (comma separated)
+                      </label>
+                      <input
+                        type="text"
+                        value={editSubjects}
+                        onChange={(e) => setEditSubjects(e.target.value)}
+                        placeholder="e.g. American Literature, Jazz Age, Classic Fiction"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Personal Notes & Provenance
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={editNotes}
+                        onChange={(e) => setEditNotes(e.target.value)}
+                        placeholder="Acquisition history, bookplate tags, personal review, or condition defects..."
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-y"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Form Action Buttons */}
                   <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
                     <button
                       type="button"
                       onClick={() => setIsEditing(false)}
-                      className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl"
+                      className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl transition cursor-pointer"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      onClick={handleSaveEdit}
-                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md"
+                      className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl shadow-md transition cursor-pointer flex items-center gap-1.5"
                     >
-                      Save Changes
+                      <span>💾</span>
+                      <span>Save Changes</span>
                     </button>
                   </div>
-                </div>
+                </form>
               )}
             </div>
           </div>

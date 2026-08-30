@@ -2268,6 +2268,51 @@ export function createApp(): express.Express {
     }
   });
 
+  // Enrich single volume with full online metadata (Description, Publisher, Year, Page Count, Subjects, Dewey)
+  app.post("/api/library/volumes/:id/enrich-metadata", async (req, res) => {
+    try {
+      const volume = await getLibraryVolume(req.params.id);
+      if (!volume) return res.status(404).json({ error: "Library volume not found." });
+
+      const enrichment = await enrichLibraryClassification(volume.isbn);
+      const updateData: Record<string, any> = {};
+
+      if (!volume.description && enrichment.description) updateData.description = enrichment.description;
+      if (!volume.publisher && enrichment.publisher) updateData.publisher = enrichment.publisher;
+      if (!volume.publishYear && enrichment.publishYear) updateData.publishYear = enrichment.publishYear;
+      if (!volume.pageCount && enrichment.pageCount) updateData.pageCount = enrichment.pageCount;
+      if (!volume.deweyDecimal && enrichment.deweyDecimal) {
+        updateData.deweyDecimal = enrichment.deweyDecimal;
+        updateData.deweyCategory = enrichment.deweyCategory;
+      }
+      if (!volume.locClassification && enrichment.locClassification) updateData.locClassification = enrichment.locClassification;
+      if (!volume.coverUrl && enrichment.coverUrl) updateData.coverUrl = enrichment.coverUrl;
+      if (!volume.subjects && enrichment.subjects && enrichment.subjects.length > 0) {
+        updateData.subjects = enrichment.subjects.join(", ");
+      }
+
+      // If user passed force=true, overwrite all metadata with fresh sources
+      if (req.body?.force) {
+        if (enrichment.description) updateData.description = enrichment.description;
+        if (enrichment.publisher) updateData.publisher = enrichment.publisher;
+        if (enrichment.publishYear) updateData.publishYear = enrichment.publishYear;
+        if (enrichment.pageCount) updateData.pageCount = enrichment.pageCount;
+        if (enrichment.deweyDecimal) {
+          updateData.deweyDecimal = enrichment.deweyDecimal;
+          updateData.deweyCategory = enrichment.deweyCategory;
+        }
+        if (enrichment.locClassification) updateData.locClassification = enrichment.locClassification;
+        if (enrichment.coverUrl) updateData.coverUrl = enrichment.coverUrl;
+      }
+
+      const updated = await updateLibraryVolume(volume.id, updateData);
+      res.json({ success: true, volume: updated, enrichment });
+    } catch (error) {
+      console.error("Enrich volume metadata error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to enrich volume metadata." });
+    }
+  });
+
   // Batch refresh missing covers for catalog volumes
   app.post("/api/library/volumes/refresh-missing-covers", async (req, res) => {
     try {

@@ -1195,9 +1195,8 @@ function Shell({
                   </div>
                 )}
               </div>
-            </div>
-          </header>
-        )}
+            </header>
+          )}
 
           <main className={isPosRoute ? "pb-2 pt-0" : "pb-8 pt-4"}>
             {/* Page Title & Subtitle Banner (Full-Width, Nestled Right Above the Library Selector & Page Controls) */}

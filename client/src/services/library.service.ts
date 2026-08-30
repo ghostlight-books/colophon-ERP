@@ -388,6 +388,27 @@ export async function bulkMoveLibraryVolumes(
   return { count: ids.length };
 }
 
+export async function enrichVolumeMetadata(
+  id: string,
+  force = false
+): Promise<{ success: boolean; volume: LibraryVolume; enrichment: any }> {
+  const url = resolveApiUrl(`/library/volumes/${encodeURIComponent(id)}/enrich-metadata`);
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force }),
+  });
+  if (!res.ok) throw new Error("Failed to enrich volume metadata.");
+  return res.json() as Promise<{ success: boolean; volume: LibraryVolume; enrichment: any }>;
+}
+
+export async function fetchIsbnEnrichment(isbn: string): Promise<any> {
+  const url = resolveApiUrl(`/library/enrich-isbn/${encodeURIComponent(isbn)}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to lookup ISBN classification.");
+  return res.json();
+}
+
 export async function fetchShelves(): Promise<LibraryShelfLocation[]> {
   const url = resolveApiUrl(`/library/shelves?t=${Date.now()}`);
   const res = await fetchWithTimeout(url);
