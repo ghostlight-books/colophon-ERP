@@ -648,11 +648,11 @@ function Shell({
           {isPosRoute ? null : (
             <header
               className={[
-                "relative z-[120] overflow-visible flex items-center justify-between rounded-[20px] sm:rounded-[26px] border px-3.5 py-3 sm:px-7 sm:py-5 transition-colors duration-300 shadow-xs",
+                "relative z-[120] overflow-visible flex items-center justify-between rounded-[20px] sm:rounded-[26px] border px-3.5 py-2.5 sm:px-6 sm:py-3.5 transition-colors duration-300 shadow-xs",
                 isDark ? "border-slate-800 bg-[#131927] text-white" : "border-slate-300 bg-[#f1f5f9] text-slate-900",
               ].join(" ")}
             >
-              {/* Left: Mobile Hamburger + Title + Library Switcher */}
+              {/* Left: Mobile Hamburger + Brand Logo Badge */}
               <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
                 <button
                   type="button"
@@ -667,15 +667,14 @@ function Shell({
                   <Menu size={18} strokeWidth={2.2} />
                 </button>
 
-                <div className="min-w-0">
-                  <h1 className={[
-                    "text-base sm:text-xl lg:text-[1.75rem] font-semibold tracking-tight transition-colors duration-300 truncate",
+                <div className="flex items-center gap-2 min-w-0">
+                  <BrandLogo className="h-7 w-7 text-indigo-500 shrink-0" />
+                  <span className={[
+                    "text-xs sm:text-sm font-bold tracking-tight truncate",
                     isDark ? "text-white" : "text-slate-900",
-                  ].join(" ")}>{greeting}</h1>
-                  <p className={[
-                    "mt-0.5 sm:mt-1 text-xs sm:text-sm font-normal transition-colors duration-300 line-clamp-1 sm:line-clamp-none hidden sm:block",
-                    isDark ? "text-slate-400" : "text-slate-500",
-                  ].join(" ")}>{subtitle}</p>
+                  ].join(" ")}>
+                    {workspaceMode === "library" ? "Colophon Library" : "Colophon Bookstore"}
+                  </span>
                 </div>
               </div>
 
@@ -1138,7 +1137,29 @@ function Shell({
             </header>
           )}
 
-          <main className={isPosRoute ? "pb-2 pt-0" : "pb-8 pt-4"}>{children}</main>
+          <main className={isPosRoute ? "pb-2 pt-0" : "pb-8 pt-4"}>
+            {/* Page Title & Subtitle Banner (Full-Width, Nestled Right Above the Library Selector & Page Controls) */}
+            {!isPosRoute && greeting && (
+              <div className="mb-4 sm:mb-5 max-w-4xl mx-auto px-1 animate-fadeIn">
+                <h1 className={[
+                  "text-xl sm:text-2xl lg:text-3xl font-black tracking-tight transition-colors duration-300",
+                  isDark ? "text-white" : "text-slate-900",
+                ].join(" ")}>
+                  {greeting}
+                </h1>
+                {subtitle && (
+                  <p className={[
+                    "mt-1 text-xs sm:text-sm font-medium transition-colors duration-300",
+                    isDark ? "text-slate-400" : "text-slate-500",
+                  ].join(" ")}>
+                    {subtitle}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {children}
+          </main>
         </div>
 
         {/* Mobile Navigation Tab Bar (Phones & Tablets) */}
