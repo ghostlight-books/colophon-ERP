@@ -39,7 +39,7 @@ type ShellProps = {
   children: ReactNode;
 };
 
-type ToolbarMenu = "none" | "search" | "notifications" | "calendar" | "account";
+type ToolbarMenu = "none" | "menu" | "search" | "notifications" | "calendar" | "account";
 type ThemeMode = "light" | "dark";
 type SearchCategory = "all" | "navigation" | "orders" | "inventory" | "customers";
 
@@ -200,6 +200,34 @@ function Shell({
       cancelled = true;
       window.clearInterval(timer);
     };
+  }, []);
+
+  // Close toolbar menu on outside click
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (toolbarRef.current && !toolbarRef.current.contains(event.target as Node)) {
+        setMenu("none");
+      }
+    }
+
+    if (menu !== "none") {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [menu]);
+
+  // Global Cmd+K / Ctrl+K search shortcut
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setMenu((curr) => (curr === "search" ? "none" : "search"));
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   const notifications = useMemo<NotificationItem[]>(() => [
@@ -651,266 +679,462 @@ function Shell({
                 </div>
               </div>
 
-              {/* Right: Sleek Toolbar */}
-              <div
-                ref={toolbarRef}
-                className={[
-                  "relative z-[140] flex flex-col items-stretch rounded-2xl sm:rounded-[20px] border px-1.5 py-1 sm:px-2 sm:py-1.5 transition-colors duration-300 shrink-0",
-                  isDark ? "border-slate-700 bg-slate-800 text-slate-100" : "border-slate-300 bg-[#e2e8f0] text-slate-800 shadow-2xs",
-                ].join(" ")}
-              >
-                <div className="flex items-center justify-center gap-1.5 sm:gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setMenu((current) => (current === "search" ? "none" : "search"))}
-                    className={toolbarButtonClass(isDark, menu === "search")}
-                    aria-label="Search"
-                    title="Search"
-                  >
-                    <Search size={15} strokeWidth={2} aria-hidden="true" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
-                    className={toolbarButtonClass(isDark, false)}
-                    aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-                    title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-                  >
-                    {isDark ? <Sun size={15} strokeWidth={2} aria-hidden="true" /> : <Moon size={15} strokeWidth={2} aria-hidden="true" />}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setMenu((current) => (current === "notifications" ? "none" : "notifications"))}
-                    className={toolbarButtonClass(isDark, menu === "notifications")}
-                    aria-label="Notifications"
-                    title="Notifications"
-                  >
-                    <Bell size={15} strokeWidth={2} aria-hidden="true" />
-                    {unreadCount > 0 ? (
-                      <span className="absolute -right-0.5 -top-0.5 min-w-[16px] rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
-                        {unreadCount}
-                      </span>
-                    ) : null}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setMenu((current) => (current === "calendar" ? "none" : "calendar"))}
-                    className={[toolbarButtonClass(isDark, menu === "calendar"), "hidden sm:grid"].join(" ")}
-                    aria-label="Calendar"
-                    title="Calendar"
-                  >
-                    <CalendarDays size={15} strokeWidth={2} aria-hidden="true" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setMenu((current) => (current === "account" ? "none" : "account"))}
-                    className={[
-                      "relative grid h-8 w-8 place-items-center rounded-full transition cursor-pointer",
-                      isDark ? "bg-amber-400 text-slate-900" : "bg-amber-400 text-slate-900",
-                    ].join(" ")}
-                    aria-label="Account"
-                    title="Account"
-                  >
-                    <UserRound size={15} strokeWidth={2} aria-hidden="true" />
-                    <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-emerald-500"></span>
-                  </button>
-                </div>
-
-                {/* Digital Clock */}
-                <p className={[
-                  "mt-1 text-center font-mono text-[10px] tracking-wider transition-colors duration-300 font-bold hidden sm:block",
-                  isDark ? "text-slate-300" : "text-slate-700",
-                ].join(" ")}>
-                  {currentTime.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}
-                </p>
-              </div>
-
-              {/* Menu Popovers */}
-              {menu !== "none" ? (
-                <div
+              {/* Right: Unified Header Menu Button */}
+              <div ref={toolbarRef} className="relative z-[140] shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setMenu((current) => (current === "none" ? "menu" : "none"))}
                   className={[
-                    "absolute right-3 top-[65px] z-[1000] w-80 sm:w-96 rounded-2xl border p-4 shadow-2xl animate-scaleUp",
-                    isDark ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-200 bg-white text-slate-800",
+                    "flex items-center gap-2 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-2xl border transition cursor-pointer active:scale-95 shadow-xs font-semibold text-xs",
+                    menu !== "none"
+                      ? isDark
+                        ? "border-indigo-500 bg-indigo-950/80 text-white ring-2 ring-indigo-500/40"
+                        : "border-indigo-400 bg-indigo-50 text-indigo-950 ring-2 ring-indigo-300"
+                      : isDark
+                        ? "border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700"
+                        : "border-slate-300 bg-[#e2e8f0] text-slate-800 hover:bg-[#cbd5e1]",
                   ].join(" ")}
-                  role="dialog"
-                  aria-label="Toolbar panel"
+                  aria-label="Toggle Menu"
+                  title="Menu"
                 >
-                  {menu === "search" ? (
-                    <div>
-                      <p className="text-sm font-black text-slate-900 dark:text-white">Search System</p>
-                      <input
-                        value={searchQuery}
-                        onChange={(event) => setSearchQuery(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" && filteredSearchResults[0]) {
-                            handleSearchSelect(filteredSearchResults[0]);
-                          }
-                        }}
-                        placeholder="Search books, orders, customers..."
-                        className="mt-2 w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2.5 text-xs font-semibold focus:outline-none focus:border-indigo-500"
-                      />
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        {[
-                          { label: "All", value: "all" as const },
-                          { label: "Navigation", value: "navigation" as const },
-                          { label: "Orders", value: "orders" as const },
-                          { label: "Inventory", value: "inventory" as const },
-                          { label: "Customers", value: "customers" as const },
-                        ].map((chip) => (
-                          <button
-                            key={chip.label}
-                            type="button"
-                            onClick={() => setSearchCategory(chip.value)}
-                            className={`rounded-full px-3 py-1 text-[11px] font-bold transition cursor-pointer ${
-                              searchCategory === chip.value
-                                ? "bg-indigo-600 text-white"
-                                : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
-                            }`}
-                          >
-                            {chip.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="mt-3 max-h-56 overflow-y-auto space-y-1.5">
-                        {filteredSearchResults.length === 0 ? (
-                          <p className="p-3 text-center text-xs text-slate-500 font-semibold">No matches found.</p>
-                        ) : (
-                          filteredSearchResults.map((result) => (
-                            <button
-                              key={result.id}
-                              type="button"
-                              onClick={() => handleSearchSelect(result)}
-                              className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
-                            >
-                              <p className="text-xs font-black text-slate-900 dark:text-white">{result.title}</p>
-                              <p className="text-[10.5px] text-slate-500 dark:text-slate-400 font-semibold">{result.subtitle}</p>
-                            </button>
-                          ))
-                        )}
-                      </div>
+                  <div className="relative flex items-center justify-center">
+                    <div className="h-7 w-7 rounded-full bg-amber-400 text-slate-950 font-black flex items-center justify-center text-xs shadow-xs">
+                      {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : "U"}
                     </div>
-                  ) : null}
+                    <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white dark:border-slate-900 bg-emerald-500" />
+                  </div>
 
-                  {menu === "notifications" ? (
-                    <div>
-                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-                        <p className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Notifications</p>
-                        <span className="text-[11px] text-slate-500 font-semibold">{unreadCount} unread</span>
-                      </div>
+                  <span className="font-bold text-xs truncate max-w-[100px]">
+                    {currentUser.name ? currentUser.name.split(" ")[0] : "Menu"}
+                  </span>
 
-                      <div className="mt-3 space-y-2 max-h-60 overflow-y-auto">
-                        {notifications.map((note) => (
-                          <div
-                            key={note.id}
-                            onClick={() => markNotificationRead(note.id)}
-                            className={`p-2.5 rounded-xl border text-xs cursor-pointer transition ${
-                              note.unread
-                                ? "bg-indigo-50/60 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800"
-                                : "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700"
-                            }`}
-                          >
-                            <p className="font-bold text-slate-900 dark:text-white">{note.title}</p>
-                            <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-0.5">{note.time}</p>
+                  {unreadCount > 0 && (
+                    <span className="min-w-[18px] h-[18px] rounded-full bg-rose-500 px-1 text-[10px] font-black text-white flex items-center justify-center">
+                      {unreadCount}
+                    </span>
+                  )}
+
+                  <ChevronDown
+                    size={14}
+                    className={`transition-transform duration-200 text-slate-500 dark:text-slate-400 ${
+                      menu !== "none" ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+
+                {/* Consolidated Menu Dropdown */}
+                {menu !== "none" && (
+                  <div
+                    className={[
+                      "absolute right-0 top-[52px] z-[1000] w-80 sm:w-96 rounded-3xl border p-4 shadow-2xl animate-scaleUp",
+                      isDark ? "border-slate-700 bg-[#131927]/98 backdrop-blur-2xl text-slate-100" : "border-slate-200 bg-white/98 backdrop-blur-2xl text-slate-800",
+                    ].join(" ")}
+                    role="dialog"
+                    aria-label="Header Menu"
+                  >
+                    {/* 1. Main Consolidated Menu View */}
+                    {menu === "menu" && (
+                      <div className="space-y-3 animate-fadeIn">
+                        {/* User Profile Summary */}
+                        <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="h-10 w-10 rounded-full bg-amber-400 text-slate-950 font-black flex items-center justify-center text-sm shadow-xs shrink-0">
+                              {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : "U"}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                                {currentUser.name}
+                              </p>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                {currentUser.email}
+                              </p>
+                              <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800">
+                                {currentUser.role}
+                              </span>
+                            </div>
                           </div>
-                        ))}
-                      </div>
 
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          addManualNotification();
-                        }}
-                        className="mt-3 flex gap-2 pt-2 border-t border-slate-100 dark:border-slate-800"
-                      >
-                        <input
-                          type="text"
-                          value={manualNotificationTitle}
-                          onChange={(e) => setManualNotificationTitle(e.target.value)}
-                          placeholder="Add custom reminder..."
-                          className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2 text-xs font-semibold focus:outline-none"
-                        />
-                        <button
-                          type="submit"
-                          className="px-3 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl shadow-xs"
+                          <button
+                            type="button"
+                            onClick={() => setMenu("account")}
+                            className="px-2.5 py-1 text-[11px] font-bold rounded-lg text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950 transition cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                        </div>
+
+                        {/* Quick Menu Options */}
+                        <div className="space-y-1">
+                          {/* 1. Search */}
+                          <button
+                            type="button"
+                            onClick={() => setMenu("search")}
+                            className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition cursor-pointer text-xs font-semibold text-slate-800 dark:text-slate-200"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <span className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
+                                <Search size={14} />
+                              </span>
+                              <span>Search System</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-mono">⌘K</span>
+                          </button>
+
+                          {/* 2. Theme Switcher */}
+                          <div className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition text-xs font-semibold text-slate-800 dark:text-slate-200">
+                            <div className="flex items-center gap-2.5">
+                              <span className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400">
+                                {isDark ? <Moon size={14} /> : <Sun size={14} />}
+                              </span>
+                              <span>Appearance</span>
+                            </div>
+
+                            {/* Toggle Pill */}
+                            <div className="flex items-center p-0.5 bg-slate-200 dark:bg-slate-700 rounded-lg text-[11px]">
+                              <button
+                                type="button"
+                                onClick={() => setTheme("light")}
+                                className={`px-2 py-0.5 rounded-md transition font-bold cursor-pointer ${
+                                  !isDark
+                                    ? "bg-white text-slate-900 shadow-xs"
+                                    : "text-slate-400 hover:text-white"
+                                }`}
+                              >
+                                Light
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setTheme("dark")}
+                                className={`px-2 py-0.5 rounded-md transition font-bold cursor-pointer ${
+                                  isDark
+                                    ? "bg-indigo-600 text-white shadow-xs"
+                                    : "text-slate-600 hover:text-slate-900"
+                                }`}
+                              >
+                                Dark
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 3. Notifications */}
+                          <button
+                            type="button"
+                            onClick={() => setMenu("notifications")}
+                            className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition cursor-pointer text-xs font-semibold text-slate-800 dark:text-slate-200"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <span className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950 text-rose-600 dark:text-rose-400">
+                                <Bell size={14} />
+                              </span>
+                              <span>Notifications</span>
+                            </div>
+                            {unreadCount > 0 ? (
+                              <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-bold">
+                                {unreadCount} new
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 font-semibold">All read</span>
+                            )}
+                          </button>
+
+                          {/* 4. Calendar & Tasks */}
+                          <button
+                            type="button"
+                            onClick={() => setMenu("calendar")}
+                            className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition cursor-pointer text-xs font-semibold text-slate-800 dark:text-slate-200"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <span className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">
+                                <CalendarDays size={14} />
+                              </span>
+                              <span>Calendar & Tasks</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-semibold">
+                              {reminders.filter((r) => !r.completed).length} open
+                            </span>
+                          </button>
+                        </div>
+
+                        {/* Footer: Clock + Sign Out */}
+                        <div className="pt-2.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 text-[11px] font-mono font-medium">
+                            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            <span>
+                              {currentTime.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              window.localStorage.removeItem("colophon-current-user");
+                              setMenu("none");
+                              onNavigate("/login");
+                            }}
+                            className="text-xs text-rose-600 hover:text-rose-700 dark:text-rose-400 font-bold transition cursor-pointer"
+                          >
+                            Sign Out
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 2. Search Subpanel */}
+                    {menu === "search" && (
+                      <div className="space-y-3 animate-fadeIn">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => setMenu("menu")}
+                            className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                          >
+                            <ChevronLeft size={14} />
+                            <span>Back to Menu</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMenu("none")}
+                            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-lg text-xs font-bold cursor-pointer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Search System</p>
+                          <input
+                            autoFocus
+                            value={searchQuery}
+                            onChange={(event) => setSearchQuery(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && filteredSearchResults[0]) {
+                                handleSearchSelect(filteredSearchResults[0]);
+                                setMenu("none");
+                              }
+                            }}
+                            placeholder="Search books, orders, customers..."
+                            className="mt-2 w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2.5 text-xs font-semibold focus:outline-none focus:border-indigo-500"
+                          />
+                          <div className="mt-2.5 flex flex-wrap gap-1.5">
+                            {[
+                              { label: "All", value: "all" as const },
+                              { label: "Navigation", value: "navigation" as const },
+                              { label: "Orders", value: "orders" as const },
+                              { label: "Inventory", value: "inventory" as const },
+                              { label: "Customers", value: "customers" as const },
+                            ].map((chip) => (
+                              <button
+                                key={chip.label}
+                                type="button"
+                                onClick={() => setSearchCategory(chip.value)}
+                                className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold transition cursor-pointer ${
+                                  searchCategory === chip.value
+                                    ? "bg-indigo-600 text-white shadow-xs"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
+                                }`}
+                              >
+                                {chip.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="mt-3 max-h-56 overflow-y-auto space-y-1.5 pr-0.5">
+                            {filteredSearchResults.length === 0 ? (
+                              <p className="p-3 text-center text-xs text-slate-500 font-semibold">No matches found.</p>
+                            ) : (
+                              filteredSearchResults.map((result) => (
+                                <button
+                                  key={result.id}
+                                  type="button"
+                                  onClick={() => {
+                                    handleSearchSelect(result);
+                                    setMenu("none");
+                                  }}
+                                  className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                                >
+                                  <p className="text-xs font-black text-slate-900 dark:text-white">{result.title}</p>
+                                  <p className="text-[10.5px] text-slate-500 dark:text-slate-400 font-semibold">{result.subtitle}</p>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. Notifications Subpanel */}
+                    {menu === "notifications" && (
+                      <div className="space-y-3 animate-fadeIn">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => setMenu("menu")}
+                            className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                          >
+                            <ChevronLeft size={14} />
+                            <span>Back to Menu</span>
+                          </button>
+                          <span className="text-[11px] text-slate-500 font-semibold">{unreadCount} unread</span>
+                        </div>
+
+                        <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
+                          {notifications.length === 0 ? (
+                            <p className="p-4 text-center text-xs text-slate-500 font-medium">No notifications.</p>
+                          ) : (
+                            notifications.map((note) => (
+                              <div
+                                key={note.id}
+                                onClick={() => markNotificationRead(note.id)}
+                                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition ${
+                                  note.unread
+                                    ? "bg-indigo-50/60 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800"
+                                    : "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700"
+                                }`}
+                              >
+                                <p className="font-bold text-slate-900 dark:text-white">{note.title}</p>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-0.5">{note.time}</p>
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            addManualNotification();
+                          }}
+                          className="flex gap-2 pt-2 border-t border-slate-200 dark:border-slate-800"
                         >
-                          Add
-                        </button>
-                      </form>
-                    </div>
-                  ) : null}
-
-                  {menu === "account" ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
-                        <div className="w-10 h-10 rounded-full bg-amber-400 text-slate-900 font-black flex items-center justify-center text-sm shadow-xs">
-                          {currentUser.name.charAt(0)}
-                        </div>
-                        <div>
-                          <p className="text-xs font-black text-slate-900 dark:text-white">{currentUser.name}</p>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">{currentUser.email}</p>
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800">
-                            {currentUser.role}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2 text-xs">
-                        <div>
-                          <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Name</label>
                           <input
                             type="text"
-                            value={profileDraft.name}
-                            onChange={(e) => setProfileDraft({ ...profileDraft, name: e.target.value })}
-                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2 font-semibold"
+                            value={manualNotificationTitle}
+                            onChange={(e) => setManualNotificationTitle(e.target.value)}
+                            placeholder="Add custom reminder..."
+                            className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2 text-xs font-semibold focus:outline-none"
                           />
-                        </div>
-                        <div>
-                          <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Role</label>
-                          <select
-                            value={profileDraft.role}
-                            onChange={(e) => setProfileDraft({ ...profileDraft, role: e.target.value })}
-                            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2 font-semibold"
+                          <button
+                            type="submit"
+                            className="px-3 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl shadow-xs"
                           >
-                            <option value="Owner">Owner</option>
-                            <option value="Manager">Manager</option>
-                            <option value="Staff">Staff</option>
-                            <option value="Librarian">Librarian</option>
-                          </select>
+                            Add
+                          </button>
+                        </form>
+                      </div>
+                    )}
+
+                    {/* 4. Calendar & Tasks Subpanel */}
+                    {menu === "calendar" && (
+                      <div className="space-y-3 animate-fadeIn">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => setMenu("menu")}
+                            className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                          >
+                            <ChevronLeft size={14} />
+                            <span>Back to Menu</span>
+                          </button>
+                          <span className="text-[11px] text-slate-500 font-semibold">
+                            {new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                          </span>
+                        </div>
+
+                        <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
+                          {reminders.length === 0 ? (
+                            <p className="p-4 text-center text-xs text-slate-500 font-medium">No schedule items.</p>
+                          ) : (
+                            reminders.map((r) => (
+                              <div
+                                key={r.id}
+                                className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
+                              >
+                                <span className="font-semibold text-slate-900 dark:text-white">{r.title}</span>
+                                <span className="text-[10px] text-slate-400 font-mono">{r.due}</span>
+                              </div>
+                            ))
+                          )}
                         </div>
                       </div>
+                    )}
 
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            window.localStorage.removeItem("colophon-current-user");
-                            setMenu("none");
-                            onNavigate("/login");
-                          }}
-                          className="text-xs text-rose-600 hover:text-rose-700 dark:text-rose-400 font-medium cursor-pointer"
-                        >
-                          Sign Out
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            saveProfileDraft();
-                            setMenu("none");
-                          }}
-                          className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium text-xs rounded-xl shadow-xs cursor-pointer transition"
-                        >
-                          Save
-                        </button>
+                    {/* 5. Account Settings Subpanel */}
+                    {menu === "account" && (
+                      <div className="space-y-3 animate-fadeIn">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => setMenu("menu")}
+                            className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                          >
+                            <ChevronLeft size={14} />
+                            <span>Back to Menu</span>
+                          </button>
+                          <p className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Account Settings</p>
+                        </div>
+
+                        <div className="flex items-center gap-3 pb-2">
+                          <div className="w-10 h-10 rounded-full bg-amber-400 text-slate-900 font-black flex items-center justify-center text-sm shadow-xs">
+                            {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : "U"}
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-slate-900 dark:text-white">{currentUser.name}</p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">{currentUser.email}</p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 text-xs">
+                          <div>
+                            <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Name</label>
+                            <input
+                              type="text"
+                              value={profileDraft.name}
+                              onChange={(e) => setProfileDraft({ ...profileDraft, name: e.target.value })}
+                              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2 font-semibold"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Role</label>
+                            <select
+                              value={profileDraft.role}
+                              onChange={(e) => setProfileDraft({ ...profileDraft, role: e.target.value })}
+                              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2 font-semibold"
+                            >
+                              <option value="Owner">Owner</option>
+                              <option value="Manager">Manager</option>
+                              <option value="Staff">Staff</option>
+                              <option value="Librarian">Librarian</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              window.localStorage.removeItem("colophon-current-user");
+                              setMenu("none");
+                              onNavigate("/login");
+                            }}
+                            className="text-xs text-rose-600 hover:text-rose-700 dark:text-rose-400 font-medium cursor-pointer"
+                          >
+                            Sign Out
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              saveProfileDraft();
+                              setMenu("menu");
+                            }}
+                            className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium text-xs rounded-xl shadow-xs cursor-pointer transition"
+                          >
+                            Save
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+                    )}
+                  </div>
+                )}
+              </div>
             </header>
           )}
 
