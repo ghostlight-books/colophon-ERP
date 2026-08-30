@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Menu, Moon, RefreshCcw, Search, Sun, UserRound, X } from "lucide-react";
 import MobileBottomNav from "./MobileBottomNav";
 import InstallAppPrompt from "../common/InstallAppPrompt";
+import BrandLogo from "../common/BrandLogo";
 import LibrarySpaceSwitcher from "../library/LibrarySpaceSwitcher";
 import { fetchLibraryDashboard, type LibraryDashboardSummary } from "../../services/library.service";
 
@@ -1369,47 +1370,6 @@ function toolbarButtonClass(isDark: boolean, isActive: boolean): string {
       ? "bg-slate-800 text-slate-100 hover:bg-slate-700 hover:text-white border border-slate-700"
       : "bg-white text-slate-800 hover:bg-slate-100 hover:text-slate-950 border border-slate-300 shadow-2xs",
   ].join(" ");
-}
-
-function BrandLogo({ className }: { className?: string }): JSX.Element {
-  return (
-    <svg
-      viewBox="0 0 120 90"
-      className={className}
-      fill="none"
-      preserveAspectRatio="xMidYMid meet"
-      aria-hidden="true"
-    >
-      <path
-        d="M6 74V14C20 8 33 8 50 12C57 14 63 22 60 31C57 22 51 15 43 12C31 8 20 9 6 14"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M114 74V14C100 8 87 8 70 12C63 14 57 22 60 31C63 22 69 15 77 12C89 8 100 9 114 14"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6 74C22 70 38 70 60 77C82 70 98 70 114 74"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M60 31V78"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
 
 export default Shell;
