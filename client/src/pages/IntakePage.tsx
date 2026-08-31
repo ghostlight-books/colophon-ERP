@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
 
 import SurfaceCard from "../components/ui/SurfaceCard";
 import SyncStatusIndicator from "../components/common/SyncStatusIndicator";
@@ -81,7 +80,6 @@ function readCurrentScannedBooks(): ScannedBook[] {
 }
 
 function IntakePage(): JSX.Element {
-  const [searchParams, setSearchParams] = useSearchParams();
   const [activeView, setActiveView] = useState<"scan" | "history">("scan");
   const [scannerConnected, setScannerConnected] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -390,19 +388,6 @@ function IntakePage(): JSX.Element {
     setCameraMessage("Requesting camera access...");
     setCameraActive(true);
   };
-
-  // Deep link from the mobile quick-nav scan button: /intake?scan=1 opens the camera immediately.
-  useEffect(() => {
-    if (searchParams.get("scan") !== "1") {
-      return;
-    }
-    setActiveView("scan");
-    setCameraMessage("Requesting camera access...");
-    setCameraActive(true);
-    const next = new URLSearchParams(searchParams);
-    next.delete("scan");
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!cameraActive) {
