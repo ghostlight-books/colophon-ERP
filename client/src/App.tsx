@@ -515,6 +515,7 @@ function ShellRouteLayout(): JSX.Element {
       if (mode !== "library") setMode("library");
       return;
     }
+    if (mode !== "bookstore") setMode("bookstore");
     const matchedPath = Object.keys(routeModules).find((path) => location.pathname.startsWith(path));
     const module = matchedPath ? routeModules[matchedPath] : "DASHBOARD";
     if (!hasModuleAccess(normalizeRole(currentUser.role), module)) {
@@ -529,6 +530,7 @@ function ShellRouteLayout(): JSX.Element {
       subtitle={meta.subtitle}
       navItems={activeNavItems}
       activePath={activePath}
+      workspaceMode={mode}
       onWorkspaceModeChange={(newMode) => {
         setMode(newMode);
         navigate(newMode === "library" ? "/library" : "/dashboard");
