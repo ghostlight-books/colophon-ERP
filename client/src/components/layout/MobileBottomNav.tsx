@@ -111,35 +111,37 @@ export default function MobileBottomNav({
           <span className="text-[10px] font-medium tracking-tight">Inventory</span>
         </Link>
 
-        {/* Center Floating POS Action Button */}
+        {/* Center Floating Barcode Scanner */}
         <Link
-          to="/pos-register"
+          to="/intake?scan=1"
           onClick={triggerHaptic}
-          className="relative -top-3.5 flex flex-col items-center justify-center w-13 h-13 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 text-white font-semibold shadow-[0_6px_20px_rgba(245,158,11,0.4)] border-2 border-white active:scale-95 transition"
+          className={`relative -top-3 flex flex-col items-center justify-center w-13 h-13 rounded-full bg-gradient-to-tr from-amber-500 to-orange-500 text-white font-semibold shadow-[0_6px_20px_rgba(245,158,11,0.4)] border-2 border-white active:scale-95 transition group ${
+            isIntake ? "ring-4 ring-amber-400/50" : ""
+          }`}
+          title="Quick Barcode Scanner"
         >
           <img
-            src="/icons/quicknav/dollar@3x.png"
-            alt="POS"
-            className="w-6 h-6 object-contain brightness-0 invert"
+            src="/icons/quicknav/barcode@3x.png"
+            alt="Scanner"
+            className="w-7 h-7 object-contain brightness-0 invert group-hover:scale-110 transition"
           />
-          <span className="text-[8px] font-semibold uppercase tracking-tighter text-white">POS</span>
         </Link>
 
         <Link
-          to="/intake"
+          to="/pos-register"
           onClick={triggerHaptic}
           className={`flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition ${
-            isIntake
+            isPos
               ? "bg-slate-300/80 dark:bg-white/10 text-slate-950 dark:text-white font-semibold scale-105"
               : "text-slate-600 dark:text-white/70 hover:text-slate-900 dark:hover:text-white"
           }`}
         >
           <img
-            src="/icons/quicknav/barcode@3x.png"
-            alt="Intake"
+            src="/icons/quicknav/dollar@3x.png"
+            alt="POS"
             className="w-5 h-5 object-contain dark:brightness-0 dark:invert"
           />
-          <span className="text-[10px] font-medium tracking-tight">Intake</span>
+          <span className="text-[10px] font-medium tracking-tight">POS</span>
         </Link>
 
         <Link
