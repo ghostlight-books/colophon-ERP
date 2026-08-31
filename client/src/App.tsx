@@ -6,6 +6,7 @@ import CalendarPage from "./pages/CalendarPage";
 import DashboardPage from "./pages/DashboardPage";
 import FinancePage from "./pages/FinancePage";
 import IntakePage from "./pages/IntakePage";
+import IntakeQuickScanPage from "./pages/IntakeQuickScanPage";
 import ActiveInventoryPage from "./pages/ActiveInventoryPage";
 import AdminPage from "./pages/AdminPage";
 import InventoryPage from "./pages/InventoryPage";
@@ -184,6 +185,7 @@ function App(): JSX.Element {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/library/quick-scan" element={<LibraryQuickScanPage />} />
+            <Route path="/intake/quick-scan" element={<IntakeQuickScanPage />} />
             <Route path="/" element={<ShellRouteLayout />}>
               <Route index element={<RootRedirect />} />
               <Route path="dashboard" element={<DashboardPage />} />

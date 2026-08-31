@@ -1,22 +1,81 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
-import CameraBarcodeScanner from "../../components/common/CameraBarcodeScanner";
-import { useLibrarySpace } from "../../context/LibrarySpaceContext";
+import { Link } from "react-router-dom";
+import CameraBarcodeScanner from "../components/common/CameraBarcodeScanner";
 import {
-  scanLibraryIsbn,
-  deleteLibraryVolume,
-  updateLibraryVolume,
-  evaluateRareBookPricing,
-  fetchShelves,
-  type LibraryVolume,
-  type LibraryShelfLocation,
-  type RarePricingResult,
-} from "../../services/library.service";
+  getIntakeContainer,
+  lookupBookByIsbn,
+  receiveInventory,
+  type BookCondition,
+  type BookLookup,
+  type IntakeContainer,
+} from "../services/intake.service";
+
+type ScanHistoryItem = {
+  id: string;
+  isbn: string;
+  title: string | null;
+  status: "Received" | "Not added";
+  condition: BookCondition | null;
+  container: IntakeContainer | null;
+  reason: string | null;
+  day: string;
+  time: string;
+  value: number | null;
+};
+
+type ScanSession = {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+  items: ScanHistoryItem[];
+};
+
+type ScannedBook = BookLookup & {
+  container: IntakeContainer;
+  condition: BookCondition;
+  listPrice: number | null;
+  scannedAt: string;
+};
+
+const conditionOptions: Array<{ value: BookCondition; discount: number }> = [
+  { value: "Fine", discount: 0 },
+  { value: "Very Good", discount: 0.1 },
+  { value: "Good", discount: 0.2 },
+  { value: "Fair", discount: 0.3 },
+  { value: "Poor", discount: 0.4 },
+];
 
 function formatCurrency(amount: number | null | undefined): string {
   if (typeof amount !== "number" || isNaN(amount)) return "$0.00";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
+}
+
+function nowTime(): string {
+  return new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function nowDay(): string {
+  return new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+}
+
+function readScanSessions(): ScanSession[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("colophon-scan-sessions") ?? "[]") as ScanSession[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function readCurrentScannedBooks(): ScannedBook[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("colophon-current-scanned-books") ?? "[]") as ScannedBook[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 // Audio chime synthesized via Web Audio API for fast zero-asset feedback
@@ -45,10 +104,7 @@ function triggerHapticSuccess() {
   }
 }
 
-export default function LibraryQuickScanPage() {
-  const navigate = useNavigate();
-  const { activeSpace, activeSpaceId } = useLibrarySpace();
-
+export default function IntakeQuickScanPage() {
   // Video & Stream State
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -57,7 +113,6 @@ export default function LibraryQuickScanPage() {
   const [hasTorch, setHasTorch] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
-  const [scanMode, setScanMode] = useState<"barcode" | "manual">("barcode");
 
   // Continuous Batch Mode
   const [batchMode, setBatchMode] = useState(true);
@@ -68,21 +123,36 @@ export default function LibraryQuickScanPage() {
 
   // Scan & Intake State
   const [isProcessingScan, setIsProcessingScan] = useState(false);
-  const [scannedVolume, setScannedVolume] = useState<LibraryVolume | null>(null);
-  const [sessionVolumes, setSessionVolumes] = useState<LibraryVolume[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
 
   // Condition State for next scan
-  const [defaultCondition, setDefaultCondition] = useState<"FINE" | "VERY_GOOD" | "GOOD" | "FAIR" | "POOR">("VERY_GOOD");
+  const [defaultCondition, setDefaultCondition] = useState<BookCondition>("Very Good");
 
-  // Shelves
-  const [shelves, setShelves] = useState<LibraryShelfLocation[]>([]);
-  const [selectedShelfId, setSelectedShelfId] = useState<string>("");
+  // Session (shared with the regular Intake page's Running Scan List & History)
+  const [sessionBooks, setSessionBooks] = useState<ScannedBook[]>(readCurrentScannedBooks);
+  const [scanSessions, setScanSessions] = useState<ScanSession[]>(readScanSessions);
+  const [currentSessionId] = useState(() => `INTAKE-${Date.now()}`);
 
   useEffect(() => {
-    void fetchShelves().then(setShelves);
-  }, []);
+    window.localStorage.setItem("colophon-scan-sessions", JSON.stringify(scanSessions));
+  }, [scanSessions]);
+
+  useEffect(() => {
+    window.localStorage.setItem("colophon-current-scanned-books", JSON.stringify(sessionBooks));
+  }, [sessionBooks]);
+
+  useEffect(() => {
+    setScanSessions((current) => current.some((session) => session.id === currentSessionId)
+      ? current
+      : [{ id: currentSessionId, startedAt: `${nowDay()} ${nowTime()}`, endedAt: null, items: [] }, ...current]);
+  }, [currentSessionId]);
+
+  const addSessionItem = (item: Omit<ScanHistoryItem, "id" | "day" | "time">): void => {
+    setScanSessions((current) => current.map((session) => session.id === currentSessionId
+      ? { ...session, items: [{ ...item, id: `SCAN-${Date.now()}`, day: nowDay(), time: nowTime() }, ...session.items] }
+      : session));
+  };
 
   // Initialize and attach camera stream
   const startCamera = useCallback(async (facing: "environment" | "user" = cameraFacing) => {
@@ -157,7 +227,7 @@ export default function LibraryQuickScanPage() {
     }
   };
 
-  // Process and Intake ISBN
+  // Process and Receive ISBN into inventory
   const handleProcessIsbn = async (rawIsbn: string) => {
     const clean = rawIsbn.replace(/[^0-9X]/gi, "").toUpperCase();
     if (clean.length < 9) {
@@ -165,32 +235,46 @@ export default function LibraryQuickScanPage() {
       return;
     }
 
-    // Check if duplicate in current session
-    if (sessionVolumes.some((v) => v.isbn.replace(/[^0-9X]/gi, "").toUpperCase() === clean)) {
+    if (sessionBooks.some((b) => b.isbn.replace(/[^0-9X]/gi, "").toUpperCase() === clean)) {
       setStatusFeedback(`"${clean}" already in current scan session.`);
       setTimeout(() => setStatusFeedback(null), 2500);
     }
 
     setIsProcessingScan(true);
     setErrorMessage(null);
-    setStatusFeedback("Scanning ISBN and fetching Library of Congress & metadata...");
+    setStatusFeedback("Looking up ISBN and fetching pricing...");
 
     try {
-      const volume = await scanLibraryIsbn(clean, selectedShelfId || undefined, {
-        condition: defaultCondition,
-        librarySpaceId: activeSpaceId !== "ALL" ? activeSpaceId : undefined,
-      });
+      const book = await lookupBookByIsbn(clean);
+      const discount = conditionOptions.find((option) => option.value === defaultCondition)?.discount ?? 0;
+      const listPrice = book.thriftbooksPrice === null ? null : Number((book.thriftbooksPrice * (1 - discount)).toFixed(2));
+      const container = getIntakeContainer(listPrice);
+      await receiveInventory(book, defaultCondition, listPrice, container);
 
       playScanChime();
       triggerHapticSuccess();
-      setScannedVolume(volume);
-      setSessionVolumes((prev) => [volume, ...prev]);
-      setStatusFeedback(`Cataloged: "${volume.title}"`);
+
+      const normalizedIsbn = book.isbn.replace(/[^0-9X]/gi, "").toUpperCase();
+      setSessionBooks((current) => {
+        const existingIndex = current.findIndex((item) => item.isbn.replace(/[^0-9X]/gi, "").toUpperCase() === normalizedIsbn);
+        if (existingIndex >= 0) {
+          const updated = [...current];
+          const existing = updated[existingIndex];
+          const nextQty = (existing.quantityOnHand || 1) + 1;
+          return [{ ...existing, quantityOnHand: nextQty, container, condition: defaultCondition, listPrice, scannedAt: nowTime() }, ...current.filter((_, i) => i !== existingIndex)];
+        }
+        return [{ ...book, quantityOnHand: 1, container, condition: defaultCondition, listPrice, scannedAt: nowTime() }, ...current];
+      });
+
+      addSessionItem({ isbn: book.isbn, title: book.title, status: "Received", condition: defaultCondition, container, reason: null, value: listPrice });
+      setStatusFeedback(`Received: "${book.title ?? clean}" · ${container}`);
       setTimeout(() => setStatusFeedback(null), 3000);
       setManualIsbn("");
       setIsManualModalOpen(false);
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed to scan volume.");
+      const reason = err instanceof Error ? err.message : "Failed to receive book.";
+      addSessionItem({ isbn: clean, title: null, status: "Not added", condition: null, container: null, reason, value: null });
+      setErrorMessage(reason);
       setStatusFeedback(null);
     } finally {
       setIsProcessingScan(false);
@@ -239,7 +323,7 @@ export default function LibraryQuickScanPage() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [cameraActive, isProcessingScan, activeSpaceId, defaultCondition, selectedShelfId]);
+  }, [cameraActive, isProcessingScan, defaultCondition]);
 
   // Start Camera on initial mount
   useEffect(() => {
@@ -249,55 +333,20 @@ export default function LibraryQuickScanPage() {
     };
   }, []);
 
-  // Update volume attributes from recent drawer
-  const handleUpdateVolumeCondition = async (vol: LibraryVolume, newCond: string) => {
+  // 1-Tap condition regrade for an already-received book: re-runs pricing/bin and re-submits
+  const handleRegradeCondition = async (book: ScannedBook, nextCondition: BookCondition) => {
     try {
-      const updated = await updateLibraryVolume(vol.id, { condition: newCond });
-      setSessionVolumes((prev) => prev.map((v) => (v.id === vol.id ? updated : v)));
-      if (scannedVolume?.id === vol.id) setScannedVolume(updated);
+      const discount = conditionOptions.find((option) => option.value === nextCondition)?.discount ?? 0;
+      const listPrice = book.thriftbooksPrice === null ? null : Number((book.thriftbooksPrice * (1 - discount)).toFixed(2));
+      const container = getIntakeContainer(listPrice);
+      await receiveInventory(book, nextCondition, listPrice, container);
+      setSessionBooks((current) => current.map((item) => (item.isbn === book.isbn ? { ...item, condition: nextCondition, listPrice, container } : item)));
     } catch (err) {
       console.warn("Failed to update condition:", err);
     }
   };
 
-  const handleToggleVolumeTag = async (vol: LibraryVolume, tag: "signed" | "firstEd" | "offers") => {
-    let nextSigned = vol.isSigned;
-    let nextFirstEd = vol.isFirstEdition;
-    let nextOffers = vol.listingStatus === "ALLOW_OFFERS";
-
-    if (tag === "signed") nextSigned = !nextSigned;
-    if (tag === "firstEd") nextFirstEd = !nextFirstEd;
-    if (tag === "offers") nextOffers = !nextOffers;
-
-    try {
-      const updated = await updateLibraryVolume(vol.id, {
-        isSigned: nextSigned,
-        isFirstEdition: nextFirstEd,
-        listingStatus: nextOffers ? "ALLOW_OFFERS" : "COLLECTION_ONLY",
-      });
-      setSessionVolumes((prev) => prev.map((v) => (v.id === vol.id ? updated : v)));
-      if (scannedVolume?.id === vol.id) setScannedVolume(updated);
-    } catch (err) {
-      console.warn("Failed to update tag:", err);
-    }
-  };
-
-  const handleRemoveVolume = async (volId: string) => {
-    try {
-      await deleteLibraryVolume(volId);
-      setSessionVolumes((prev) => prev.filter((v) => v.id !== volId));
-      if (scannedVolume?.id === volId) setScannedVolume(null);
-      setStatusFeedback("Book removed from collection.");
-      setTimeout(() => setStatusFeedback(null), 2500);
-    } catch (err) {
-      setErrorMessage("Failed to remove book.");
-    }
-  };
-
-  const sessionTotalValue = sessionVolumes.reduce(
-    (sum, v) => sum + (v.rareMarketValue || v.replacementValue || 0),
-    0
-  );
+  const sessionTotalValue = sessionBooks.reduce((sum, book) => sum + (book.listPrice ?? 0), 0);
 
   return (
     <div className="fixed inset-0 z-[9980] bg-black text-white flex flex-col justify-between select-none overflow-hidden font-sans">
@@ -308,9 +357,9 @@ export default function LibraryQuickScanPage() {
       <header className="px-3.5 pb-3.5 pt-[calc(env(safe-area-inset-top,0px)+0.875rem)] bg-slate-950/80 backdrop-blur-xl border-b border-slate-800/80 flex items-center justify-between z-30 shrink-0 gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
           <Link
-            to="/library/catalog"
+            to="/intake"
             className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 active:scale-95 flex items-center justify-center text-slate-200 text-sm font-bold transition shrink-0"
-            title="Back to Catalog"
+            title="Back to Intake"
           >
             ←
           </Link>
@@ -318,19 +367,28 @@ export default function LibraryQuickScanPage() {
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
               <h1 className="text-xs font-black tracking-tight text-white truncate">
-                {activeSpace?.name || "Library"} Scanner
+                Store Scanner
               </h1>
             </div>
             {/* Live Rolling Counter Bar */}
             <p className="text-[10px] text-slate-300 truncate">
-              <span className="font-bold text-indigo-400">{sessionVolumes.length} Books</span> • {formatCurrency(sessionTotalValue)}
+              <span className="font-bold text-indigo-400">{sessionBooks.length} Books</span> • {formatCurrency(sessionTotalValue)}
             </p>
           </div>
         </div>
 
-        {/* Space Selector & Batch Toggle */}
+        {/* Default Condition & Batch Toggle */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <LibrarySpaceSwitcher />
+          <select
+            value={defaultCondition}
+            onChange={(event) => setDefaultCondition(event.target.value as BookCondition)}
+            aria-label="Default condition for this batch"
+            className="bg-slate-800 text-white text-[10px] font-bold rounded-full px-2.5 py-1.5 border border-slate-700 cursor-pointer"
+          >
+            {conditionOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.value}</option>
+            ))}
+          </select>
 
           {/* Continuous Batch Mode Toggle Pill */}
           <button
@@ -360,7 +418,7 @@ export default function LibraryQuickScanPage() {
         {isProcessingScan && (
           <div className="absolute inset-0 z-20 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center gap-3 animate-fadeIn">
             <div className="w-10 h-10 border-3 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-            <p className="text-xs font-bold text-slate-100">Intaking Book into Library...</p>
+            <p className="text-xs font-bold text-slate-100">Receiving Book into Inventory...</p>
           </div>
         )}
 
@@ -415,97 +473,58 @@ export default function LibraryQuickScanPage() {
 
       {/* 3. Bottom Slide-Out Recent Scans Tray */}
       <footer className="bg-slate-950/95 backdrop-blur-2xl border-t border-slate-800/90 p-3.5 z-30 shrink-0 space-y-3">
-        {sessionVolumes.length > 0 ? (
+        {sessionBooks.length > 0 ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold px-1">
-              <span>Recently Cataloged ({sessionVolumes.length})</span>
-              <Link to="/library/catalog" className="text-indigo-400 hover:text-indigo-300 font-bold">
-                View in Catalog →
+              <span>Recently Received ({sessionBooks.length})</span>
+              <Link to="/intake" className="text-indigo-400 hover:text-indigo-300 font-bold">
+                View in Intake →
               </Link>
             </div>
 
             {/* Horizontal Scrollable Intake Cards */}
             <div className="flex items-center gap-3 overflow-x-auto pb-1 scrollbar-none">
-              {sessionVolumes.map((vol) => (
+              {sessionBooks.map((book, index) => (
                 <div
-                  key={vol.id}
+                  key={`${book.isbn}-${index}`}
                   className="w-64 shrink-0 bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 space-y-2 shadow-lg"
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-10 h-14 bg-slate-800 rounded-lg overflow-hidden shrink-0 border border-slate-700 flex items-center justify-center">
-                      {vol.coverUrl ? (
-                        <img src={vol.coverUrl} alt="" className="w-full h-full object-cover" />
+                      {book.coverUrl ? (
+                        <img src={book.coverUrl} alt="" className="w-full h-full object-cover" />
                       ) : (
                         <span>📖</span>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <h4 className="text-xs font-black text-white truncate">{vol.title}</h4>
-                      <p className="text-[10px] text-slate-400 truncate">{vol.author || "Unknown"}</p>
+                      <h4 className="text-xs font-black text-white truncate">{book.title ?? "Title unavailable"}</h4>
+                      <p className="text-[10px] text-slate-400 truncate">{book.author || "Unknown"}</p>
                       <p className="text-[10px] font-mono font-bold text-indigo-400 mt-0.5">
-                        {vol.deweyDecimal ? `DDC: ${vol.deweyDecimal}` : vol.locClassification || "--"}
+                        {book.listPrice === null ? "No price" : formatCurrency(book.listPrice)} · {book.container}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveVolume(vol.id)}
-                      className="text-slate-500 hover:text-rose-400 p-1 text-xs cursor-pointer"
-                      title="Undo scan"
-                    >
-                      ✕
-                    </button>
                   </div>
 
                   {/* 1-Tap Condition Grading Buttons */}
                   <div className="flex items-center gap-1 text-[9px] pt-1 border-t border-slate-800">
-                    {(["FINE", "VERY_GOOD", "GOOD", "FAIR"] as const).map((cond) => {
-                      const isSelected = (vol.condition || "VERY_GOOD") === cond;
+                    {(["Fine", "Very Good", "Good", "Fair"] as const).map((cond) => {
+                      const isSelected = book.condition === cond;
                       return (
                         <button
                           key={cond}
                           type="button"
-                          onClick={() => handleUpdateVolumeCondition(vol, cond)}
+                          onClick={() => handleRegradeCondition(book, cond)}
                           className={`flex-1 py-1 rounded-md font-bold transition cursor-pointer ${
                             isSelected
                               ? "bg-indigo-600 text-white shadow-xs"
                               : "bg-slate-800 text-slate-400 hover:text-slate-200"
                           }`}
                         >
-                          {cond === "FINE" ? "💎 Fine" : cond === "VERY_GOOD" ? "✨ VG" : cond === "GOOD" ? "📖 Good" : "Fair"}
+                          {cond === "Fine" ? "💎 Fine" : cond === "Very Good" ? "✨ VG" : cond === "Good" ? "📖 Good" : "Fair"}
                         </button>
                       );
                     })}
-                  </div>
-
-                  {/* Quick Collectible Tag Toggles */}
-                  <div className="flex items-center gap-1 text-[9px]">
-                    <button
-                      type="button"
-                      onClick={() => handleToggleVolumeTag(vol, "signed")}
-                      className={`flex-1 py-0.5 rounded-md font-bold transition cursor-pointer ${
-                        vol.isSigned ? "bg-amber-500/30 text-amber-300 border border-amber-500/50" : "bg-slate-800 text-slate-500"
-                      }`}
-                    >
-                      ✍️ Signed
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleVolumeTag(vol, "firstEd")}
-                      className={`flex-1 py-0.5 rounded-md font-bold transition cursor-pointer ${
-                        vol.isFirstEdition ? "bg-purple-500/30 text-purple-300 border border-purple-500/50" : "bg-slate-800 text-slate-500"
-                      }`}
-                    >
-                      ⭐ 1st Ed
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleVolumeTag(vol, "offers")}
-                      className={`flex-1 py-0.5 rounded-md font-bold transition cursor-pointer ${
-                        vol.listingStatus === "ALLOW_OFFERS" ? "bg-emerald-500/30 text-emerald-300 border border-emerald-500/50" : "bg-slate-800 text-slate-500"
-                      }`}
-                    >
-                      🤝 Offers
-                    </button>
                   </div>
                 </div>
               ))}
@@ -556,7 +575,7 @@ export default function LibraryQuickScanPage() {
                 disabled={!manualIsbn.trim() || isProcessingScan}
                 className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl transition shadow-md cursor-pointer disabled:opacity-50"
               >
-                {isProcessingScan ? "Fetching Metadata..." : "Intake Book"}
+                {isProcessingScan ? "Fetching Metadata..." : "Receive Book"}
               </button>
             </form>
           </div>

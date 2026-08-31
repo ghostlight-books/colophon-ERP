@@ -319,6 +319,17 @@ export default function LibraryScannerPage() {
 
   return (
     <div className="space-y-6">
+      {/* Full-Screen Camera Overlay */}
+      {cameraActive && (
+        <div className="fixed inset-0 z-[9990] bg-black pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
+          <CameraBarcodeScanner
+            onScan={handleProcessIsbn}
+            onClose={() => setCameraActive(false)}
+            className="w-full h-full rounded-none border-none"
+          />
+        </div>
+      )}
+
       {/* Header card */}
       <SurfaceCard className="space-y-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200/80 pb-4">
@@ -405,28 +416,20 @@ export default function LibraryScannerPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-1">
           {/* Left Column: Camera Viewfinder (6 cols) */}
           <div className="lg:col-span-6 space-y-3">
-            {cameraActive ? (
-              <CameraBarcodeScanner
-                onScan={handleProcessIsbn}
-                onClose={() => setCameraActive(false)}
-                className="w-full"
-              />
-            ) : (
-              <div className="relative w-full h-[280px] bg-slate-900 rounded-3xl overflow-hidden border border-slate-800 flex flex-col items-center justify-center shadow-md text-center p-6 space-y-3 text-slate-400">
-                <span className="text-4xl block">📷</span>
-                <p className="text-xs font-semibold text-slate-200">Device Camera Scanner</p>
-                <p className="text-[11px] text-slate-400 max-w-[260px]">
-                  Position your book's barcode in front of the camera for instant auto-intake
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setCameraActive(true)}
-                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium text-xs rounded-2xl transition shadow-xs cursor-pointer"
-                >
-                  Start Camera Scanner
-                </button>
-              </div>
-            )}
+            <div className="relative w-full h-[280px] bg-slate-900 rounded-3xl overflow-hidden border border-slate-800 flex flex-col items-center justify-center shadow-md text-center p-6 space-y-3 text-slate-400">
+              <span className="text-4xl block">📷</span>
+              <p className="text-xs font-semibold text-slate-200">Device Camera Scanner</p>
+              <p className="text-[11px] text-slate-400 max-w-[260px]">
+                Position your book's barcode in front of the camera for instant auto-intake
+              </p>
+              <button
+                type="button"
+                onClick={() => setCameraActive(true)}
+                className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium text-xs rounded-2xl transition shadow-xs cursor-pointer"
+              >
+                Start Camera Scanner
+              </button>
+            </div>
 
             {cameraError && (
               <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-xl p-2.5">{cameraError}</p>

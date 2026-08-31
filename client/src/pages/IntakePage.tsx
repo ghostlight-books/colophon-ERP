@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 
 import SurfaceCard from "../components/ui/SurfaceCard";
 import SyncStatusIndicator from "../components/common/SyncStatusIndicator";
@@ -463,7 +464,16 @@ function IntakePage(): JSX.Element {
           <button type="button" onClick={() => setActiveView("scan")} className={["rounded-full px-4 py-2.5", activeView === "scan" ? "bg-white text-slate-700 shadow-[0_5px_14px_rgba(76,86,103,0.12)]" : "hover:bg-white/70"].join(" ")}>Scan Session</button>
           <button type="button" onClick={() => setActiveView("history")} className={["rounded-full px-4 py-2.5", activeView === "history" ? "bg-white text-slate-700 shadow-[0_5px_14px_rgba(76,86,103,0.12)]" : "hover:bg-white/70"].join(" ")}>Intake History</button>
         </div>
-        <SyncStatusIndicator />
+        <div className="flex items-center gap-2">
+          <Link
+            to="/intake/quick-scan"
+            className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 transition"
+          >
+            <span>📱</span>
+            <span>Quick Phone Scanner</span>
+          </Link>
+          <SyncStatusIndicator />
+        </div>
       </div>
       {activeView === "scan" ? (
       <>
@@ -747,7 +757,7 @@ function IntakePage(): JSX.Element {
           </form>
 
           {cameraActive ? (
-            <div className="mt-3">
+            <div className="fixed inset-0 z-[9990] bg-black pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
               <CameraBarcodeScanner
                 onScan={(code) => {
                   setBarcode(code);
@@ -755,6 +765,7 @@ function IntakePage(): JSX.Element {
                   void handleBarcodeLookup(code);
                 }}
                 onClose={() => stopCamera()}
+                className="w-full h-full rounded-none border-none"
               />
             </div>
           ) : null}
