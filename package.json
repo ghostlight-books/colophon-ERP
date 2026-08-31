@@ -16,13 +16,23 @@
     "db:generate": "npm --workspace @colophon/database run prisma:generate",
     "db:migrate": "npm --workspace @colophon/database run prisma:migrate",
     "db:migrate:deploy": "npm --workspace @colophon/database run prisma:migrate:deploy",
-    "db:seed": "npm --workspace @colophon/database run seed"
-    ,"shopify:dev": "shopify app dev"
-    ,"shopify:deploy": "shopify app deploy"
-    ,"shopify:config": "shopify app config link"
+    "db:seed": "npm --workspace @colophon/database run seed",
+    "shopify:dev": "shopify app dev",
+    "shopify:deploy": "shopify app deploy",
+    "shopify:config": "shopify app config link"
   },
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5",
+    "cross-env": "^10.1.0",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
+    "wait-on": "^9.1.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }
