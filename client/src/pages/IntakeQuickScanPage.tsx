@@ -50,6 +50,12 @@ function formatCurrency(amount: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
 }
 
+function toteColors(container: IntakeContainer): { border: string; bg: string; text: string; dot: string } {
+  if (container === "Green Box") return { border: "border-emerald-400/60", bg: "bg-emerald-500/15", text: "text-emerald-300", dot: "bg-emerald-500" };
+  if (container === "Blue Bin") return { border: "border-sky-400/60", bg: "bg-sky-500/15", text: "text-sky-300", dot: "bg-sky-500" };
+  return { border: "border-rose-400/60", bg: "bg-rose-500/15", text: "text-rose-300", dot: "bg-rose-500" };
+}
+
 function nowTime(): string {
   return new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
@@ -125,6 +131,7 @@ export default function IntakeQuickScanPage() {
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
+  const [lastScannedBook, setLastScannedBook] = useState<ScannedBook | null>(null);
 
   // Condition State for next scan
   const [defaultCondition, setDefaultCondition] = useState<BookCondition>("Very Good");
@@ -255,20 +262,22 @@ export default function IntakeQuickScanPage() {
       triggerHapticSuccess();
 
       const normalizedIsbn = book.isbn.replace(/[^0-9X]/gi, "").toUpperCase();
+      const receivedBook: ScannedBook = { ...book, quantityOnHand: 1, container, condition: defaultCondition, listPrice, scannedAt: nowTime() };
       setSessionBooks((current) => {
         const existingIndex = current.findIndex((item) => item.isbn.replace(/[^0-9X]/gi, "").toUpperCase() === normalizedIsbn);
         if (existingIndex >= 0) {
-          const updated = [...current];
-          const existing = updated[existingIndex];
+          const existing = current[existingIndex];
           const nextQty = (existing.quantityOnHand || 1) + 1;
-          return [{ ...existing, quantityOnHand: nextQty, container, condition: defaultCondition, listPrice, scannedAt: nowTime() }, ...current.filter((_, i) => i !== existingIndex)];
+          receivedBook.quantityOnHand = nextQty;
+          return [{ ...existing, ...receivedBook }, ...current.filter((_, i) => i !== existingIndex)];
         }
-        return [{ ...book, quantityOnHand: 1, container, condition: defaultCondition, listPrice, scannedAt: nowTime() }, ...current];
+        return [receivedBook, ...current];
       });
 
       addSessionItem({ isbn: book.isbn, title: book.title, status: "Received", condition: defaultCondition, container, reason: null, value: listPrice });
-      setStatusFeedback(`Received: "${book.title ?? clean}" · ${container}`);
-      setTimeout(() => setStatusFeedback(null), 3000);
+      setStatusFeedback(null);
+      setLastScannedBook(receivedBook);
+      setTimeout(() => setLastScannedBook((current) => (current?.isbn === receivedBook.isbn ? null : current)), 4500);
       setManualIsbn("");
       setIsManualModalOpen(false);
     } catch (err) {
@@ -276,6 +285,7 @@ export default function IntakeQuickScanPage() {
       addSessionItem({ isbn: clean, title: null, status: "Not added", condition: null, container: null, reason, value: null });
       setErrorMessage(reason);
       setStatusFeedback(null);
+      setLastScannedBook(null);
     } finally {
       setIsProcessingScan(false);
     }
@@ -422,10 +432,44 @@ export default function IntakeQuickScanPage() {
           </div>
         )}
 
-        {/* Feedback / Error Toast */}
-        {statusFeedback && (
-          <div className="absolute top-4 left-4 right-4 z-20 p-3 bg-emerald-950/90 border border-emerald-500/50 text-emerald-200 text-xs font-bold rounded-2xl backdrop-blur-md shadow-xl text-center animate-slideDown">
-            ✅ {statusFeedback}
+        {/* Just Scanned: Cover, Title, Author, Value & Tote */}
+        {lastScannedBook && (() => {
+          const tote = toteColors(lastScannedBook.container);
+          return (
+            <div className={`absolute top-4 left-4 right-4 z-20 p-3 rounded-2xl border-2 ${tote.border} bg-slate-950/95 backdrop-blur-md shadow-xl flex items-center gap-3 animate-slideDown`}>
+              <div className="w-12 h-16 rounded-lg overflow-hidden shrink-0 border border-slate-700 bg-slate-800 flex items-center justify-center">
+                {lastScannedBook.coverUrl ? (
+                  <img src={lastScannedBook.coverUrl} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-xl">📖</span>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-black text-white truncate">{lastScannedBook.title ?? "Title unavailable"}</p>
+                <p className="text-xs text-slate-400 truncate">{lastScannedBook.author ?? "Unknown author"}</p>
+                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                  <span className="text-sm font-black text-emerald-400">{formatCurrency(lastScannedBook.listPrice)}</span>
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${tote.bg} ${tote.text} ${tote.border}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${tote.dot}`} />
+                    {lastScannedBook.container}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLastScannedBook(null)}
+                className="self-start text-slate-500 hover:text-white text-xs px-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          );
+        })()}
+
+        {/* Transient Status (looking up, duplicate warning) */}
+        {statusFeedback && !lastScannedBook && (
+          <div className="absolute top-4 left-4 right-4 z-20 p-3 bg-slate-950/90 border border-slate-700 text-slate-200 text-xs font-bold rounded-2xl backdrop-blur-md shadow-xl text-center animate-slideDown">
+            {statusFeedback}
           </div>
         )}
 
@@ -484,10 +528,12 @@ export default function IntakeQuickScanPage() {
 
             {/* Horizontal Scrollable Intake Cards */}
             <div className="flex items-center gap-3 overflow-x-auto pb-1 scrollbar-none">
-              {sessionBooks.map((book, index) => (
+              {sessionBooks.map((book, index) => {
+                const tote = toteColors(book.container);
+                return (
                 <div
                   key={`${book.isbn}-${index}`}
-                  className="w-64 shrink-0 bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 space-y-2 shadow-lg"
+                  className={`w-64 shrink-0 bg-slate-900/90 border-2 ${tote.border} rounded-2xl p-2.5 space-y-2 shadow-lg`}
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-10 h-14 bg-slate-800 rounded-lg overflow-hidden shrink-0 border border-slate-700 flex items-center justify-center">
@@ -500,9 +546,15 @@ export default function IntakeQuickScanPage() {
                     <div className="min-w-0 flex-1">
                       <h4 className="text-xs font-black text-white truncate">{book.title ?? "Title unavailable"}</h4>
                       <p className="text-[10px] text-slate-400 truncate">{book.author || "Unknown"}</p>
-                      <p className="text-[10px] font-mono font-bold text-indigo-400 mt-0.5">
-                        {book.listPrice === null ? "No price" : formatCurrency(book.listPrice)} · {book.container}
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <span className="text-[11px] font-mono font-black text-emerald-400">
+                          {book.listPrice === null ? "No price" : formatCurrency(book.listPrice)}
+                        </span>
+                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${tote.bg} ${tote.text} ${tote.border}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${tote.dot}`} />
+                          {book.container}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -527,7 +579,8 @@ export default function IntakeQuickScanPage() {
                     })}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : (

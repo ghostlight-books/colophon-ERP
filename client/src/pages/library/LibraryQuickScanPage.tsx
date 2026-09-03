@@ -185,13 +185,14 @@ export default function LibraryQuickScanPage() {
       triggerHapticSuccess();
       setScannedVolume(volume);
       setSessionVolumes((prev) => [volume, ...prev]);
-      setStatusFeedback(`Cataloged: "${volume.title}"`);
-      setTimeout(() => setStatusFeedback(null), 3000);
+      setStatusFeedback(null);
+      setTimeout(() => setScannedVolume((current) => (current?.id === volume.id ? null : current)), 4500);
       setManualIsbn("");
       setIsManualModalOpen(false);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Failed to scan volume.");
       setStatusFeedback(null);
+      setScannedVolume(null);
     } finally {
       setIsProcessingScan(false);
     }
@@ -364,10 +365,42 @@ export default function LibraryQuickScanPage() {
           </div>
         )}
 
-        {/* Feedback / Error Toast */}
-        {statusFeedback && (
-          <div className="absolute top-4 left-4 right-4 z-20 p-3 bg-emerald-950/90 border border-emerald-500/50 text-emerald-200 text-xs font-bold rounded-2xl backdrop-blur-md shadow-xl text-center animate-slideDown">
-            ✅ {statusFeedback}
+        {/* Just Scanned: Cover, Title, Author, Value & Classification */}
+        {scannedVolume && (
+          <div className="absolute top-4 left-4 right-4 z-20 p-3 rounded-2xl border-2 border-indigo-400/60 bg-slate-950/95 backdrop-blur-md shadow-xl flex items-center gap-3 animate-slideDown">
+            <div className="w-12 h-16 rounded-lg overflow-hidden shrink-0 border border-slate-700 bg-slate-800 flex items-center justify-center">
+              {scannedVolume.coverUrl ? (
+                <img src={scannedVolume.coverUrl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xl">📖</span>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-black text-white truncate">{scannedVolume.title}</p>
+              <p className="text-xs text-slate-400 truncate">{scannedVolume.author || "Unknown author"}</p>
+              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                <span className="text-sm font-black text-emerald-400">
+                  {formatCurrency(scannedVolume.rareMarketValue || scannedVolume.replacementValue)}
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border bg-indigo-500/15 text-indigo-300 border-indigo-400/60">
+                  {scannedVolume.deweyDecimal ? `DDC ${scannedVolume.deweyDecimal}` : scannedVolume.locClassification || "Unclassified"}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setScannedVolume(null)}
+              className="self-start text-slate-500 hover:text-white text-xs px-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Transient Status (scanning, duplicate warning) */}
+        {statusFeedback && !scannedVolume && (
+          <div className="absolute top-4 left-4 right-4 z-20 p-3 bg-slate-950/90 border border-slate-700 text-slate-200 text-xs font-bold rounded-2xl backdrop-blur-md shadow-xl text-center animate-slideDown">
+            {statusFeedback}
           </div>
         )}
 
@@ -442,9 +475,14 @@ export default function LibraryQuickScanPage() {
                     <div className="min-w-0 flex-1">
                       <h4 className="text-xs font-black text-white truncate">{vol.title}</h4>
                       <p className="text-[10px] text-slate-400 truncate">{vol.author || "Unknown"}</p>
-                      <p className="text-[10px] font-mono font-bold text-indigo-400 mt-0.5">
-                        {vol.deweyDecimal ? `DDC: ${vol.deweyDecimal}` : vol.locClassification || "--"}
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <span className="text-[11px] font-mono font-black text-emerald-400">
+                          {formatCurrency(vol.rareMarketValue || vol.replacementValue)}
+                        </span>
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold border bg-indigo-500/15 text-indigo-300 border-indigo-400/60">
+                          {vol.deweyDecimal ? `DDC ${vol.deweyDecimal}` : vol.locClassification || "Unclassified"}
+                        </span>
+                      </div>
                     </div>
                     <button
                       type="button"

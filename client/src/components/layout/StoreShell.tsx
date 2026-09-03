@@ -412,7 +412,7 @@ function StoreShell({
             isDark ? "text-slate-100" : "text-slate-900",
           ].join(" ")}>
             <div className="flex items-center gap-2.5">
-              <BrandLogo className="h-9 w-9 shrink-0" />
+              <BrandLogo className="h-9 w-9 shrink-0" variant="bookstore" />
               <div>
                 <p className={[
                   "text-[0.75rem] tracking-[0.01em] transition-colors duration-300 font-semibold",
@@ -425,47 +425,6 @@ function StoreShell({
                 </p>
               </div>
             </div>
-          </div>
-
-          {/* Workspace Mode Switcher Pill */}
-          <div className={[
-            "mt-2 mb-1 p-1 rounded-2xl flex items-center gap-1 transition-colors duration-300",
-            isDark ? "bg-slate-800" : "bg-slate-100",
-          ].join(" ")}>
-            <button
-              type="button"
-              onClick={() => onWorkspaceModeChange?.("bookstore")}
-              className={[
-                "flex-1 py-1.5 px-2 rounded-xl text-[11px] font-medium transition flex items-center justify-center gap-1 cursor-pointer",
-                workspaceMode === "bookstore"
-                  ? isDark
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "bg-white text-indigo-950 shadow-sm border border-slate-200"
-                  : isDark
-                    ? "text-slate-400 hover:text-white"
-                    : "text-slate-600 hover:text-slate-900",
-              ].join(" ")}
-            >
-              <span>🏪</span>
-              <span>Store</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onWorkspaceModeChange?.("library")}
-              className={[
-                "flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer",
-                workspaceMode === "library"
-                  ? isDark
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "bg-white text-indigo-950 shadow-sm border border-slate-200"
-                  : isDark
-                    ? "text-slate-400 hover:text-white"
-                    : "text-slate-600 hover:text-slate-900",
-              ].join(" ")}
-            >
-              <span>🏛️</span>
-              <span>Library</span>
-            </button>
           </div>
 
           {workspaceMode === "library" && (
@@ -505,11 +464,11 @@ function StoreShell({
                     className={[
                       "group flex items-center justify-between rounded-full px-3.5 py-1.5 text-left text-[0.88rem] font-bold transition cursor-pointer",
                       isDirectActive && !hasChildren
-                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                        ? "bg-amber-600 text-white shadow-md shadow-amber-500/20"
                         : isParentActive
                           ? isDark
-                            ? "bg-indigo-950/60 text-indigo-200 border border-indigo-800"
-                            : "bg-indigo-50 text-indigo-900 border border-indigo-200/80"
+                            ? "bg-amber-950/60 text-amber-200 border border-amber-800"
+                            : "bg-amber-50 text-amber-900 border border-amber-200/80"
                           : isDark
                             ? "text-slate-200 hover:bg-slate-800 hover:text-white"
                             : "text-slate-800 hover:bg-slate-100 hover:text-slate-950",
@@ -559,7 +518,7 @@ function StoreShell({
                             className={[
                               "group flex items-center gap-2 rounded-lg px-2.5 py-1 text-left text-[11.5px] font-bold transition cursor-pointer",
                               isThisChildActive
-                                ? "bg-indigo-600 text-white shadow-xs"
+                                ? "bg-amber-600 text-white shadow-xs"
                                 : isDark
                                   ? "text-slate-300 hover:bg-slate-800 hover:text-white"
                                   : "text-slate-700 hover:bg-slate-100 hover:text-slate-950",
@@ -610,8 +569,12 @@ function StoreShell({
         </aside>
 
         {/* Main Content Area */}
+        {/* No z-index here on purpose: giving this a stacking-context-creating
+            z-index traps every modal rendered inside {children} below that
+            level, so full-screen popups end up hidden behind the mobile
+            bottom nav (z-[9980]) no matter how high their own z-index is. */}
         <div className={[
-          "relative z-10 overflow-visible",
+          "relative overflow-visible",
           isPosRoute
             ? isPosSidebarOpen
               ? "lg:pl-[18rem] pr-2 pt-2"
@@ -641,51 +604,21 @@ function StoreShell({
                 </button>
 
                 <div className="flex items-center gap-2">
-                  <BrandLogo className="h-7 w-7 text-indigo-500 shrink-0" />
+                  <BrandLogo className="h-7 w-7 shrink-0" variant="bookstore" />
                 </div>
               </div>
 
-              {/* Right: Prominent Workspace Switcher + Unified Header Menu Button */}
+              {/* Right: Edition Badge (read-only -- edition is chosen at login, not switched in-app) + Unified Header Menu Button */}
               <div className="flex items-center gap-2 sm:gap-3">
-                <div className={[
-                  "flex items-center p-0.5 sm:p-1 rounded-2xl border text-xs",
-                  isDark ? "bg-slate-800 border-slate-700" : "bg-slate-200/90 border-slate-300",
-                ].join(" ")}>
-                  <button
-                    type="button"
-                    onClick={() => onWorkspaceModeChange?.("bookstore")}
-                    title="Switch to Bookstore ERP (POS, Inventory, Intake, Finance, eBay)"
-                    className={`px-2.5 sm:px-3 py-1 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer text-xs ${
-                      workspaceMode === "bookstore"
-                        ? isDark
-                          ? "bg-indigo-600 text-white shadow-xs font-black"
-                          : "bg-white text-slate-900 shadow-xs font-black"
-                        : isDark
-                          ? "text-slate-400 hover:text-white"
-                          : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <span>🏪</span>
-                    <span className="hidden sm:inline">Store</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onWorkspaceModeChange?.("library")}
-                    title="Switch to Personal Library (Catalog, Shelves, Scanner, Lending, Valuation)"
-                    className={`px-2.5 sm:px-3 py-1 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer text-xs ${
-                      workspaceMode === "library"
-                        ? isDark
-                          ? "bg-indigo-600 text-white shadow-xs font-black"
-                          : "bg-white text-slate-900 shadow-xs font-black"
-                        : isDark
-                          ? "text-slate-400 hover:text-white"
-                          : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <span>🏛️</span>
-                    <span className="hidden sm:inline">Library</span>
-                  </button>
-                </div>
+                <span
+                  className={[
+                    "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-2xl border text-xs font-black",
+                    isDark ? "bg-amber-950/50 border-amber-800 text-amber-300" : "bg-amber-50 border-amber-200 text-amber-800",
+                  ].join(" ")}
+                >
+                  <span>🏪</span>
+                  <span className="hidden sm:inline">Bookstore</span>
+                </span>
 
                 <div ref={toolbarRef} className="relative z-[140] shrink-0">
                 <button
@@ -695,8 +628,8 @@ function StoreShell({
                     "flex items-center gap-2 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-2xl border transition cursor-pointer active:scale-95 shadow-xs font-semibold text-xs",
                     menu !== "none"
                       ? isDark
-                        ? "border-indigo-500 bg-indigo-950/80 text-white ring-2 ring-indigo-500/40"
-                        : "border-indigo-400 bg-indigo-50 text-indigo-950 ring-2 ring-indigo-300"
+                        ? "border-amber-500 bg-amber-950/80 text-white ring-2 ring-amber-500/40"
+                        : "border-amber-400 bg-amber-50 text-amber-950 ring-2 ring-amber-300"
                       : isDark
                         ? "border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700"
                         : "border-slate-300 bg-[#e2e8f0] text-slate-800 hover:bg-[#cbd5e1]",
@@ -755,7 +688,7 @@ function StoreShell({
                                 <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                                   {currentUser.email}
                                 </p>
-                                <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800">
+                                <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-800">
                                   {currentUser.role}
                                 </span>
                               </div>
@@ -764,52 +697,10 @@ function StoreShell({
                             <button
                               type="button"
                               onClick={() => setMenu("account")}
-                              className="px-2.5 py-1 text-[11px] font-bold rounded-lg text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950 transition cursor-pointer"
+                              className="px-2.5 py-1 text-[11px] font-bold rounded-lg text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950 transition cursor-pointer"
                             >
                               Edit
                             </button>
-                          </div>
-
-                          {/* Workspace Switcher in Dropdown */}
-                          <div className="p-2 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1.5">
-                            <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1">
-                              <span>Switch Workspace</span>
-                              <span className="text-indigo-600 dark:text-indigo-400 lowercase font-medium">
-                                active: {workspaceMode}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onWorkspaceModeChange?.("bookstore");
-                                  setMenu("none");
-                                }}
-                                className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                                  workspaceMode === "bookstore"
-                                    ? "bg-indigo-600 text-white shadow-xs font-black"
-                                    : "bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-slate-50"
-                                }`}
-                              >
-                                <span>🏪</span>
-                                <span>Bookstore</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onWorkspaceModeChange?.("library");
-                                  setMenu("none");
-                                }}
-                                className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                                  workspaceMode === "library"
-                                    ? "bg-indigo-600 text-white shadow-xs font-black"
-                                    : "bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-slate-50"
-                                }`}
-                              >
-                                <span>🏛️</span>
-                                <span>Library</span>
-                              </button>
-                            </div>
                           </div>
 
                         {/* Quick Menu Options */}
@@ -821,7 +712,7 @@ function StoreShell({
                             className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition cursor-pointer text-xs font-semibold text-slate-800 dark:text-slate-200"
                           >
                             <div className="flex items-center gap-2.5">
-                              <span className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
+                              <span className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400">
                                 <Search size={14} />
                               </span>
                               <span>Search System</span>
@@ -856,7 +747,7 @@ function StoreShell({
                                 onClick={() => setTheme("dark")}
                                 className={`px-2 py-0.5 rounded-md transition font-bold cursor-pointer ${
                                   isDark
-                                    ? "bg-indigo-600 text-white shadow-xs"
+                                    ? "bg-amber-600 text-white shadow-xs"
                                     : "text-slate-600 hover:text-slate-900"
                                 }`}
                               >
@@ -960,7 +851,7 @@ function StoreShell({
                           <button
                             type="button"
                             onClick={() => setMenu("menu")}
-                            className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                            className="flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
                           >
                             <ChevronLeft size={14} />
                             <span>Back to Menu</span>
@@ -987,7 +878,7 @@ function StoreShell({
                               }
                             }}
                             placeholder="Search books, orders, customers..."
-                            className="mt-2 w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2.5 text-xs font-semibold focus:outline-none focus:border-indigo-500"
+                            className="mt-2 w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2.5 text-xs font-semibold focus:outline-none focus:border-amber-500"
                           />
                           <div className="mt-2.5 flex flex-wrap gap-1.5">
                             {[
@@ -1003,7 +894,7 @@ function StoreShell({
                                 onClick={() => setSearchCategory(chip.value)}
                                 className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold transition cursor-pointer ${
                                   searchCategory === chip.value
-                                    ? "bg-indigo-600 text-white shadow-xs"
+                                    ? "bg-amber-600 text-white shadow-xs"
                                     : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
                                 }`}
                               >
@@ -1043,7 +934,7 @@ function StoreShell({
                           <button
                             type="button"
                             onClick={() => setMenu("menu")}
-                            className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                            className="flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
                           >
                             <ChevronLeft size={14} />
                             <span>Back to Menu</span>
@@ -1061,7 +952,7 @@ function StoreShell({
                                 onClick={() => markNotificationRead(note.id)}
                                 className={`p-2.5 rounded-xl border text-xs cursor-pointer transition ${
                                   note.unread
-                                    ? "bg-indigo-50/60 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800"
+                                    ? "bg-amber-50/60 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800"
                                     : "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700"
                                 }`}
                               >
@@ -1088,7 +979,7 @@ function StoreShell({
                           />
                           <button
                             type="submit"
-                            className="px-3 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl shadow-xs"
+                            className="px-3 py-2 bg-amber-600 text-white font-bold text-xs rounded-xl shadow-xs"
                           >
                             Add
                           </button>
@@ -1103,7 +994,7 @@ function StoreShell({
                           <button
                             type="button"
                             onClick={() => setMenu("menu")}
-                            className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                            className="flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
                           >
                             <ChevronLeft size={14} />
                             <span>Back to Menu</span>
@@ -1138,7 +1029,7 @@ function StoreShell({
                           <button
                             type="button"
                             onClick={() => setMenu("menu")}
-                            className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                            className="flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
                           >
                             <ChevronLeft size={14} />
                             <span>Back to Menu</span>
@@ -1199,7 +1090,7 @@ function StoreShell({
                               saveProfileDraft();
                               setMenu("menu");
                             }}
-                            className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium text-xs rounded-xl shadow-xs cursor-pointer transition"
+                            className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 dark:bg-amber-600 dark:hover:bg-amber-700 text-white font-medium text-xs rounded-xl shadow-xs cursor-pointer transition"
                           >
                             Save
                           </button>
@@ -1265,7 +1156,7 @@ function StoreShell({
             >
               <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
                 <div className="flex items-center gap-2.5">
-                  <BrandLogo className="h-8 w-8 shrink-0" />
+                  <BrandLogo className="h-8 w-8 shrink-0" variant="bookstore" />
                   <div>
                     <p className="text-xs font-black text-slate-900 dark:text-white">{workspaceMode === "library" ? "Colophon Library" : "Colophon Bookstore"}</p>
                     <p className="text-[10px] text-slate-500 font-semibold">Mobile Edition</p>
@@ -1280,40 +1171,10 @@ function StoreShell({
                 </button>
               </div>
 
-              {/* Workspace Mode Switcher */}
-              <div className="mt-3 mb-2 p-1 rounded-2xl flex items-center gap-1 bg-slate-100 dark:bg-slate-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onWorkspaceModeChange?.("bookstore");
-                    setIsMobileDrawerOpen(false);
-                  }}
-                  className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
-                    workspaceMode === "bookstore" ? "bg-white text-indigo-950 shadow-sm" : "text-slate-500"
-                  }`}
-                >
-                  <span>🏪</span>
-                  <span>Store</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onWorkspaceModeChange?.("library");
-                    setIsMobileDrawerOpen(false);
-                  }}
-                  className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
-                    workspaceMode === "library" ? "bg-indigo-600 text-white shadow-sm" : "text-slate-500"
-                  }`}
-                >
-                  <span>🏛️</span>
-                  <span>Library</span>
-                </button>
-              </div>
-
               {/* Library Space Switcher inside Mobile Drawer */}
               {workspaceMode === "library" && (
-                <div className="my-2 p-2.5 bg-indigo-50/60 dark:bg-indigo-950/40 rounded-2xl border border-indigo-200/50 dark:border-indigo-800/50 space-y-1.5">
-                  <span className="text-[10px] font-bold text-indigo-900 dark:text-indigo-300 block uppercase tracking-wider">
+                <div className="my-2 p-2.5 bg-amber-50/60 dark:bg-amber-950/40 rounded-2xl border border-amber-200/50 dark:border-amber-800/50 space-y-1.5">
+                  <span className="text-[10px] font-bold text-amber-900 dark:text-amber-300 block uppercase tracking-wider">
                     🏛️ Active Library Space
                   </span>
                   <LibrarySpaceSwitcher />
@@ -1336,7 +1197,7 @@ function StoreShell({
                       }}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition text-left cursor-pointer ${
                         isActive
-                          ? "bg-indigo-600 text-white shadow-sm"
+                          ? "bg-amber-600 text-white shadow-sm"
                           : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
                       }`}
                     >

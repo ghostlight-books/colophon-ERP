@@ -427,46 +427,6 @@ function LibraryShell({
             </div>
           </div>
 
-          {/* Workspace Mode Switcher Pill */}
-          <div className={[
-            "mt-2 mb-1 p-1 rounded-2xl flex items-center gap-1 transition-colors duration-300",
-            isDark ? "bg-slate-800" : "bg-slate-100",
-          ].join(" ")}>
-            <button
-              type="button"
-              onClick={() => onWorkspaceModeChange?.("bookstore")}
-              className={[
-                "flex-1 py-1.5 px-2 rounded-xl text-[11px] font-medium transition flex items-center justify-center gap-1 cursor-pointer",
-                workspaceMode === "bookstore"
-                  ? isDark
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "bg-white text-indigo-950 shadow-sm border border-slate-200"
-                  : isDark
-                    ? "text-slate-400 hover:text-white"
-                    : "text-slate-600 hover:text-slate-900",
-              ].join(" ")}
-            >
-              <span>🏪</span>
-              <span>Store</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onWorkspaceModeChange?.("library")}
-              className={[
-                "flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer",
-                workspaceMode === "library"
-                  ? isDark
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "bg-white text-indigo-950 shadow-sm border border-slate-200"
-                  : isDark
-                    ? "text-slate-400 hover:text-white"
-                    : "text-slate-600 hover:text-slate-900",
-              ].join(" ")}
-            >
-              <span>🏛️</span>
-              <span>Library</span>
-            </button>
-          </div>
 
           {workspaceMode === "library" && (
             <div className="my-1.5 w-full">
@@ -610,8 +570,12 @@ function LibraryShell({
         </aside>
 
         {/* Main Content Area */}
+        {/* No z-index here on purpose: giving this a stacking-context-creating
+            z-index traps every modal rendered inside {children} below that
+            level, so full-screen popups end up hidden behind the mobile
+            bottom nav (z-[9980]) no matter how high their own z-index is. */}
         <div className={[
-          "relative z-10 overflow-visible",
+          "relative overflow-visible",
           isPosRoute
             ? isPosSidebarOpen
               ? "lg:pl-[18rem] pr-2 pt-2"
@@ -645,47 +609,17 @@ function LibraryShell({
                 </div>
               </div>
 
-              {/* Right: Prominent Workspace Switcher + Unified Header Menu Button */}
+              {/* Right: Edition Badge (read-only -- edition is chosen at login, not switched in-app) + Unified Header Menu Button */}
               <div className="flex items-center gap-2 sm:gap-3">
-                <div className={[
-                  "flex items-center p-0.5 sm:p-1 rounded-2xl border text-xs",
-                  isDark ? "bg-slate-800 border-slate-700" : "bg-slate-200/90 border-slate-300",
-                ].join(" ")}>
-                  <button
-                    type="button"
-                    onClick={() => onWorkspaceModeChange?.("bookstore")}
-                    title="Switch to Bookstore ERP (POS, Inventory, Intake, Finance, eBay)"
-                    className={`px-2.5 sm:px-3 py-1 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer text-xs ${
-                      workspaceMode === "bookstore"
-                        ? isDark
-                          ? "bg-indigo-600 text-white shadow-xs font-black"
-                          : "bg-white text-slate-900 shadow-xs font-black"
-                        : isDark
-                          ? "text-slate-400 hover:text-white"
-                          : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <span>🏪</span>
-                    <span className="hidden sm:inline">Store</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onWorkspaceModeChange?.("library")}
-                    title="Switch to Personal Library (Catalog, Shelves, Scanner, Lending, Valuation)"
-                    className={`px-2.5 sm:px-3 py-1 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer text-xs ${
-                      workspaceMode === "library"
-                        ? isDark
-                          ? "bg-indigo-600 text-white shadow-xs font-black"
-                          : "bg-white text-slate-900 shadow-xs font-black"
-                        : isDark
-                          ? "text-slate-400 hover:text-white"
-                          : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <span>🏛️</span>
-                    <span className="hidden sm:inline">Library</span>
-                  </button>
-                </div>
+                <span
+                  className={[
+                    "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-2xl border text-xs font-black",
+                    isDark ? "bg-indigo-950/50 border-indigo-800 text-indigo-300" : "bg-indigo-50 border-indigo-200 text-indigo-800",
+                  ].join(" ")}
+                >
+                  <span>🏛️</span>
+                  <span className="hidden sm:inline">Library</span>
+                </span>
 
                 <div ref={toolbarRef} className="relative z-[140] shrink-0">
                 <button
@@ -768,48 +702,6 @@ function LibraryShell({
                             >
                               Edit
                             </button>
-                          </div>
-
-                          {/* Workspace Switcher in Dropdown */}
-                          <div className="p-2 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1.5">
-                            <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-1">
-                              <span>Switch Workspace</span>
-                              <span className="text-indigo-600 dark:text-indigo-400 lowercase font-medium">
-                                active: {workspaceMode}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onWorkspaceModeChange?.("bookstore");
-                                  setMenu("none");
-                                }}
-                                className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                                  workspaceMode === "bookstore"
-                                    ? "bg-indigo-600 text-white shadow-xs font-black"
-                                    : "bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-slate-50"
-                                }`}
-                              >
-                                <span>🏪</span>
-                                <span>Bookstore</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onWorkspaceModeChange?.("library");
-                                  setMenu("none");
-                                }}
-                                className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                                  workspaceMode === "library"
-                                    ? "bg-indigo-600 text-white shadow-xs font-black"
-                                    : "bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-slate-50"
-                                }`}
-                              >
-                                <span>🏛️</span>
-                                <span>Library</span>
-                              </button>
-                            </div>
                           </div>
 
                         {/* Quick Menu Options */}
@@ -1277,36 +1169,6 @@ function LibraryShell({
                   className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 font-bold cursor-pointer"
                 >
                   <X size={18} />
-                </button>
-              </div>
-
-              {/* Workspace Mode Switcher */}
-              <div className="mt-3 mb-2 p-1 rounded-2xl flex items-center gap-1 bg-slate-100 dark:bg-slate-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onWorkspaceModeChange?.("bookstore");
-                    setIsMobileDrawerOpen(false);
-                  }}
-                  className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
-                    workspaceMode === "bookstore" ? "bg-white text-indigo-950 shadow-sm" : "text-slate-500"
-                  }`}
-                >
-                  <span>🏪</span>
-                  <span>Store</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onWorkspaceModeChange?.("library");
-                    setIsMobileDrawerOpen(false);
-                  }}
-                  className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
-                    workspaceMode === "library" ? "bg-indigo-600 text-white shadow-sm" : "text-slate-500"
-                  }`}
-                >
-                  <span>🏛️</span>
-                  <span>Library</span>
                 </button>
               </div>
 
