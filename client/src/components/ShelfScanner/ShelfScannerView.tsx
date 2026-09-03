@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle, ChevronRight, Key, Loader2, Plus, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle, ChevronRight, DollarSign, Key, Loader2, Plus, Upload } from "lucide-react";
 import { analyzeShelfImage, preprocessShelfImage } from "../../services/geminiShelfService";
 import { resolveBookValuations } from "../../services/valuationService";
 import type { TriageFlag, ValuedBook } from "../../types/shelfScanner";
@@ -12,9 +12,26 @@ export interface ShelfScannerViewProps {
 }
 
 const API_KEY_STORAGE_KEY = "colophon-gemini-api-key";
+const TARGET_COST_STORAGE_KEY = "colophon-shelf-target-cost";
+const TARGET_RETURN_STORAGE_KEY = "colophon-shelf-target-return";
+const DEFAULT_TARGET_COST = 1;
+const DEFAULT_TARGET_RETURN_PERCENT = 300;
 
 type AnalysisStage = "idle" | "preprocessing" | "detecting" | "valuing" | "done";
-type FilterOption = "ALL" | "GREEN" | "YELLOW";
+type FilterOption = "ALL" | "TARGET" | "GREEN" | "YELLOW";
+
+function readStoredNumber(key: string, fallback: number): number {
+  if (typeof window === "undefined") return fallback;
+  const raw = window.localStorage.getItem(key);
+  const parsed = raw !== null ? Number(raw) : NaN;
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/** Return on cost using the median market estimate: ((value - cost) / cost) * 100. */
+function computeReturnPercent(book: ValuedBook, cost: number): number | null {
+  if (!(cost > 0)) return null;
+  return ((book.medianMarketValue - cost) / cost) * 100;
+}
 
 const STAGE_LABELS: Record<"preprocessing" | "detecting" | "valuing", string> = {
   preprocessing: "Preparing photo for analysis...",
@@ -156,13 +173,61 @@ function UploadZone({ onFileSelected, busy }: { onFileSelected: (file: File) => 
   );
 }
 
+function TargetSettingsBar({
+  targetCost,
+  onTargetCostChange,
+  targetReturnPercent,
+  onTargetReturnPercentChange,
+}: {
+  targetCost: number;
+  onTargetCostChange: (value: number) => void;
+  targetReturnPercent: number;
+  onTargetReturnPercentChange: (value: number) => void;
+}): JSX.Element {
+  return (
+    <div className="rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 flex items-center gap-4 flex-wrap">
+      <div className="flex items-center gap-1.5 text-amber-800 dark:text-amber-300 shrink-0">
+        <DollarSign size={16} />
+        <p className="text-xs font-black uppercase tracking-wide">Your Resale Targets</p>
+      </div>
+      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200">
+        Cost per book ($)
+        <input
+          type="number"
+          min={0}
+          step="0.25"
+          value={targetCost}
+          onChange={(event) => onTargetCostChange(Math.max(0, Number(event.target.value) || 0))}
+          className="w-20 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+        />
+      </label>
+      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200">
+        Min. return (%)
+        <input
+          type="number"
+          min={0}
+          step="25"
+          value={targetReturnPercent}
+          onChange={(event) => onTargetReturnPercentChange(Math.max(0, Number(event.target.value) || 0))}
+          className="w-20 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+        />
+      </label>
+      <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+        💰 flags any book worth at least {formatCurrency(targetCost * (1 + targetReturnPercent / 100))} at your ${targetCost.toFixed(2)} cost.
+      </p>
+    </div>
+  );
+}
+
 function SpineOverlayBox({
   book,
   isSelected,
+  hitsTarget,
   onSelect,
 }: {
   book: ValuedBook;
   isSelected: boolean;
+  hitsTarget: boolean;
   onSelect: () => void;
 }): JSX.Element {
   const style = TRIAGE_STYLES[book.triage];
@@ -176,20 +241,36 @@ function SpineOverlayBox({
       type="button"
       onClick={onSelect}
       style={{ top: `${top}%`, left: `${left}%`, height: `${height}%`, width: `${width}%` }}
-      title={`${book.title} -- ${style.label}`}
+      title={`${book.title} -- ${style.label}${hitsTarget ? " -- hits your return target" : ""}`}
       className={`absolute rounded-md transition cursor-pointer ${style.borderWidth} ${style.border} ${style.bg} ${style.bgHover} ${
-        isSelected ? "ring-2 ring-white ring-offset-1 ring-offset-black z-10" : ""
+        isSelected
+          ? "ring-2 ring-white ring-offset-1 ring-offset-black z-10"
+          : hitsTarget
+            ? "ring-2 ring-amber-300 ring-offset-1 ring-offset-black z-10"
+            : ""
       }`}
-    />
+    >
+      {hitsTarget && (
+        <span className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-amber-400 text-slate-950 text-[9px] font-black flex items-center justify-center shadow-md">
+          $
+        </span>
+      )}
+    </button>
   );
 }
 
 function InspectionDrawer({
   book,
+  targetCost,
+  returnPercent,
+  hitsTarget,
   onAddToInventory,
   alreadyAdded,
 }: {
   book: ValuedBook;
+  targetCost: number;
+  returnPercent: number | null;
+  hitsTarget: boolean;
   onAddToInventory: () => void;
   alreadyAdded: boolean;
 }): JSX.Element {
@@ -212,6 +293,26 @@ function InspectionDrawer({
           {book.formatConfidence}
         </span>
       </div>
+
+      {returnPercent !== null && (
+        <div className={`flex items-center justify-between rounded-xl p-2.5 border-2 ${
+          hitsTarget
+            ? "bg-amber-50 dark:bg-amber-950/30 border-amber-400 dark:border-amber-700"
+            : "bg-slate-50 dark:bg-slate-800/60 border-transparent"
+        }`}>
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Your Return at {formatCurrency(targetCost)} Cost</p>
+            <p className={`text-sm font-black ${hitsTarget ? "text-amber-700 dark:text-amber-300" : "text-slate-700 dark:text-slate-300"}`}>
+              {returnPercent >= 0 ? "+" : ""}{returnPercent.toFixed(0)}%
+            </p>
+          </div>
+          {hitsTarget && (
+            <span className="px-2 py-1 rounded-full text-[10px] font-black bg-amber-400 text-slate-950">
+              💰 HITS TARGET
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="flex items-center justify-between rounded-xl bg-slate-50 dark:bg-slate-800/60 p-2.5">
         <div>
@@ -285,6 +386,18 @@ export default function ShelfScannerView({ onAddToInventory }: ShelfScannerViewP
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterOption>("ALL");
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+  const [targetCost, setTargetCost] = useState<number>(() => readStoredNumber(TARGET_COST_STORAGE_KEY, DEFAULT_TARGET_COST));
+  const [targetReturnPercent, setTargetReturnPercent] = useState<number>(() =>
+    readStoredNumber(TARGET_RETURN_STORAGE_KEY, DEFAULT_TARGET_RETURN_PERCENT),
+  );
+
+  useEffect(() => {
+    window.localStorage.setItem(TARGET_COST_STORAGE_KEY, String(targetCost));
+  }, [targetCost]);
+
+  useEffect(() => {
+    window.localStorage.setItem(TARGET_RETURN_STORAGE_KEY, String(targetReturnPercent));
+  }, [targetReturnPercent]);
 
   const isBusy = stage !== "idle" && stage !== "done";
 
@@ -332,21 +445,28 @@ export default function ShelfScannerView({ onAddToInventory }: ShelfScannerViewP
     }
   };
 
+  const hitsTarget = (book: ValuedBook): boolean => {
+    const pct = computeReturnPercent(book, targetCost);
+    return pct !== null && pct >= targetReturnPercent;
+  };
+
   const filteredBooks = useMemo(() => {
     if (filter === "ALL") return books;
+    if (filter === "TARGET") return books.filter(hitsTarget);
     return books.filter((book) => book.triage === filter);
-  }, [books, filter]);
+  }, [books, filter, targetCost, targetReturnPercent]);
 
   const selectedBook = books.find((book) => book.id === selectedBookId) ?? null;
 
   const summary = useMemo(
     () => ({
       total: books.length,
+      target: books.filter(hitsTarget).length,
       green: books.filter((book) => book.triage === "GREEN").length,
       yellow: books.filter((book) => book.triage === "YELLOW").length,
       gray: books.filter((book) => book.triage === "GRAY").length,
     }),
-    [books],
+    [books, targetCost, targetReturnPercent],
   );
 
   const handleAddToInventory = (book: ValuedBook): void => {
@@ -376,6 +496,13 @@ export default function ShelfScannerView({ onAddToInventory }: ShelfScannerViewP
         </button>
       </div>
 
+      <TargetSettingsBar
+        targetCost={targetCost}
+        onTargetCostChange={setTargetCost}
+        targetReturnPercent={targetReturnPercent}
+        onTargetReturnPercentChange={setTargetReturnPercent}
+      />
+
       <UploadZone onFileSelected={(file) => void handleFileSelected(file)} busy={isBusy} />
 
       {isBusy && (
@@ -396,21 +523,23 @@ export default function ShelfScannerView({ onAddToInventory }: ShelfScannerViewP
         <>
           <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 flex items-center justify-between flex-wrap gap-3">
             <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
-              {summary.total} Books Detected — {summary.green} High Priority, {summary.yellow} Inspect In-Person, {summary.gray} Pass
+              {summary.total} Books Detected — <span className="text-amber-600 dark:text-amber-400">{summary.target} Hit Your Return Target</span>, {summary.green} High Priority, {summary.yellow} Inspect In-Person, {summary.gray} Pass
             </p>
             <div className="flex items-center gap-1.5">
-              {(["ALL", "GREEN", "YELLOW"] as const).map((option) => (
+              {(["ALL", "TARGET", "GREEN", "YELLOW"] as const).map((option) => (
                 <button
                   key={option}
                   type="button"
                   onClick={() => setFilter(option)}
                   className={`px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer ${
                     filter === option
-                      ? "bg-indigo-600 text-white"
+                      ? option === "TARGET"
+                        ? "bg-amber-500 text-slate-950"
+                        : "bg-indigo-600 text-white"
                       : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
                   }`}
                 >
-                  {option === "ALL" ? "All" : option === "GREEN" ? "Green Only" : "Yellow Only"}
+                  {option === "ALL" ? "All" : option === "TARGET" ? "💰 Hits Target" : option === "GREEN" ? "Green Only" : "Yellow Only"}
                 </button>
               ))}
             </div>
@@ -425,6 +554,7 @@ export default function ShelfScannerView({ onAddToInventory }: ShelfScannerViewP
                     key={book.id}
                     book={book}
                     isSelected={book.id === selectedBookId}
+                    hitsTarget={hitsTarget(book)}
                     onSelect={() => setSelectedBookId(book.id)}
                   />
                 ))}
@@ -438,6 +568,7 @@ export default function ShelfScannerView({ onAddToInventory }: ShelfScannerViewP
                 ) : (
                   filteredBooks.map((book) => {
                     const style = TRIAGE_STYLES[book.triage];
+                    const bookHitsTarget = hitsTarget(book);
                     return (
                       <button
                         key={book.id}
@@ -452,6 +583,7 @@ export default function ShelfScannerView({ onAddToInventory }: ShelfScannerViewP
                           <span className="block text-xs font-bold text-slate-900 dark:text-white truncate">{book.title}</span>
                           <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">{book.author}</span>
                         </span>
+                        {bookHitsTarget && <span className="shrink-0 text-sm" title="Hits your return target">💰</span>}
                         <ChevronRight size={14} className="text-slate-400 shrink-0" />
                       </button>
                     );
@@ -462,6 +594,9 @@ export default function ShelfScannerView({ onAddToInventory }: ShelfScannerViewP
               {selectedBook && (
                 <InspectionDrawer
                   book={selectedBook}
+                  targetCost={targetCost}
+                  returnPercent={computeReturnPercent(selectedBook, targetCost)}
+                  hitsTarget={hitsTarget(selectedBook)}
                   onAddToInventory={() => handleAddToInventory(selectedBook)}
                   alreadyAdded={addedIds.has(selectedBook.id)}
                 />

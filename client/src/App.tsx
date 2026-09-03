@@ -300,8 +300,14 @@ function ShellRouteLayout(): JSX.Element {
         children: [
           { key: "intake-scanner", label: "Scanner Station", to: "/intake", icon: <BoxIcon /> },
           { key: "buying-desk", label: "Book Buying Desk", to: "/buying", icon: <WalletIcon /> },
-          { key: "shelf-scanner", label: "Shelf Scanner", to: "/shelf-scanner", icon: <BoxIcon /> },
         ],
+      },
+      {
+        key: "shelf-scanner",
+        label: "Shelf Scanner",
+        to: "/shelf-scanner",
+        icon: <BoxIcon />,
+        module: "INTAKE",
       },
       {
         key: "open-network",
