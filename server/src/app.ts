@@ -69,6 +69,12 @@ import {
   markAllLibraryNotificationsRead,
   getLibraryCollectionHealth,
 } from "./services/library/libraryExchange.service.js";
+import {
+  listWantlistItems,
+  createWantlistItem,
+  updateWantlistItem,
+  deleteWantlistItem,
+} from "./services/library/libraryWantlist.service.js";
 import { evaluateRareBookPricing } from "./services/library/libraryRarePricing.service.js";
 
 type OpsConnector = {
@@ -2401,6 +2407,49 @@ export function createApp(): express.Express {
     } catch (error) {
       console.error("Respond offer error:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "Failed to respond to offer." });
+    }
+  });
+
+  // Library Wantlist -- personal want-list items, auto-matched against the
+  // same Exchange marketplace pool that listExchangeMarketplace browses.
+  app.get("/api/library/wantlist", async (req, res) => {
+    try {
+      const librarySpaceId = typeof req.query?.librarySpaceId === "string" ? req.query.librarySpaceId : undefined;
+      const items = await listWantlistItems(librarySpaceId);
+      res.json({ items });
+    } catch (error) {
+      console.error("List wantlist error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list wantlist." });
+    }
+  });
+
+  app.post("/api/library/wantlist", async (req, res) => {
+    try {
+      const item = await createWantlistItem(req.body);
+      res.json(item);
+    } catch (error) {
+      console.error("Create wantlist item error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to add wantlist item." });
+    }
+  });
+
+  app.patch("/api/library/wantlist/:id", async (req, res) => {
+    try {
+      const item = await updateWantlistItem(req.params.id, req.body);
+      res.json(item);
+    } catch (error) {
+      console.error("Update wantlist item error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to update wantlist item." });
+    }
+  });
+
+  app.delete("/api/library/wantlist/:id", async (req, res) => {
+    try {
+      const result = await deleteWantlistItem(req.params.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Delete wantlist item error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to remove wantlist item." });
     }
   });
 

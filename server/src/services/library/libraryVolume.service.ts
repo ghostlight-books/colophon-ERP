@@ -159,6 +159,22 @@ export async function ensureLibraryTablesExist(): Promise<void> {
       );
     `);
 
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "LibraryWantlistItem" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "title" TEXT NOT NULL,
+        "author" TEXT,
+        "isbn" TEXT,
+        "notes" TEXT,
+        "maxPrice" REAL,
+        "librarySpaceId" TEXT,
+        "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+        "storeId" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     // Dynamically ensure new columns exist in LibraryVolume
     const migrations = [
       `ALTER TABLE "LibraryVolume" ADD COLUMN "isSigned" BOOLEAN NOT NULL DEFAULT 0;`,

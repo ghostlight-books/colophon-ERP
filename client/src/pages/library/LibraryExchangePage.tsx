@@ -1,12 +1,18 @@
 import { useEffect, useState, type FormEvent } from "react";
 import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
+import { useLibrarySpace } from "../../context/LibrarySpaceContext";
 import {
   fetchExchangeMarketplace,
   fetchIncomingOffers,
   respondToOffer,
   submitOffer,
+  fetchWantlist,
+  addWantlistItem,
+  updateWantlistItem as updateWantlistItemApi,
+  removeWantlistItem,
   type LibraryVolume,
   type LibraryOffer,
+  type LibraryWantlistItem,
 } from "../../services/library.service";
 
 function formatCurrency(amount: number | null | undefined): string {
@@ -15,7 +21,18 @@ function formatCurrency(amount: number | null | undefined): string {
 }
 
 export default function LibraryExchangePage() {
-  const [activeTab, setActiveTab] = useState<"incoming" | "marketplace">("incoming");
+  const { activeSpaceId } = useLibrarySpace();
+  const [activeTab, setActiveTab] = useState<"incoming" | "marketplace" | "wantlist">("incoming");
+
+  // Wantlist State
+  const [wantlist, setWantlist] = useState<LibraryWantlistItem[]>([]);
+  const [loadingWantlist, setLoadingWantlist] = useState(false);
+  const [newWantTitle, setNewWantTitle] = useState("");
+  const [newWantAuthor, setNewWantAuthor] = useState("");
+  const [newWantIsbn, setNewWantIsbn] = useState("");
+  const [newWantMaxPrice, setNewWantMaxPrice] = useState("");
+  const [newWantNotes, setNewWantNotes] = useState("");
+  const [isAddingWant, setIsAddingWant] = useState(false);
 
   // Incoming Offers State
   const [incomingOffers, setIncomingOffers] = useState<LibraryOffer[]>([]);
@@ -80,6 +97,69 @@ export default function LibraryExchangePage() {
     }
   }, [activeTab, statusFilter]);
 
+  const loadWantlist = async () => {
+    setLoadingWantlist(true);
+    try {
+      const items = await fetchWantlist(activeSpaceId);
+      setWantlist(items);
+    } catch (err) {
+      console.warn("fetchWantlist error:", err);
+    } finally {
+      setLoadingWantlist(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "wantlist") {
+      void loadWantlist();
+    }
+  }, [activeTab, activeSpaceId]);
+
+  const handleAddWantlistItem = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!newWantTitle.trim()) return;
+
+    setIsAddingWant(true);
+    try {
+      await addWantlistItem({
+        title: newWantTitle.trim(),
+        author: newWantAuthor.trim() || undefined,
+        isbn: newWantIsbn.trim() || undefined,
+        maxPrice: newWantMaxPrice ? parseFloat(newWantMaxPrice) : undefined,
+        notes: newWantNotes.trim() || undefined,
+        librarySpaceId: activeSpaceId !== "ALL" ? activeSpaceId : undefined,
+      });
+      setNewWantTitle("");
+      setNewWantAuthor("");
+      setNewWantIsbn("");
+      setNewWantMaxPrice("");
+      setNewWantNotes("");
+      void loadWantlist();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to add wantlist item.");
+    } finally {
+      setIsAddingWant(false);
+    }
+  };
+
+  const handleMarkWantlistFulfilled = async (id: string) => {
+    try {
+      await updateWantlistItemApi(id, { status: "FULFILLED" });
+      void loadWantlist();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update wantlist item.");
+    }
+  };
+
+  const handleRemoveWantlistItem = async (id: string) => {
+    try {
+      await removeWantlistItem(id);
+      setWantlist((current) => current.filter((item) => item.id !== id));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to remove wantlist item.");
+    }
+  };
+
   const handleRespond = async (
     offerId: string,
     action: "ACCEPT" | "COUNTER" | "DECLINE" | "COMPLETE",
@@ -125,6 +205,8 @@ export default function LibraryExchangePage() {
 
   const pendingOffers = incomingOffers.filter((o) => o.status === "PENDING");
   const completedDeals = incomingOffers.filter((o) => o.status === "ACCEPTED" || o.status === "COMPLETED");
+  const activeWantlist = wantlist.filter((item) => item.status === "ACTIVE");
+  const wantlistMatchCount = activeWantlist.filter((item) => item.matches.length > 0).length;
 
   return (
     <div className="space-y-6 pb-24 font-sans max-w-4xl mx-auto">
@@ -160,6 +242,22 @@ export default function LibraryExchangePage() {
             }`}
           >
             <span>Network Marketplace</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("wantlist")}
+            className={`px-3 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === "wantlist"
+                ? "bg-slate-800 dark:bg-indigo-600 text-white shadow-xs font-semibold"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white"
+            }`}
+          >
+            <span>My Wantlist</span>
+            {wantlistMatchCount > 0 && (
+              <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-semibold ${activeTab === "wantlist" ? "bg-emerald-500 text-white" : "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300"}`}>
+                {wantlistMatchCount}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -445,6 +543,166 @@ export default function LibraryExchangePage() {
                       Make Offer
                     </button>
                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 3: MY WANTLIST */}
+      {activeTab === "wantlist" && (
+        <div className="p-4 sm:p-5 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <h3 className="text-xs font-semibold text-slate-800 dark:text-white uppercase tracking-wider">
+              My Wantlist ({activeWantlist.length})
+            </h3>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Auto-matched against the Network Marketplace every time you open this tab.
+            </p>
+          </div>
+
+          {/* Add Item Form */}
+          <form
+            onSubmit={handleAddWantlistItem}
+            className="p-3.5 bg-white dark:bg-slate-700/70 rounded-2xl border border-slate-300 dark:border-slate-600 space-y-2.5"
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <input
+                type="text"
+                required
+                value={newWantTitle}
+                onChange={(e) => setNewWantTitle(e.target.value)}
+                placeholder="Title (required)"
+                className="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+              />
+              <input
+                type="text"
+                value={newWantAuthor}
+                onChange={(e) => setNewWantAuthor(e.target.value)}
+                placeholder="Author"
+                className="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+              />
+              <input
+                type="text"
+                value={newWantIsbn}
+                onChange={(e) => setNewWantIsbn(e.target.value)}
+                placeholder="ISBN (optional, most accurate match)"
+                className="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+              />
+              <input
+                type="number"
+                step="0.01"
+                value={newWantMaxPrice}
+                onChange={(e) => setNewWantMaxPrice(e.target.value)}
+                placeholder="Max price you'd pay ($)"
+                className="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+              />
+            </div>
+            <input
+              type="text"
+              value={newWantNotes}
+              onChange={(e) => setNewWantNotes(e.target.value)}
+              placeholder="Notes (edition preference, condition, etc.)"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-2 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+            />
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={isAddingWant || !newWantTitle.trim()}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-medium rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isAddingWant ? "Adding..." : "Add to Wantlist"}
+              </button>
+            </div>
+          </form>
+
+          {loadingWantlist ? (
+            <div className="p-12 text-center text-slate-500 text-xs">Loading wantlist...</div>
+          ) : activeWantlist.length === 0 ? (
+            <div className="p-12 text-center text-slate-500 dark:text-slate-400 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 space-y-2">
+              <p className="text-xs font-semibold text-slate-800 dark:text-white">Your wantlist is empty.</p>
+              <p className="text-[11px] text-slate-500">
+                Add a title above -- we'll watch the Network Marketplace and surface any matches automatically.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {activeWantlist.map((item) => (
+                <div
+                  key={item.id}
+                  className="p-4 rounded-2xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700/80 shadow-xs space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-semibold text-slate-900 dark:text-white">{item.title}</h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 font-normal">
+                        {item.author || "Any author"}
+                        {item.isbn ? ` • ISBN ${item.isbn}` : ""}
+                        {item.maxPrice ? ` • Up to ${formatCurrency(item.maxPrice)}` : ""}
+                      </p>
+                      {item.notes && <p className="text-[11px] text-slate-500 dark:text-slate-400 italic mt-0.5">"{item.notes}"</p>}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleMarkWantlistFulfilled(item.id)}
+                        className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 hover:text-emerald-700 text-slate-600 dark:text-slate-300 font-medium text-[11px] rounded-lg transition cursor-pointer"
+                      >
+                        Mark Fulfilled
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveWantlistItem(item.id)}
+                        className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-rose-50 hover:text-rose-700 text-slate-600 dark:text-slate-300 font-medium text-[11px] rounded-lg transition cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+
+                  {item.matches.length > 0 ? (
+                    <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-800 space-y-2">
+                      <p className="text-[11px] font-semibold text-emerald-900 dark:text-emerald-300">
+                        🎯 {item.matches.length} Match{item.matches.length === 1 ? "" : "es"} Found in the Network
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {item.matches.map((vol) => (
+                          <div
+                            key={vol.id}
+                            className="p-2.5 bg-white dark:bg-slate-800 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center gap-2.5"
+                          >
+                            <div className="w-9 h-12 bg-slate-100 dark:bg-slate-900 rounded-lg overflow-hidden shrink-0 flex items-center justify-center">
+                              {vol.coverUrl ? (
+                                <img src={vol.coverUrl} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                <span className="text-[8px] font-medium text-slate-500">BOOK</span>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[11px] font-semibold text-slate-900 dark:text-white truncate">{vol.title}</p>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                                {vol.listingStatus.replace(/_/g, " ")}
+                                {vol.askingPrice ? ` • ${formatCurrency(vol.askingPrice)}` : ""}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedMarketVolume(vol);
+                                setCashAmount(vol.askingPrice ? String(vol.askingPrice) : "");
+                              }}
+                              className="shrink-0 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-[10px] rounded-lg transition cursor-pointer"
+                            >
+                              Make Offer
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500">No matches yet -- we'll keep watching the marketplace.</p>
+                  )}
                 </div>
               ))}
             </div>

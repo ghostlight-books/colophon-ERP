@@ -98,6 +98,20 @@ export interface LibraryNotification {
   createdAt: string;
 }
 
+export interface LibraryWantlistItem {
+  id: string;
+  title: string;
+  author: string | null;
+  isbn: string | null;
+  notes: string | null;
+  maxPrice: number | null;
+  librarySpaceId: string | null;
+  status: "ACTIVE" | "FULFILLED" | "ARCHIVED";
+  matches: LibraryVolume[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface LibraryCollectionHealth {
   totalVolumes: number;
   classificationPercent: number;
@@ -545,6 +559,64 @@ export async function respondToOffer(
   });
   if (!res.ok) throw new Error("Failed to respond to offer.");
   return res.json() as Promise<LibraryOffer>;
+}
+
+// Wantlist API -- personal want-list items, auto-matched against Exchange
+export async function fetchWantlist(librarySpaceId?: string): Promise<LibraryWantlistItem[]> {
+  const q = librarySpaceId && librarySpaceId !== "ALL" ? `?librarySpaceId=${encodeURIComponent(librarySpaceId)}` : "";
+  const url = resolveApiUrl(`/library/wantlist${q}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to load wantlist.");
+  const data = (await res.json()) as { items?: LibraryWantlistItem[] };
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+export async function addWantlistItem(data: {
+  title: string;
+  author?: string;
+  isbn?: string;
+  notes?: string;
+  maxPrice?: number;
+  librarySpaceId?: string;
+}): Promise<LibraryWantlistItem> {
+  const url = resolveApiUrl("/library/wantlist");
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any)?.error || "Failed to add wantlist item.");
+  }
+  return res.json() as Promise<LibraryWantlistItem>;
+}
+
+export async function updateWantlistItem(
+  id: string,
+  data: Partial<{
+    title: string;
+    author: string | null;
+    isbn: string | null;
+    notes: string | null;
+    maxPrice: number | null;
+    status: "ACTIVE" | "FULFILLED" | "ARCHIVED";
+  }>,
+): Promise<LibraryWantlistItem> {
+  const url = resolveApiUrl(`/library/wantlist/${encodeURIComponent(id)}`);
+  const res = await fetchWithTimeout(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update wantlist item.");
+  return res.json() as Promise<LibraryWantlistItem>;
+}
+
+export async function removeWantlistItem(id: string): Promise<void> {
+  const url = resolveApiUrl(`/library/wantlist/${encodeURIComponent(id)}`);
+  const res = await fetchWithTimeout(url, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to remove wantlist item.");
 }
 
 // Library Notifications Feed API

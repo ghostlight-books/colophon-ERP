@@ -713,6 +713,7 @@ model LibrarySpace {
 
   volumes               LibraryVolume[]
   shelves               LibraryShelfLocation[]
+  wantlistItems         LibraryWantlistItem[]
 
   @@index([storeId])
 }
@@ -771,6 +772,26 @@ model LibraryNotification {
   createdAt             DateTime              @default(now())
 
   @@index([read, createdAt])
+}
+
+model LibraryWantlistItem {
+  id                    String                @id @default(uuid())
+  title                 String
+  author                String?
+  isbn                  String?               // normalized digits/X only, if provided -- enables exact-match hits
+  notes                 String?
+  maxPrice              Float?
+  librarySpaceId        String?
+  librarySpace          LibrarySpace?         @relation(fields: [librarySpaceId], references: [id], onDelete: SetNull)
+  status                String                @default("ACTIVE") // "ACTIVE" | "FULFILLED" | "ARCHIVED"
+  storeId               String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@index([isbn])
+  @@index([title])
+  @@index([status])
+  @@index([librarySpaceId])
 }
 
 
