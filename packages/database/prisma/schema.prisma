@@ -686,6 +686,8 @@ model LibraryVolume {
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
 
+  notes                 LibraryNote[]
+
   @@index([isbn])
   @@index([title])
   @@index([author])
@@ -792,6 +794,30 @@ model LibraryWantlistItem {
   @@index([title])
   @@index([status])
   @@index([librarySpaceId])
+}
+
+model LibraryNote {
+  id                    String                @id @default(uuid())
+  volumeId              String
+  volume                LibraryVolume         @relation(fields: [volumeId], references: [id], onDelete: Cascade)
+  quoteText             String?               // transcribed from a photo, or typed directly
+  personalNote          String?               // the collector's own commentary/research notes
+  pageNumber            String?
+  citationText          String?               // auto-generated from the volume's metadata + pageNumber
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@index([volumeId])
+}
+
+model LibraryAuthorAlias {
+  id                    String                @id @default(uuid())
+  alias                 String                @unique // e.g. "Tom Wright", "Gloria Jean Watkins"
+  canonicalName         String                // e.g. "N.T. Wright" -- the name shown on the Author page
+  source                String                @default("MANUAL") // "MANUAL" | "OPENLIBRARY"
+  createdAt             DateTime              @default(now())
+
+  @@index([canonicalName])
 }
 
 

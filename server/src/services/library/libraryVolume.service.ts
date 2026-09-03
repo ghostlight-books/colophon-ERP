@@ -160,6 +160,35 @@ export async function ensureLibraryTablesExist(): Promise<void> {
     `);
 
     await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "LibraryNote" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "volumeId" TEXT NOT NULL,
+        "quoteText" TEXT,
+        "personalNote" TEXT,
+        "pageNumber" TEXT,
+        "citationText" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "LibraryAuthorAlias" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "alias" TEXT NOT NULL,
+        "canonicalName" TEXT NOT NULL,
+        "source" TEXT NOT NULL DEFAULT 'MANUAL',
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "LibraryAuthorAlias_alias_key" ON "LibraryAuthorAlias"("alias");
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "LibraryAuthorAlias_canonicalName_idx" ON "LibraryAuthorAlias"("canonicalName");
+    `);
+
+    await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "LibraryWantlistItem" (
         "id" TEXT NOT NULL PRIMARY KEY,
         "title" TEXT NOT NULL,

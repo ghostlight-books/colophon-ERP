@@ -33,6 +33,9 @@ import LibraryExchangePage from "./pages/library/LibraryExchangePage";
 import LibraryLendingPage from "./pages/library/LibraryLendingPage";
 import LibraryValuationReportPage from "./pages/library/LibraryValuationReportPage";
 import LibraryAchievementsPage from "./pages/library/LibraryAchievementsPage";
+import LibraryNotesPage from "./pages/library/LibraryNotesPage";
+import LibraryAuthorsPage from "./pages/library/LibraryAuthorsPage";
+import LibraryAuthorDetailPage from "./pages/library/LibraryAuthorDetailPage";
 import { WorkspaceProvider, useWorkspace } from "./contexts/WorkspaceContext";
 import { LibrarySpaceProvider } from "./context/LibrarySpaceContext";
 import { hasModuleAccess, normalizeRole, type SystemModule } from "@colophon/shared";
@@ -138,6 +141,15 @@ function ListsIcon(): JSX.Element {
   );
 }
 
+function AuthorsIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+      <circle cx="12" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M5.5 19c1-3.2 3.8-5 6.5-5s5.5 1.8 6.5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function MarketingIcon(): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
@@ -221,6 +233,9 @@ function App(): JSX.Element {
               <Route path="library/lending" element={<LibraryLendingPage />} />
               <Route path="library/valuation" element={<LibraryValuationReportPage />} />
               <Route path="library/achievements" element={<LibraryAchievementsPage />} />
+              <Route path="library/notes" element={<LibraryNotesPage />} />
+              <Route path="library/authors" element={<LibraryAuthorsPage />} />
+              <Route path="library/authors/:name" element={<LibraryAuthorDetailPage />} />
             </Route>
           </Routes>
         </BrowserRouter>
@@ -407,6 +422,18 @@ function ShellRouteLayout(): JSX.Element {
         icon: <WalletIcon />,
       },
       {
+        key: "library-authors",
+        label: "Authors",
+        to: "/library/authors",
+        icon: <AuthorsIcon />,
+      },
+      {
+        key: "library-notes",
+        label: "Research Notes",
+        to: "/library/notes",
+        icon: <ListsIcon />,
+      },
+      {
         key: "library-achievements",
         label: "Collector Level",
         to: "/library/achievements",
@@ -534,6 +561,14 @@ function ShellRouteLayout(): JSX.Element {
     "/library/achievements": {
       title: "Collector Level",
       subtitle: "Track your collector level, points, and badges as your collection grows.",
+    },
+    "/library/notes": {
+      title: "Research Notes",
+      subtitle: "Photograph a page to transcribe a quote, add your own notes, and get an auto-generated citation.",
+    },
+    "/library/authors": {
+      title: "Authors",
+      subtitle: "Browse your collection by author, with unified name variants and related-author suggestions.",
     },
   };
 

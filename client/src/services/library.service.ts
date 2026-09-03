@@ -136,6 +136,48 @@ export interface LibraryAchievementStats {
   fulfilledWantlistCount: number;
 }
 
+export interface LibraryNote {
+  id: string;
+  volumeId: string;
+  volume?: Pick<LibraryVolume, "id" | "title" | "author" | "coverUrl" | "publisher" | "publishYear">;
+  quoteText: string | null;
+  personalNote: string | null;
+  pageNumber: string | null;
+  citationText: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LibraryAuthorSummary {
+  canonicalName: string;
+  bookCount: number;
+  sampleCoverUrl: string | null;
+}
+
+export interface LibraryAuthorVolume {
+  id: string;
+  title: string;
+  isbn: string | null;
+  coverUrl: string | null;
+  deweyDecimal: string | null;
+  subjects: string | null;
+  rating: number | null;
+}
+
+export interface LibraryAuthorDetail {
+  canonicalName: string;
+  volumes: LibraryAuthorVolume[];
+  relatedAuthors: string[];
+}
+
+export interface LibraryAuthorAlias {
+  id: string;
+  alias: string;
+  canonicalName: string;
+  source: "MANUAL" | "OPENLIBRARY";
+  createdAt: string;
+}
+
 export interface LibraryShelfLocation {
   id: string;
   roomName: string;
@@ -665,6 +707,113 @@ export async function fetchLibraryAchievementStats(): Promise<LibraryAchievement
   const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error("Failed to fetch achievement stats.");
   return res.json() as Promise<LibraryAchievementStats>;
+}
+
+// Research Notes & Quote Capture API
+export async function fetchLibraryNotes(params: { volumeId?: string; query?: string } = {}): Promise<LibraryNote[]> {
+  const q = new URLSearchParams();
+  if (params.volumeId) q.set("volumeId", params.volumeId);
+  if (params.query) q.set("query", params.query);
+  q.set("t", String(Date.now()));
+  const url = resolveApiUrl(`/library/notes?${q.toString()}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to load notes.");
+  const data = (await res.json()) as { notes?: LibraryNote[] };
+  return Array.isArray(data.notes) ? data.notes : [];
+}
+
+export async function createLibraryNote(data: {
+  volumeId: string;
+  quoteText?: string;
+  personalNote?: string;
+  pageNumber?: string;
+}): Promise<LibraryNote> {
+  const url = resolveApiUrl("/library/notes");
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any)?.error || "Failed to save note.");
+  }
+  return res.json() as Promise<LibraryNote>;
+}
+
+export async function updateLibraryNote(
+  id: string,
+  data: Partial<{ quoteText: string | null; personalNote: string | null; pageNumber: string | null }>,
+): Promise<LibraryNote> {
+  const url = resolveApiUrl(`/library/notes/${encodeURIComponent(id)}`);
+  const res = await fetchWithTimeout(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update note.");
+  return res.json() as Promise<LibraryNote>;
+}
+
+export async function removeLibraryNote(id: string): Promise<void> {
+  const url = resolveApiUrl(`/library/notes/${encodeURIComponent(id)}`);
+  const res = await fetchWithTimeout(url, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to remove note.");
+}
+
+// Author Unification & Author Pages API
+export async function fetchLibraryAuthors(): Promise<LibraryAuthorSummary[]> {
+  const url = resolveApiUrl(`/library/authors?t=${Date.now()}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to load authors.");
+  const data = (await res.json()) as { authors?: LibraryAuthorSummary[] };
+  return Array.isArray(data.authors) ? data.authors : [];
+}
+
+export async function fetchLibraryAuthorDetail(name: string): Promise<LibraryAuthorDetail> {
+  const url = resolveApiUrl(`/library/authors/detail?name=${encodeURIComponent(name)}&t=${Date.now()}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to load this author.");
+  return res.json() as Promise<LibraryAuthorDetail>;
+}
+
+export async function fetchLibraryAuthorAliases(): Promise<LibraryAuthorAlias[]> {
+  const url = resolveApiUrl(`/library/authors/aliases?t=${Date.now()}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to load author aliases.");
+  const data = (await res.json()) as { aliases?: LibraryAuthorAlias[] };
+  return Array.isArray(data.aliases) ? data.aliases : [];
+}
+
+export async function createLibraryAuthorAlias(alias: string, canonicalName: string): Promise<LibraryAuthorAlias> {
+  const url = resolveApiUrl("/library/authors/aliases");
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ alias, canonicalName }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any)?.error || "Failed to merge authors.");
+  }
+  return res.json() as Promise<LibraryAuthorAlias>;
+}
+
+export async function removeLibraryAuthorAlias(id: string): Promise<void> {
+  const url = resolveApiUrl(`/library/authors/aliases/${encodeURIComponent(id)}`);
+  const res = await fetchWithTimeout(url, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to remove alias.");
+}
+
+export async function seedLibraryAuthorAliases(name: string): Promise<{ added: number }> {
+  const url = resolveApiUrl("/library/authors/seed-aliases");
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error("Failed to check for alternate names.");
+  return res.json() as Promise<{ added: number }>;
 }
 
 export interface RareBookComp {

@@ -76,6 +76,21 @@ import {
   deleteWantlistItem,
 } from "./services/library/libraryWantlist.service.js";
 import { getLibraryAchievementStats } from "./services/library/libraryAchievements.service.js";
+import {
+  listNotesForVolume,
+  listAllNotes,
+  createNote as createLibraryNote,
+  updateNote as updateLibraryNote,
+  deleteNote as deleteLibraryNote,
+} from "./services/library/libraryNotes.service.js";
+import {
+  listAuthors,
+  getAuthorDetail,
+  listAuthorAliases,
+  createAuthorAlias,
+  deleteAuthorAlias,
+  seedAliasesFromOpenLibrary,
+} from "./services/library/libraryAuthors.service.js";
 import { evaluateRareBookPricing } from "./services/library/libraryRarePricing.service.js";
 
 type OpsConnector = {
@@ -2483,6 +2498,115 @@ export function createApp(): express.Express {
     } catch (error) {
       console.error("Mark all read error:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "Failed to mark all read." });
+    }
+  });
+
+  // Library Authors -- unification, author pages, related-authors
+  app.get("/api/library/authors", async (_req, res) => {
+    try {
+      const authors = await listAuthors();
+      res.json({ authors });
+    } catch (error) {
+      console.error("List library authors error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list authors." });
+    }
+  });
+
+  app.get("/api/library/authors/detail", async (req, res) => {
+    try {
+      const name = typeof req.query?.name === "string" ? req.query.name : "";
+      if (!name.trim()) return res.status(400).json({ error: "A name query param is required." });
+      const detail = await getAuthorDetail(name);
+      res.json(detail);
+    } catch (error) {
+      console.error("Get author detail error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load author." });
+    }
+  });
+
+  app.get("/api/library/authors/aliases", async (_req, res) => {
+    try {
+      const aliases = await listAuthorAliases();
+      res.json({ aliases });
+    } catch (error) {
+      console.error("List author aliases error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list aliases." });
+    }
+  });
+
+  app.post("/api/library/authors/aliases", async (req, res) => {
+    try {
+      const { alias, canonicalName } = req.body || {};
+      const created = await createAuthorAlias(alias, canonicalName);
+      res.json(created);
+    } catch (error) {
+      console.error("Create author alias error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to save alias." });
+    }
+  });
+
+  app.delete("/api/library/authors/aliases/:id", async (req, res) => {
+    try {
+      const result = await deleteAuthorAlias(req.params.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Delete author alias error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to remove alias." });
+    }
+  });
+
+  app.post("/api/library/authors/seed-aliases", async (req, res) => {
+    try {
+      const name = typeof req.body?.name === "string" ? req.body.name : "";
+      if (!name.trim()) return res.status(400).json({ error: "A name is required." });
+      const result = await seedAliasesFromOpenLibrary(name);
+      res.json(result);
+    } catch (error) {
+      console.error("Seed author aliases error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to check for alternate names." });
+    }
+  });
+
+  // Library Research Notes & Quote Capture
+  app.get("/api/library/notes", async (req, res) => {
+    try {
+      const volumeId = typeof req.query?.volumeId === "string" ? req.query.volumeId : undefined;
+      const query = typeof req.query?.query === "string" ? req.query.query : undefined;
+      const notes = volumeId ? await listNotesForVolume(volumeId) : await listAllNotes(query);
+      res.json({ notes });
+    } catch (error) {
+      console.error("List library notes error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list notes." });
+    }
+  });
+
+  app.post("/api/library/notes", async (req, res) => {
+    try {
+      const note = await createLibraryNote(req.body);
+      res.json(note);
+    } catch (error) {
+      console.error("Create library note error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to save note." });
+    }
+  });
+
+  app.patch("/api/library/notes/:id", async (req, res) => {
+    try {
+      const note = await updateLibraryNote(req.params.id, req.body);
+      res.json(note);
+    } catch (error) {
+      console.error("Update library note error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to update note." });
+    }
+  });
+
+  app.delete("/api/library/notes/:id", async (req, res) => {
+    try {
+      const result = await deleteLibraryNote(req.params.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Delete library note error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to remove note." });
     }
   });
 
