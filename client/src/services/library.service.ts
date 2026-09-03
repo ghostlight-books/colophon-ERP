@@ -124,6 +124,18 @@ export interface LibraryCollectionHealth {
   healthStatus: "excellent" | "good" | "needs_attention";
 }
 
+export interface LibraryAchievementStats {
+  totalVolumes: number;
+  classifiedDeweyCount: number;
+  classificationPercent: number;
+  totalInsuredValue: number;
+  rareFindsCount: number;
+  deweyDivisionsOwned: string[];
+  librarySpacesUsedCount: number;
+  completedTradesCount: number;
+  fulfilledWantlistCount: number;
+}
+
 export interface LibraryShelfLocation {
   id: string;
   roomName: string;
@@ -645,6 +657,14 @@ export async function fetchCollectionHealth(): Promise<LibraryCollectionHealth> 
   const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error("Failed to fetch collection health.");
   return res.json() as Promise<LibraryCollectionHealth>;
+}
+
+// Collector Level & Achievements API
+export async function fetchLibraryAchievementStats(): Promise<LibraryAchievementStats> {
+  const url = resolveApiUrl(`/library/achievements?t=${Date.now()}`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to fetch achievement stats.");
+  return res.json() as Promise<LibraryAchievementStats>;
 }
 
 export interface RareBookComp {

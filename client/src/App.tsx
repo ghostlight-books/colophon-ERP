@@ -32,6 +32,7 @@ import LibraryShelvesPage from "./pages/library/LibraryShelvesPage";
 import LibraryExchangePage from "./pages/library/LibraryExchangePage";
 import LibraryLendingPage from "./pages/library/LibraryLendingPage";
 import LibraryValuationReportPage from "./pages/library/LibraryValuationReportPage";
+import LibraryAchievementsPage from "./pages/library/LibraryAchievementsPage";
 import { WorkspaceProvider, useWorkspace } from "./contexts/WorkspaceContext";
 import { LibrarySpaceProvider } from "./context/LibrarySpaceContext";
 import { hasModuleAccess, normalizeRole, type SystemModule } from "@colophon/shared";
@@ -219,6 +220,7 @@ function App(): JSX.Element {
               <Route path="library/exchange" element={<LibraryExchangePage />} />
               <Route path="library/lending" element={<LibraryLendingPage />} />
               <Route path="library/valuation" element={<LibraryValuationReportPage />} />
+              <Route path="library/achievements" element={<LibraryAchievementsPage />} />
             </Route>
           </Routes>
         </BrowserRouter>
@@ -404,6 +406,12 @@ function ShellRouteLayout(): JSX.Element {
         to: "/library/valuation",
         icon: <WalletIcon />,
       },
+      {
+        key: "library-achievements",
+        label: "Collector Level",
+        to: "/library/achievements",
+        icon: <GridIcon />,
+      },
     ];
   }, []);
 
@@ -522,6 +530,10 @@ function ShellRouteLayout(): JSX.Element {
     "/library/valuation": {
       title: "Insurance Valuation",
       subtitle: "Collection replacement appraisal schedule for personal property insurance.",
+    },
+    "/library/achievements": {
+      title: "Collector Level",
+      subtitle: "Track your collector level, points, and badges as your collection grows.",
     },
   };
 

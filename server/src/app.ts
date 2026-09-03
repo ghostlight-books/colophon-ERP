@@ -75,6 +75,7 @@ import {
   updateWantlistItem,
   deleteWantlistItem,
 } from "./services/library/libraryWantlist.service.js";
+import { getLibraryAchievementStats } from "./services/library/libraryAchievements.service.js";
 import { evaluateRareBookPricing } from "./services/library/libraryRarePricing.service.js";
 
 type OpsConnector = {
@@ -2482,6 +2483,17 @@ export function createApp(): express.Express {
     } catch (error) {
       console.error("Mark all read error:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "Failed to mark all read." });
+    }
+  });
+
+  // Collector Level & Achievements
+  app.get("/api/library/achievements", async (_req, res) => {
+    try {
+      const stats = await getLibraryAchievementStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Get library achievements error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to get achievement stats." });
     }
   });
 
