@@ -7,6 +7,7 @@ import DashboardPage from "./pages/DashboardPage";
 import FinancePage from "./pages/FinancePage";
 import IntakePage from "./pages/IntakePage";
 import IntakeQuickScanPage from "./pages/IntakeQuickScanPage";
+import ShelfScannerPage from "./pages/ShelfScannerPage";
 import ActiveInventoryPage from "./pages/ActiveInventoryPage";
 import AdminPage from "./pages/AdminPage";
 import InventoryPage from "./pages/InventoryPage";
@@ -192,6 +193,7 @@ function App(): JSX.Element {
               <Route path="pos-register" element={<PosRegisterPage />} />
               <Route path="intake" element={<IntakePage />} />
               <Route path="buying" element={<BuyingPage />} />
+              <Route path="shelf-scanner" element={<ShelfScannerPage />} />
               <Route path="sales" element={<InventoryPage />} />
               <Route path="operations" element={<OperationsPage />} />
               <Route path="marketing" element={<MarketingPage />} />
@@ -295,6 +297,7 @@ function ShellRouteLayout(): JSX.Element {
         children: [
           { key: "intake-scanner", label: "Scanner Station", to: "/intake", icon: <BoxIcon /> },
           { key: "buying-desk", label: "Book Buying Desk", to: "/buying", icon: <WalletIcon /> },
+          { key: "shelf-scanner", label: "Shelf Scanner", to: "/shelf-scanner", icon: <BoxIcon /> },
         ],
       },
       {
@@ -403,6 +406,7 @@ function ShellRouteLayout(): JSX.Element {
     "/calendar": "CALENDAR",
     "/lists": "LISTS",
     "/buying": "INTAKE",
+    "/shelf-scanner": "INTAKE",
     "/inventory": "INVENTORY",
     "/bundles": "INVENTORY",
     "/ebay": "INVENTORY",
@@ -429,6 +433,10 @@ function ShellRouteLayout(): JSX.Element {
     "/buying": {
       title: "Buy Back Books",
       subtitle: "Evaluate incoming books, live comparative market prices, and purchase offers.",
+    },
+    "/shelf-scanner": {
+      title: "Shelf Scanner & Rapid Spine Valuation",
+      subtitle: "Photograph a shelf to detect, price, and triage every spine at once.",
     },
     "/bundles": {
       title: "Product Bundles",
