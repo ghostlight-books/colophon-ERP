@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import Shell, { type LoggedInUser, type ShellNavItem } from "./components/layout/Shell";
+import ErrorBoundary from "./components/common/ErrorBoundary";
 import CalendarPage from "./pages/CalendarPage";
 import DashboardPage from "./pages/DashboardPage";
 import FinancePage from "./pages/FinancePage";
@@ -179,6 +180,7 @@ function RootRedirect(): JSX.Element {
 
 function App(): JSX.Element {
   return (
+    <ErrorBoundary>
     <WorkspaceProvider>
       <LibrarySpaceProvider>
         <BrowserRouter>
@@ -222,6 +224,7 @@ function App(): JSX.Element {
         </BrowserRouter>
       </LibrarySpaceProvider>
     </WorkspaceProvider>
+    </ErrorBoundary>
   );
 }
 

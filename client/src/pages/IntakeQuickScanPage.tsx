@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import CameraBarcodeScanner from "../components/common/CameraBarcodeScanner";
 import {
@@ -111,15 +111,6 @@ function triggerHapticSuccess() {
 }
 
 export default function IntakeQuickScanPage() {
-  // Video & Stream State
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [cameraFacing, setCameraFacing] = useState<"environment" | "user">("environment");
-  const [hasTorch, setHasTorch] = useState(false);
-  const [torchOn, setTorchOn] = useState(false);
-  const [cameraActive, setCameraActive] = useState(false);
-
   // Continuous Batch Mode
   const [batchMode, setBatchMode] = useState(true);
 
@@ -159,79 +150,6 @@ export default function IntakeQuickScanPage() {
     setScanSessions((current) => current.map((session) => session.id === currentSessionId
       ? { ...session, items: [{ ...item, id: `SCAN-${Date.now()}`, day: nowDay(), time: nowTime() }, ...session.items] }
       : session));
-  };
-
-  // Initialize and attach camera stream
-  const startCamera = useCallback(async (facing: "environment" | "user" = cameraFacing) => {
-    try {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
-      setErrorMessage(null);
-
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: { ideal: facing },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      };
-
-      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-      setStream(newStream);
-      setCameraActive(true);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = newStream;
-        await videoRef.current.play();
-      }
-
-      // Check for flashlight / torch support on track
-      const track = newStream.getVideoTracks()[0];
-      const capabilities = track?.getCapabilities?.() as any;
-      if (capabilities && "torch" in capabilities) {
-        setHasTorch(true);
-      } else {
-        setHasTorch(false);
-      }
-    } catch (err) {
-      console.warn("Camera init error:", err);
-      setCameraActive(false);
-      setErrorMessage("Camera access unavailable. You can enter ISBNs manually below.");
-    }
-  }, [cameraFacing, stream]);
-
-  const stopCamera = useCallback(() => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      setStream(null);
-    }
-    setCameraActive(false);
-    setTorchOn(false);
-  }, [stream]);
-
-  // Flip Camera
-  const handleFlipCamera = () => {
-    const nextFacing = cameraFacing === "environment" ? "user" : "environment";
-    setCameraFacing(nextFacing);
-    void startCamera(nextFacing);
-  };
-
-  // Toggle Torch/Flashlight
-  const handleToggleTorch = async () => {
-    if (!stream) return;
-    const track = stream.getVideoTracks()[0];
-    if (!track) return;
-    try {
-      const nextTorch = !torchOn;
-      await (track as any).applyConstraints({
-        advanced: [{ torch: nextTorch }],
-      });
-      setTorchOn(nextTorch);
-    } catch (err) {
-      console.warn("Flashlight toggle error:", err);
-    }
   };
 
   // Process and Receive ISBN into inventory
@@ -291,58 +209,6 @@ export default function IntakeQuickScanPage() {
     }
   };
 
-  // Live Barcode Detector Loop (native BarcodeDetector API)
-  useEffect(() => {
-    if (!cameraActive || isProcessingScan) return;
-
-    let detector: any = null;
-    if ("BarcodeDetector" in window) {
-      try {
-        detector = new (window as any).BarcodeDetector({
-          formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39"],
-        });
-      } catch {}
-    }
-
-    let intervalId: number;
-    let isScanningFrame = false;
-
-    const scanFrame = async () => {
-      if (!videoRef.current || isScanningFrame || isProcessingScan) return;
-      if (videoRef.current.readyState < 2) return;
-
-      isScanningFrame = true;
-      try {
-        if (detector) {
-          const barcodes = await detector.detect(videoRef.current);
-          if (barcodes && barcodes.length > 0) {
-            const detectedValue = barcodes[0].rawValue;
-            if (detectedValue && detectedValue.length >= 9) {
-              await handleProcessIsbn(detectedValue);
-            }
-          }
-        }
-      } catch (err) {
-        // BarcodeDetector scan error
-      } finally {
-        isScanningFrame = false;
-      }
-    };
-
-    intervalId = window.setInterval(scanFrame, 300);
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [cameraActive, isProcessingScan, defaultCondition]);
-
-  // Start Camera on initial mount
-  useEffect(() => {
-    void startCamera();
-    return () => {
-      stopCamera();
-    };
-  }, []);
-
   // 1-Tap condition regrade for an already-received book: re-runs pricing/bin and re-submits
   const handleRegradeCondition = async (book: ScannedBook, nextCondition: BookCondition) => {
     try {
@@ -360,9 +226,6 @@ export default function IntakeQuickScanPage() {
 
   return (
     <div className="fixed inset-0 z-[9980] bg-black text-white flex flex-col justify-between select-none overflow-hidden font-sans">
-      {/* Hidden Canvas */}
-      <canvas ref={canvasRef} className="hidden" />
-
       {/* 1. Top Immersive Header Bar */}
       <header className="px-3.5 pb-3.5 pt-[calc(env(safe-area-inset-top,0px)+0.875rem)] bg-slate-950/80 backdrop-blur-xl border-b border-slate-800/80 flex items-center justify-between z-30 shrink-0 gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -480,30 +343,8 @@ export default function IntakeQuickScanPage() {
           </div>
         )}
 
-        {/* Floating Quick Camera Controls (Torch, Flip, Manual) */}
+        {/* Floating Quick Camera Control (Manual Entry) */}
         <div className="absolute right-4 bottom-4 z-20 flex flex-col gap-3">
-          {hasTorch && (
-            <button
-              type="button"
-              onClick={handleToggleTorch}
-              className={`w-11 h-11 rounded-full backdrop-blur-xl flex items-center justify-center text-lg shadow-lg border transition cursor-pointer active:scale-95 ${
-                torchOn ? "bg-amber-400 text-slate-950 border-amber-300 shadow-amber-400/30" : "bg-slate-900/80 text-white border-slate-700"
-              }`}
-              title="Toggle Flashlight"
-            >
-              {torchOn ? "🔦" : "💡"}
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={handleFlipCamera}
-            className="w-11 h-11 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-slate-700 backdrop-blur-xl flex items-center justify-center text-lg text-white shadow-lg transition cursor-pointer active:scale-95"
-            title="Flip Camera"
-          >
-            🔄
-          </button>
-
           <button
             type="button"
             onClick={() => setIsManualModalOpen(true)}
