@@ -1,4 +1,5 @@
 import { prisma } from "../config/database.js";
+import { env } from "../config/env.js";
 import { lookupAbeBooksPrice } from "./abebooksScraper.service.js";
 import { lookupThriftbooksDetails } from "./thriftbooksScraper.service.js";
 import { lookupIsbndb, extractGenreAndCategory } from "./isbndb.service.js";
@@ -37,13 +38,24 @@ export async function lookupGoogleBooks(isbn: string): Promise<GoogleBooksDetail
   if (!clean) return null;
 
   try {
-    const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(clean)}`, {
+    const apiKey = env.GOOGLE_BOOKS_API_KEY;
+    const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(clean)}${
+      apiKey ? `&key=${encodeURIComponent(apiKey)}` : ""
+    }`;
+    const res = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
       },
       signal: AbortSignal.timeout(6000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (res.status === 429) {
+        console.warn(
+          `Google Books quota exceeded for ISBN ${clean}.${apiKey ? "" : " Set GOOGLE_BOOKS_API_KEY to get a much higher daily quota than the shared keyless pool."}`,
+        );
+      }
+      return null;
+    }
     const data = (await res.json()) as {
       totalItems?: number;
       items?: Array<{

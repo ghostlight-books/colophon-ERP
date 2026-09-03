@@ -17,6 +17,7 @@ const envSchema = z.object({
   SHOPIFY_APP_URL: z.string().url().default("https://colophon-api.onrender.com"),
   RENDER_GIT_COMMIT: z.string().optional(),
   ISBNDB_API_KEY: z.string().optional(),
+  GOOGLE_BOOKS_API_KEY: z.string().optional(),
   EBAY_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
   EBAY_APP_ID: z.string().optional(),
   EBAY_CERT_ID: z.string().optional(),

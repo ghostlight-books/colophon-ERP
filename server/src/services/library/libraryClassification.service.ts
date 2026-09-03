@@ -6,6 +6,40 @@ import { resolveBestCoverUrl } from "../isbn/coverFetcher.service.js";
 
 const PROVIDER_TIMEOUT_MS = 8000;
 
+/**
+ * Free, unlimited fallback for a book synopsis when OpenLibrary/Google/ISBNdb
+ * all come up empty (common for OpenLibrary specifically, which frequently
+ * lacks a description on both the edition and work record). Searches
+ * Wikipedia for the book, then pulls its lead summary paragraph. Only
+ * useful for reasonably well-known titles -- Wikipedia won't have every
+ * book, but it fills a real gap in the other three sources for the ones it
+ * does have.
+ */
+async function fetchWikipediaSummary(title: string, author: string | null): Promise<string | null> {
+  try {
+    const searchQuery = author ? `${title} ${author} book` : `${title} book`;
+    const searchRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchQuery)}&format=json&srlimit=1`,
+      { headers: { "User-Agent": "Colophon-Library/1.0 (personal collection app)" }, signal: AbortSignal.timeout(5000) },
+    );
+    if (!searchRes.ok) return null;
+    const searchData = (await searchRes.json()) as { query?: { search?: Array<{ title?: string }> } };
+    const pageTitle = searchData?.query?.search?.[0]?.title;
+    if (!pageTitle) return null;
+
+    const summaryRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`, {
+      headers: { "User-Agent": "Colophon-Library/1.0 (personal collection app)" },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!summaryRes.ok) return null;
+    const summaryData = (await summaryRes.json()) as { extract?: string; type?: string };
+    if (summaryData.type === "disambiguation" || !summaryData.extract) return null;
+    return summaryData.extract;
+  } catch {
+    return null;
+  }
+}
+
 export interface LibraryEnrichmentResult {
   isbn: string;
   title: string;
@@ -282,11 +316,13 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
   const yearMatch = rawYear ? String(rawYear).match(/\b(18|19|20)\d{2}\b/) : null;
   const publishYear = yearMatch ? yearMatch[0] : null;
 
-  // Description / Book Synopsis (Multi-Source with OpenLibrary Work fallback & HTML strip)
+  // Description / Book Synopsis -- priority order: ISBNdb (paid, purpose-built
+  // bibliographic data -- most reliable when configured) > Google Books >
+  // OpenLibrary edition > OpenLibrary work record > Wikipedia > opening line.
   let description: string | null = (
-    (typeof openLib?.description === "string" ? openLib.description : openLib?.description?.value) ||
-    google?.description ||
     isbndb?.description ||
+    google?.description ||
+    (typeof openLib?.description === "string" ? openLib.description : openLib?.description?.value) ||
     null
   );
 
@@ -309,6 +345,22 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
         }
       }
     } catch {}
+  }
+
+  // Still nothing? Wikipedia is free, unlimited, and has good coverage for
+  // well-known titles that OpenLibrary/Google/ISBNdb all came up empty on.
+  if (!description) {
+    description = await fetchWikipediaSummary(title, author);
+  }
+
+  // Last resort: OpenLibrary sometimes has an opening line even with no
+  // synopsis. Clearly labeled as an excerpt so it doesn't read as a real
+  // synopsis.
+  if (!description) {
+    const firstSentence = typeof openLib?.first_sentence === "string" ? openLib.first_sentence : openLib?.first_sentence?.value;
+    if (firstSentence) {
+      description = `"${firstSentence}" (opening line -- no full synopsis found)`;
+    }
   }
 
   if (description) {
