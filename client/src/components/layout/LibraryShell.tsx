@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Menu, Moon, RefreshCcw, Search, Sun, X } from "lucide-react";
+import { Bell, ChevronDown, ChevronLeft, ChevronRight, Menu, Moon, RefreshCcw, Search, Sun, X } from "lucide-react";
 import MobileBottomNav from "./MobileBottomNav";
 import InstallAppPrompt from "../common/InstallAppPrompt";
 import BrandLogo from "../common/BrandLogo";
 import LibrarySpaceSwitcher from "../library/LibrarySpaceSwitcher";
-import { fetchLibraryDashboard, type LibraryDashboardSummary } from "../../services/library.service";
+import {
+  fetchLibraryDashboard,
+  fetchLibraryNotifications,
+  markAllNotificationsAsRead,
+  markLibraryNotificationRead,
+  type LibraryDashboardSummary,
+  type LibraryNotification,
+} from "../../services/library.service";
 import type { LoggedInUser, ShellProps } from "./shellTypes";
 
-type ToolbarMenu = "none" | "menu" | "search" | "notifications" | "calendar" | "account";
+type ToolbarMenu = "none" | "menu" | "search" | "notifications" | "account";
 type ThemeMode = "light" | "dark";
 type SearchCategory = "all" | "navigation" | "orders" | "inventory" | "customers";
 
@@ -19,27 +26,22 @@ type SearchResult = {
   to?: string;
 };
 
-type NotificationItem = {
-  id: string;
-  title: string;
-  time: string;
-  unread: boolean;
-  source: "Automated" | "Manual" | "Reminder";
-};
-
-type ReminderItem = {
-  id: string;
-  title: string;
-  due: string;
-  completed: boolean;
-};
-
 type ServiceHealth = {
   key: string;
   label: string;
   detail: string;
   status: "green" | "yellow" | "red";
   path?: string;
+};
+
+const NOTIFICATION_STYLES: Record<string, string> = {
+  OFFER: "bg-indigo-50/60 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800 border-l-indigo-500",
+  TRADE: "bg-purple-50/60 dark:bg-purple-950/40 border-purple-200 dark:border-purple-800 border-l-purple-500",
+  SALE: "bg-emerald-50/60 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 border-l-emerald-500",
+  WISHLIST_MATCH: "bg-amber-50/60 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 border-l-amber-500",
+  BADGE: "bg-rose-50/60 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 border-l-rose-500",
+  LOAN_DUE: "bg-orange-50/60 dark:bg-orange-950/40 border-orange-200 dark:border-orange-800 border-l-orange-500",
+  CATALOG: "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 border-l-slate-400",
 };
 
 // Library's dedicated shell chrome. Locked to "library" — see StoreShell.tsx
@@ -68,7 +70,6 @@ function LibraryShell({
   const [menu, setMenu] = useState<ToolbarMenu>("none");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchCategory, setSearchCategory] = useState<SearchCategory>("all");
-  const [manualNotificationTitle, setManualNotificationTitle] = useState("");
   const [profileDraft, setProfileDraft] = useState<LoggedInUser>(currentUser);
   const [isPosSidebarOpen, setIsPosSidebarOpen] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
@@ -76,38 +77,8 @@ function LibraryShell({
   const [serviceHealth, setServiceHealth] = useState<ServiceHealth[]>([]);
   const [librarySummary, setLibrarySummary] = useState<LibraryDashboardSummary | null>(null);
   const [currentTime, setCurrentTime] = useState(() => new Date());
-  const [reminders, setReminders] = useState<ReminderItem[]>(() => {
-    if (typeof window === "undefined") return [];
-    try { return JSON.parse(window.localStorage.getItem("colophon-reminders") ?? "[]") as ReminderItem[]; } catch { return []; }
-  });
-  const [manualNotifications, setManualNotifications] = useState<NotificationItem[]>(() => {
-    if (typeof window === "undefined") {
-      return [];
-    }
-
-    try {
-      const stored = window.localStorage.getItem("colophon-manual-notifications");
-      if (!stored) {
-        return [];
-      }
-
-      const parsed = JSON.parse(stored) as NotificationItem[];
-      return parsed.filter((item) => item.source === "Manual");
-    } catch {
-      return [];
-    }
-  });
+  const [notifications, setNotifications] = useState<LibraryNotification[]>([]);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
-
-  const automatedNotifications = useMemo<NotificationItem[]>(
-    () => [
-      { id: "auto-1", title: "7 orders need shipped today", time: "just now", unread: true, source: "Automated" },
-      { id: "auto-2", title: "3 pickup orders are overdue", time: "14m ago", unread: true, source: "Automated" },
-      { id: "auto-3", title: "Inventory sync complete", time: "1h ago", unread: false, source: "Automated" },
-      { id: "auto-4", title: "Daily sales report generated", time: "2h ago", unread: false, source: "Automated" },
-    ],
-    [],
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -160,11 +131,20 @@ function LibraryShell({
       } catch {}
     };
 
+    const loadNotifications = async (): Promise<void> => {
+      try {
+        const items = await fetchLibraryNotifications(20);
+        if (!cancelled) setNotifications(items);
+      } catch {}
+    };
+
     void loadHealth();
     void loadLibHealth();
+    void loadNotifications();
     const timer = window.setInterval(() => {
       void loadHealth();
       void loadLibHealth();
+      void loadNotifications();
     }, 10000);
 
     return () => {
@@ -200,12 +180,6 @@ function LibraryShell({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
-
-  const notifications = useMemo<NotificationItem[]>(() => [
-    ...manualNotifications,
-    ...automatedNotifications,
-    ...reminders.filter((reminder) => !reminder.completed).map((reminder) => ({ id: reminder.id, title: reminder.title, time: reminder.due, unread: true, source: "Reminder" as const })),
-  ], [automatedNotifications, manualNotifications, reminders]);
 
   const searchableItems = useMemo<SearchResult[]>(
     () => [
@@ -250,7 +224,7 @@ function LibraryShell({
       .slice(0, 8);
   }, [searchCategory, searchQuery, searchableItems]);
 
-  const unreadCount = notifications.filter((note) => note.unread).length;
+  const unreadCount = notifications.filter((note) => !note.read).length;
   const isPosRoute = activePath.startsWith("/pos");
   const shouldHideSidebar = isPosRoute && !isPosSidebarOpen;
 
@@ -268,27 +242,9 @@ function LibraryShell({
   }, [theme]);
 
   useEffect(() => {
-    window.localStorage.setItem("colophon-manual-notifications", JSON.stringify(manualNotifications));
-  }, [manualNotifications]);
-
-  useEffect(() => {
-    window.localStorage.setItem("colophon-reminders", JSON.stringify(reminders));
-  }, [reminders]);
-
-  useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    const dateKey = currentTime.toISOString().slice(0, 10);
-    if (currentTime.getHours() < 20 || (currentTime.getHours() === 20 && currentTime.getMinutes() < 30)) {
-      return;
-    }
-    setReminders((current) => current.some((reminder) => reminder.id === `closing-${dateKey}`)
-      ? current
-      : [{ id: `closing-${dateKey}`, title: "Complete closing tasks", due: "Due now · 9:00 PM close", completed: false }, ...current]);
-  }, [currentTime]);
 
   useEffect(() => {
     setProfileDraft(currentUser);
@@ -328,26 +284,30 @@ function LibraryShell({
     }
   }
 
-  function markNotificationRead(id: string): void {
-    setManualNotifications((current) => current.map((item) => (item.id === id ? { ...item, unread: false } : item)));
+  function handleNotificationClick(note: LibraryNotification): void {
+    if (!note.read) {
+      setNotifications((current) => current.map((item) => (item.id === note.id ? { ...item, read: true } : item)));
+      void markLibraryNotificationRead(note.id).catch(() => {});
+    }
+    if (note.actionUrl) {
+      setMenu("none");
+      onNavigate(note.actionUrl);
+    }
   }
 
-  function addManualNotification(): void {
-    const title = manualNotificationTitle.trim();
-    if (!title) {
-      return;
-    }
+  function handleMarkAllRead(): void {
+    setNotifications((current) => current.map((item) => ({ ...item, read: true })));
+    void markAllNotificationsAsRead().catch(() => {});
+  }
 
-    const next: NotificationItem = {
-      id: `manual-${Date.now()}`,
-      title,
-      time: "Just now",
-      unread: true,
-      source: "Manual",
-    };
-
-    setManualNotifications((current) => [next, ...current].slice(0, 12));
-    setManualNotificationTitle("");
+  function formatNotificationTime(iso: string): string {
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const minutes = Math.floor(diffMs / 60000);
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
   }
 
   function saveProfileDraft(): void {
@@ -609,18 +569,8 @@ function LibraryShell({
                 </div>
               </div>
 
-              {/* Right: Edition Badge (read-only -- edition is chosen at login, not switched in-app) + Unified Header Menu Button */}
+              {/* Right: Unified Header Menu Button (edition badge removed -- the logo itself differentiates Library from Store) */}
               <div className="flex items-center gap-2 sm:gap-3">
-                <span
-                  className={[
-                    "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-2xl border text-xs font-black",
-                    isDark ? "bg-indigo-950/50 border-indigo-800 text-indigo-300" : "bg-indigo-50 border-indigo-200 text-indigo-800",
-                  ].join(" ")}
-                >
-                  <span>🏛️</span>
-                  <span className="hidden sm:inline">Library</span>
-                </span>
-
                 <div ref={toolbarRef} className="relative z-[140] shrink-0">
                 <button
                   type="button"
@@ -778,23 +728,6 @@ function LibraryShell({
                             )}
                           </button>
 
-                          {/* 4. Calendar & Tasks */}
-                          <button
-                            type="button"
-                            onClick={() => setMenu("calendar")}
-                            className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition cursor-pointer text-xs font-semibold text-slate-800 dark:text-slate-200"
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <span className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">
-                                <CalendarDays size={14} />
-                              </span>
-                              <span>Calendar & Tasks</span>
-                            </div>
-                            <span className="text-[10px] text-slate-400 font-semibold">
-                              {reminders.filter((r) => !r.completed).length} open
-                            </span>
-                          </button>
-
                           {/* 5. Reload App & Check Updates */}
                           <button
                             type="button"
@@ -940,7 +873,18 @@ function LibraryShell({
                             <ChevronLeft size={14} />
                             <span>Back to Menu</span>
                           </button>
-                          <span className="text-[11px] text-slate-500 font-semibold">{unreadCount} unread</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-slate-500 font-semibold">{unreadCount} unread</span>
+                            {unreadCount > 0 && (
+                              <button
+                                type="button"
+                                onClick={handleMarkAllRead}
+                                className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                              >
+                                Mark all read
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
@@ -950,72 +894,16 @@ function LibraryShell({
                             notifications.map((note) => (
                               <div
                                 key={note.id}
-                                onClick={() => markNotificationRead(note.id)}
-                                className={`p-2.5 rounded-xl border text-xs cursor-pointer transition ${
-                                  note.unread
-                                    ? "bg-indigo-50/60 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800"
-                                    : "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700"
+                                onClick={() => handleNotificationClick(note)}
+                                className={`p-2.5 rounded-xl border-l-4 border text-xs transition ${
+                                  note.actionUrl ? "cursor-pointer" : "cursor-default"
+                                } ${NOTIFICATION_STYLES[note.type] ?? NOTIFICATION_STYLES.CATALOG} ${
+                                  note.read ? "opacity-60" : ""
                                 }`}
                               >
                                 <p className="font-bold text-slate-900 dark:text-white">{note.title}</p>
-                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-0.5">{note.time}</p>
-                              </div>
-                            ))
-                          )}
-                        </div>
-
-                        <form
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            addManualNotification();
-                          }}
-                          className="flex gap-2 pt-2 border-t border-slate-200 dark:border-slate-800"
-                        >
-                          <input
-                            type="text"
-                            value={manualNotificationTitle}
-                            onChange={(e) => setManualNotificationTitle(e.target.value)}
-                            placeholder="Add custom reminder..."
-                            className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2 text-xs font-semibold focus:outline-none"
-                          />
-                          <button
-                            type="submit"
-                            className="px-3 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl shadow-xs"
-                          >
-                            Add
-                          </button>
-                        </form>
-                      </div>
-                    )}
-
-                    {/* 4. Calendar & Tasks Subpanel */}
-                    {menu === "calendar" && (
-                      <div className="space-y-3 animate-fadeIn">
-                        <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
-                          <button
-                            type="button"
-                            onClick={() => setMenu("menu")}
-                            className="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
-                          >
-                            <ChevronLeft size={14} />
-                            <span>Back to Menu</span>
-                          </button>
-                          <span className="text-[11px] text-slate-500 font-semibold">
-                            {new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
-                          </span>
-                        </div>
-
-                        <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
-                          {reminders.length === 0 ? (
-                            <p className="p-4 text-center text-xs text-slate-500 font-medium">No schedule items.</p>
-                          ) : (
-                            reminders.map((r) => (
-                              <div
-                                key={r.id}
-                                className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs"
-                              >
-                                <span className="font-semibold text-slate-900 dark:text-white">{r.title}</span>
-                                <span className="text-[10px] text-slate-400 font-mono">{r.due}</span>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-300 mt-0.5">{note.detail}</p>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-1">{formatNotificationTime(note.createdAt)}</p>
                               </div>
                             ))
                           )}

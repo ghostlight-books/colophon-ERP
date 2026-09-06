@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
 import { useLibrarySpace } from "../../context/LibrarySpaceContext";
 import {
@@ -22,7 +23,10 @@ function formatCurrency(amount: number | null | undefined): string {
 
 export default function LibraryExchangePage() {
   const { activeSpaceId } = useLibrarySpace();
-  const [activeTab, setActiveTab] = useState<"incoming" | "marketplace" | "wantlist">("incoming");
+  const [searchParams] = useSearchParams();
+  const highlightedOfferId = searchParams.get("offerId");
+  const highlightedVolumeId = searchParams.get("volumeId");
+  const [activeTab, setActiveTab] = useState<"incoming" | "marketplace" | "wantlist">(highlightedVolumeId ? "marketplace" : "incoming");
 
   // Wantlist State
   const [wantlist, setWantlist] = useState<LibraryWantlistItem[]>([]);
@@ -96,6 +100,13 @@ export default function LibraryExchangePage() {
       void loadMarketplace();
     }
   }, [activeTab, statusFilter]);
+
+  // Arriving from a "wishlist item now available" notification -- jump straight to making an offer on it.
+  useEffect(() => {
+    if (!highlightedVolumeId) return;
+    const match = marketplaceItems.find((item) => item.id === highlightedVolumeId);
+    if (match) setSelectedMarketVolume(match);
+  }, [marketplaceItems, highlightedVolumeId]);
 
   const loadWantlist = async () => {
     setLoadingWantlist(true);
@@ -338,11 +349,16 @@ export default function LibraryExchangePage() {
                 const isPending = offer.status === "PENDING";
                 const isBookstore = offer.offererType === "BOOKSTORE" || offer.offerType === "BOOKSTORE_BUY_OFFER";
 
+                const isHighlighted = highlightedOfferId === offer.id;
+
                 return (
                   <div
                     key={offer.id}
+                    ref={isHighlighted ? (el) => el?.scrollIntoView({ block: "center", behavior: "smooth" }) : undefined}
                     className={`p-4 rounded-2xl border transition flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
-                      isPending
+                      isHighlighted
+                        ? "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-400 dark:border-indigo-600 ring-2 ring-indigo-400/50 shadow-md"
+                        : isPending
                         ? "bg-white dark:bg-slate-700/80 border-slate-300 dark:border-slate-600 shadow-xs"
                         : "bg-white/60 dark:bg-slate-800/60 border-slate-300 dark:border-slate-700 opacity-80"
                     }`}

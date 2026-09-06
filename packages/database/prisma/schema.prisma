@@ -768,12 +768,18 @@ model LibraryNotification {
   id                    String                @id @default(uuid())
   title                 String
   detail                String
-  type                  String                @default("CATALOG") // "OFFER" | "TRADE" | "LOAN_DUE" | "CATALOG"
+  type                  String                @default("CATALOG") // "OFFER" | "TRADE" | "SALE" | "WISHLIST_MATCH" | "BADGE" | "LOAN_DUE" | "CATALOG"
   read                  Boolean               @default(false)
   actionUrl             String?
   createdAt             DateTime              @default(now())
 
   @@index([read, createdAt])
+}
+
+model LibraryBadgeAward {
+  id                    String                @id @default(uuid())
+  badgeId               String                @unique
+  awardedAt             DateTime              @default(now())
 }
 
 model LibraryWantlistItem {

@@ -92,7 +92,7 @@ export interface LibraryNotification {
   id: string;
   title: string;
   detail: string;
-  type: "OFFER" | "TRADE" | "LOAN_DUE" | "CATALOG";
+  type: "OFFER" | "TRADE" | "SALE" | "WISHLIST_MATCH" | "BADGE" | "LOAN_DUE" | "CATALOG";
   read: boolean;
   actionUrl: string | null;
   createdAt: string;
