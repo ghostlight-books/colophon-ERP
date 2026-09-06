@@ -175,6 +175,20 @@ export async function ensureLibraryTablesExist(): Promise<void> {
     `);
 
     await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "LibraryOfferMessage" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "offerId" TEXT NOT NULL,
+        "senderRole" TEXT NOT NULL,
+        "senderName" TEXT NOT NULL,
+        "body" TEXT NOT NULL,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "LibraryOfferMessage_offerId_createdAt_idx" ON "LibraryOfferMessage"("offerId", "createdAt");
+    `);
+
+    await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "LibraryAuthorAlias" (
         "id" TEXT NOT NULL PRIMARY KEY,
         "alias" TEXT NOT NULL,

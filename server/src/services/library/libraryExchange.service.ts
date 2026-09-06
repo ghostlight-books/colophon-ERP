@@ -212,6 +212,53 @@ export async function respondToLibraryOffer(input: RespondOfferInput) {
   return updatedOffer;
 }
 
+// 4b. Messaging thread attached to one offer -- the two parties (collection
+// owner and whoever made the offer) can go back and forth beyond the single
+// initial note on the offer itself.
+export interface SendOfferMessageInput {
+  offerId: string;
+  senderRole: "OWNER" | "OFFERER";
+  senderName: string;
+  body: string;
+}
+
+export async function listOfferMessages(offerId: string) {
+  await ensureLibraryTablesExist();
+  return prisma.libraryOfferMessage.findMany({
+    where: { offerId },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+export async function sendOfferMessage(input: SendOfferMessageInput) {
+  await ensureLibraryTablesExist();
+
+  const offer = await prisma.libraryOffer.findUnique({ where: { id: input.offerId }, include: { volume: true } });
+  if (!offer) {
+    throw new Error(`Offer with ID ${input.offerId} not found.`);
+  }
+
+  const message = await prisma.libraryOfferMessage.create({
+    data: {
+      offerId: input.offerId,
+      senderRole: input.senderRole,
+      senderName: input.senderName,
+      body: input.body,
+    },
+  });
+
+  await prisma.libraryNotification.create({
+    data: {
+      title: `New message from ${input.senderName}`,
+      detail: `Re: "${offer.volume.title}" -- ${input.body.length > 120 ? `${input.body.slice(0, 120)}…` : input.body}`,
+      type: "MESSAGE",
+      actionUrl: `/library/exchange?offerId=${offer.id}`,
+    },
+  });
+
+  return message;
+}
+
 // 5. Get Notifications for Library
 export async function getLibraryNotifications(limit = 20) {
   await ensureLibraryTablesExist();

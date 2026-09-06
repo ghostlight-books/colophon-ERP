@@ -92,9 +92,18 @@ export interface LibraryNotification {
   id: string;
   title: string;
   detail: string;
-  type: "OFFER" | "TRADE" | "SALE" | "WISHLIST_MATCH" | "BADGE" | "LOAN_DUE" | "CATALOG";
+  type: "OFFER" | "TRADE" | "SALE" | "WISHLIST_MATCH" | "BADGE" | "MESSAGE" | "LOAN_DUE" | "CATALOG";
   read: boolean;
   actionUrl: string | null;
+  createdAt: string;
+}
+
+export interface LibraryOfferMessage {
+  id: string;
+  offerId: string;
+  senderRole: "OWNER" | "OFFERER";
+  senderName: string;
+  body: string;
   createdAt: string;
 }
 
@@ -613,6 +622,30 @@ export async function respondToOffer(
   });
   if (!res.ok) throw new Error("Failed to respond to offer.");
   return res.json() as Promise<LibraryOffer>;
+}
+
+export async function fetchOfferMessages(offerId: string): Promise<LibraryOfferMessage[]> {
+  const url = resolveApiUrl(`/library/exchange/offers/${encodeURIComponent(offerId)}/messages`);
+  const res = await fetchWithTimeout(url);
+  if (!res.ok) throw new Error("Failed to load messages.");
+  const data = (await res.json()) as { messages?: LibraryOfferMessage[] };
+  return Array.isArray(data.messages) ? data.messages : [];
+}
+
+export async function sendOfferMessage(
+  offerId: string,
+  senderRole: "OWNER" | "OFFERER",
+  senderName: string,
+  body: string,
+): Promise<LibraryOfferMessage> {
+  const url = resolveApiUrl(`/library/exchange/offers/${encodeURIComponent(offerId)}/messages`);
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ senderRole, senderName, body }),
+  });
+  if (!res.ok) throw new Error("Failed to send message.");
+  return res.json() as Promise<LibraryOfferMessage>;
 }
 
 // Wantlist API -- personal want-list items, auto-matched against Exchange

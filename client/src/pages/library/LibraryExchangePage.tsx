@@ -11,9 +11,12 @@ import {
   addWantlistItem,
   updateWantlistItem as updateWantlistItemApi,
   removeWantlistItem,
+  fetchOfferMessages,
+  sendOfferMessage,
   type LibraryVolume,
   type LibraryOffer,
   type LibraryWantlistItem,
+  type LibraryOfferMessage,
 } from "../../services/library.service";
 
 function formatCurrency(amount: number | null | undefined): string {
@@ -52,6 +55,13 @@ export default function LibraryExchangePage() {
   const [counterModalOffer, setCounterModalOffer] = useState<LibraryOffer | null>(null);
   const [counterAmount, setCounterAmount] = useState("");
   const [counterNotes, setCounterNotes] = useState("");
+
+  // Offer Messaging State -- a conversation thread attached to one offer
+  const [expandedMessagesOfferId, setExpandedMessagesOfferId] = useState<string | null>(null);
+  const [messagesByOffer, setMessagesByOffer] = useState<Record<string, LibraryOfferMessage[]>>({});
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
 
   // Submit Offer Modal State (for browsing marketplace)
   const [selectedMarketVolume, setSelectedMarketVolume] = useState<LibraryVolume | null>(null);
@@ -185,6 +195,47 @@ export default function LibraryExchangePage() {
       alert(err instanceof Error ? err.message : "Failed to update offer.");
     }
   };
+
+  const toggleMessages = async (offerId: string) => {
+    if (expandedMessagesOfferId === offerId) {
+      setExpandedMessagesOfferId(null);
+      return;
+    }
+    setExpandedMessagesOfferId(offerId);
+    if (!messagesByOffer[offerId]) {
+      setLoadingMessages(true);
+      try {
+        const messages = await fetchOfferMessages(offerId);
+        setMessagesByOffer((current) => ({ ...current, [offerId]: messages }));
+      } catch (err) {
+        console.warn("fetchOfferMessages error:", err);
+      } finally {
+        setLoadingMessages(false);
+      }
+    }
+  };
+
+  const handleSendMessage = async (offerId: string) => {
+    const body = messageDraft.trim();
+    if (!body) return;
+    setSendingMessage(true);
+    try {
+      const message = await sendOfferMessage(offerId, "OWNER", "Library Owner", body);
+      setMessagesByOffer((current) => ({ ...current, [offerId]: [...(current[offerId] ?? []), message] }));
+      setMessageDraft("");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to send message.");
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  useEffect(() => {
+    if (highlightedOfferId) {
+      void toggleMessages(highlightedOfferId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightedOfferId]);
 
   const handleSubmitOffer = async (e: FormEvent) => {
     e.preventDefault();
@@ -355,7 +406,7 @@ export default function LibraryExchangePage() {
                   <div
                     key={offer.id}
                     ref={isHighlighted ? (el) => el?.scrollIntoView({ block: "center", behavior: "smooth" }) : undefined}
-                    className={`p-4 rounded-2xl border transition flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
+                    className={`p-4 rounded-2xl border transition space-y-3 ${
                       isHighlighted
                         ? "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-400 dark:border-indigo-600 ring-2 ring-indigo-400/50 shadow-md"
                         : isPending
@@ -363,6 +414,7 @@ export default function LibraryExchangePage() {
                         : "bg-white/60 dark:bg-slate-800/60 border-slate-300 dark:border-slate-700 opacity-80"
                     }`}
                   >
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                     {/* Left: Book Cover & Details */}
                     <div className="flex items-start gap-3.5 min-w-0">
                       <div className="w-12 h-16 bg-slate-100 dark:bg-slate-900 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0 flex items-center justify-center shadow-2xs">
@@ -457,6 +509,67 @@ export default function LibraryExchangePage() {
                       </div>
                     )}
                   </div>
+
+                  {/* Messages Thread */}
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => toggleMessages(offer.id)}
+                      className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    >
+                      {expandedMessagesOfferId === offer.id ? "Hide messages" : `Messages${messagesByOffer[offer.id]?.length ? ` (${messagesByOffer[offer.id].length})` : ""}`}
+                    </button>
+
+                    {expandedMessagesOfferId === offer.id && (
+                      <div className="mt-2 space-y-2">
+                        {loadingMessages ? (
+                          <p className="text-[11px] text-slate-500">Loading messages…</p>
+                        ) : (messagesByOffer[offer.id]?.length ?? 0) === 0 ? (
+                          <p className="text-[11px] text-slate-500">No messages yet.</p>
+                        ) : (
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+                            {messagesByOffer[offer.id].map((msg) => (
+                              <div
+                                key={msg.id}
+                                className={`p-2 rounded-xl text-[11px] max-w-[85%] ${
+                                  msg.senderRole === "OWNER"
+                                    ? "ml-auto bg-indigo-100 dark:bg-indigo-950/50 text-slate-900 dark:text-white"
+                                    : "bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white"
+                                }`}
+                              >
+                                <p className="font-semibold">{msg.senderName}</p>
+                                <p>{msg.body}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            void handleSendMessage(offer.id);
+                          }}
+                          className="flex gap-2"
+                        >
+                          <input
+                            type="text"
+                            value={messageDraft}
+                            onChange={(e) => setMessageDraft(e.target.value)}
+                            placeholder="Reply..."
+                            className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-2.5 py-1.5 text-[11px] focus:outline-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={sendingMessage || !messageDraft.trim()}
+                            className="px-3 py-1.5 bg-indigo-600 text-white font-bold text-[11px] rounded-xl shadow-xs disabled:opacity-50 cursor-pointer"
+                          >
+                            Send
+                          </button>
+                        </form>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 );
               })}
             </div>

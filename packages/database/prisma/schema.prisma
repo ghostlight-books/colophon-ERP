@@ -758,17 +758,30 @@ model LibraryOffer {
   counterNotes          String?
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
+  messages              LibraryOfferMessage[]
 
   @@index([volumeId])
   @@index([status])
   @@index([offererEmail])
 }
 
+model LibraryOfferMessage {
+  id                    String                @id @default(uuid())
+  offerId               String
+  offer                 LibraryOffer          @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  senderRole            String                // "OWNER" | "OFFERER"
+  senderName            String
+  body                  String
+  createdAt             DateTime              @default(now())
+
+  @@index([offerId, createdAt])
+}
+
 model LibraryNotification {
   id                    String                @id @default(uuid())
   title                 String
   detail                String
-  type                  String                @default("CATALOG") // "OFFER" | "TRADE" | "SALE" | "WISHLIST_MATCH" | "BADGE" | "LOAN_DUE" | "CATALOG"
+  type                  String                @default("CATALOG") // "OFFER" | "TRADE" | "SALE" | "WISHLIST_MATCH" | "BADGE" | "MESSAGE" | "LOAN_DUE" | "CATALOG"
   read                  Boolean               @default(false)
   actionUrl             String?
   createdAt             DateTime              @default(now())

@@ -40,6 +40,7 @@ const NOTIFICATION_STYLES: Record<string, string> = {
   SALE: "bg-emerald-50/60 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 border-l-emerald-500",
   WISHLIST_MATCH: "bg-amber-50/60 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 border-l-amber-500",
   BADGE: "bg-rose-50/60 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 border-l-rose-500",
+  MESSAGE: "bg-cyan-50/60 dark:bg-cyan-950/40 border-cyan-200 dark:border-cyan-800 border-l-cyan-500",
   LOAN_DUE: "bg-orange-50/60 dark:bg-orange-950/40 border-orange-200 dark:border-orange-800 border-l-orange-500",
   CATALOG: "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 border-l-slate-400",
 };

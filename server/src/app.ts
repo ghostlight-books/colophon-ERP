@@ -64,6 +64,8 @@ import {
   submitLibraryOffer,
   listIncomingLibraryOffers,
   respondToLibraryOffer,
+  listOfferMessages,
+  sendOfferMessage,
   getLibraryNotifications,
   markLibraryNotificationRead,
   markAllLibraryNotificationsRead,
@@ -2423,6 +2425,32 @@ export function createApp(): express.Express {
     } catch (error) {
       console.error("Respond offer error:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "Failed to respond to offer." });
+    }
+  });
+
+  app.get("/api/library/exchange/offers/:id/messages", async (req, res) => {
+    try {
+      const messages = await listOfferMessages(req.params.id);
+      res.json({ messages });
+    } catch (error) {
+      console.error("List offer messages error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load messages." });
+    }
+  });
+
+  app.post("/api/library/exchange/offers/:id/messages", async (req, res) => {
+    try {
+      const { senderRole, senderName, body } = req.body || {};
+      const message = await sendOfferMessage({
+        offerId: req.params.id,
+        senderRole: senderRole === "OFFERER" ? "OFFERER" : "OWNER",
+        senderName,
+        body,
+      });
+      res.json(message);
+    } catch (error) {
+      console.error("Send offer message error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to send message." });
     }
   });
 
