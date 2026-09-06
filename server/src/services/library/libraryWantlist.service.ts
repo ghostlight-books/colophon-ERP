@@ -63,6 +63,45 @@ async function findMatchesForItem(item: { isbn: string | null; title: string; au
   });
 }
 
+/**
+ * Called whenever a volume's listingStatus changes to a marketplace-eligible
+ * status (see createLibraryVolume/updateLibraryVolume in
+ * libraryVolume.service.ts). Checks every active wantlist item's existing
+ * match logic against this one volume and notifies on a hit, deduped by
+ * actionUrl so re-saving the same volume doesn't spam repeat notifications.
+ */
+export async function notifyWantlistMatchesForVolume(volume: {
+  id: string;
+  title: string;
+  author: string | null;
+  isbn: string | null;
+  listingStatus: string;
+}): Promise<void> {
+  if (!MARKETPLACE_LISTING_STATUSES.includes(volume.listingStatus)) return;
+
+  const activeItems = await prisma.libraryWantlistItem.findMany({ where: { status: "ACTIVE" } });
+  if (activeItems.length === 0) return;
+
+  const actionUrl = `/library/exchange?volumeId=${volume.id}`;
+  const alreadyNotified = await prisma.libraryNotification.findFirst({ where: { type: "WISHLIST_MATCH", actionUrl } });
+  if (alreadyNotified) return;
+
+  for (const item of activeItems) {
+    const matches = await findMatchesForItem({ isbn: item.isbn, title: item.title, author: item.author });
+    if (!matches.some((m) => m.id === volume.id)) continue;
+
+    await prisma.libraryNotification.create({
+      data: {
+        title: `Wishlist match: "${item.title}"`,
+        detail: `"${volume.title}"${volume.author ? ` by ${volume.author}` : ""} is now available and matches your wishlist item.`,
+        type: "WISHLIST_MATCH",
+        actionUrl,
+      },
+    });
+    return; // one notification per newly-listed volume is enough, even if it matches multiple wantlist items
+  }
+}
+
 export async function listWantlistItems(librarySpaceId?: string) {
   await ensureLibraryTablesExist();
 

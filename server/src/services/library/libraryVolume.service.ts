@@ -6,6 +6,8 @@ import {
   DEWEY_DIVISIONS,
 } from "./libraryClassification.service.js";
 import { ensureLibrarySpacesExist } from "./librarySpace.service.js";
+import { notifyWantlistMatchesForVolume } from "./libraryWantlist.service.js";
+import { checkAndNotifyNewBadges } from "./libraryAchievements.service.js";
 
 export interface CreateLibraryVolumeInput {
   isbn: string;
@@ -189,6 +191,17 @@ export async function ensureLibraryTablesExist(): Promise<void> {
     `);
 
     await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "LibraryBadgeAward" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "badgeId" TEXT NOT NULL,
+        "awardedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "LibraryBadgeAward_badgeId_key" ON "LibraryBadgeAward"("badgeId");
+    `);
+
+    await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "LibraryWantlistItem" (
         "id" TEXT NOT NULL PRIMARY KEY,
         "title" TEXT NOT NULL,
@@ -282,7 +295,7 @@ export async function createLibraryVolume(input: CreateLibraryVolumeInput) {
     if (defaultSpace) librarySpaceId = defaultSpace.id;
   }
 
-  return prisma.libraryVolume.create({
+  const createdVolume = await prisma.libraryVolume.create({
     data: {
       isbn: input.isbn.replace(/[^0-9X]/gi, "").toUpperCase(),
       title: finalTitle,
@@ -329,6 +342,11 @@ export async function createLibraryVolume(input: CreateLibraryVolumeInput) {
       librarySpace: true,
     },
   });
+
+  notifyWantlistMatchesForVolume(createdVolume).catch(() => {});
+  checkAndNotifyNewBadges().catch(() => {});
+
+  return createdVolume;
 }
 
 export async function scanAndIntakeVolume(
@@ -499,11 +517,18 @@ export async function updateLibraryVolume(id: string, data: Partial<CreateLibrar
     }
   }
 
-  return prisma.libraryVolume.update({
+  const updatedVolume = await prisma.libraryVolume.update({
     where: { id },
     data: updatePayload,
     include: { shelfLocation: true },
   });
+
+  if (data.listingStatus !== undefined) {
+    notifyWantlistMatchesForVolume(updatedVolume).catch(() => {});
+  }
+  checkAndNotifyNewBadges().catch(() => {});
+
+  return updatedVolume;
 }
 
 export async function deleteLibraryVolume(id: string) {

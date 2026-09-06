@@ -195,12 +195,17 @@ export async function respondToLibraryOffer(input: RespondOfferInput) {
       ? `counter-offered $${input.counterAmount?.toFixed(2) || ""}`
       : "declined your offer";
 
+  // Accepting a cash/bookstore-buy offer is a completed sale, not just a status change -- surface it distinctly.
+  const isSale = input.action === "ACCEPT" && offer.offerType !== "TRADE";
+
   await prisma.libraryNotification.create({
     data: {
-      title: `Offer Update: "${offer.volume.title}"`,
-      detail: `Owner ${actionLabel} on "${offer.volume.title}".`,
-      type: "OFFER",
-      actionUrl: `/library/exchange`,
+      title: isSale ? `Sold: "${offer.volume.title}"` : `Offer Update: "${offer.volume.title}"`,
+      detail: isSale
+        ? `You accepted ${offer.cashOfferAmount ? `$${offer.cashOfferAmount.toFixed(2)} for` : "an offer on"} "${offer.volume.title}".`
+        : `Owner ${actionLabel} on "${offer.volume.title}".`,
+      type: isSale ? "SALE" : "OFFER",
+      actionUrl: `/library/exchange?offerId=${offer.id}`,
     },
   });
 
