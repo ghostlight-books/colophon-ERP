@@ -127,6 +127,7 @@ export default function LibraryCatalogPage() {
   const [editAskingPrice, setEditAskingPrice] = useState("");
   const [editIsSigned, setEditIsSigned] = useState(false);
   const [editIsFirstEdition, setEditIsFirstEdition] = useState(false);
+  const [editListingStatus, setEditListingStatus] = useState<LibraryVolume["listingStatus"]>("COLLECTION_ONLY");
   const [isEnrichingMetadata, setIsEnrichingMetadata] = useState(false);
 
   // Cover Picker State
@@ -337,6 +338,7 @@ export default function LibraryCatalogPage() {
     setEditAskingPrice(volume.askingPrice ? String(volume.askingPrice) : "");
     setEditIsSigned(Boolean(volume.isSigned));
     setEditIsFirstEdition(Boolean(volume.isFirstEdition));
+    setEditListingStatus(volume.listingStatus || "COLLECTION_ONLY");
     setIsEditing(false);
   };
 
@@ -363,6 +365,7 @@ export default function LibraryCatalogPage() {
         askingPrice: editAskingPrice ? parseFloat(editAskingPrice) : null,
         isSigned: editIsSigned,
         isFirstEdition: editIsFirstEdition,
+        listingStatus: editListingStatus,
       });
       setSelectedVolume(updated);
       setIsEditing(false);
@@ -1608,6 +1611,36 @@ export default function LibraryCatalogPage() {
                       />
                       <span>⭐ First Edition / Printing</span>
                     </label>
+                  </div>
+
+                  {/* 8b. Exchange Listing Status (mutually exclusive -- pick one) */}
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Exchange Listing
+                    </label>
+                    <div className="flex flex-wrap items-center gap-4">
+                      {(
+                        [
+                          { value: "ALLOW_OFFERS", label: "Allow Offers" },
+                          { value: "OPEN_FOR_TRADE", label: "Open to Trade" },
+                          { value: "FOR_SALE", label: "For Sale" },
+                          { value: "COLLECTION_ONLY", label: "Collection Only" },
+                        ] as const
+                      ).map((opt) => (
+                        <label
+                          key={opt.value}
+                          className="flex items-center gap-2 cursor-pointer font-bold select-none text-slate-800 dark:text-slate-200"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={editListingStatus === opt.value}
+                            onChange={() => setEditListingStatus(opt.value)}
+                            className="w-4 h-4 rounded text-indigo-600 cursor-pointer accent-indigo-600"
+                          />
+                          <span>{opt.label}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
 
                   {/* 9. Subjects & Personal Notes */}
