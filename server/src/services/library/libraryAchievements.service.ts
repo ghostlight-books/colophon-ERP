@@ -65,3 +65,46 @@ export async function getLibraryAchievementStats(): Promise<LibraryAchievementSt
     fulfilledWantlistCount,
   };
 }
+
+// Mirrors the badge thresholds in client/src/utils/libraryAchievements.ts --
+// kept here too (not shared via packages/) since this is the one server-side
+// consumer and the two lists are small and stable. If they ever drift, the
+// client copy (with icons/progress labels) is the source of truth for
+// user-facing badge text.
+const BADGE_DEFINITIONS: Array<{ id: string; name: string; isEarned: (stats: LibraryAchievementStats) => boolean }> = [
+  { id: "full-dewey", name: "Full Dewey", isEarned: (s) => s.deweyDivisionsOwned.length >= 10 },
+  { id: "century-club", name: "Century Club", isEarned: (s) => s.totalVolumes >= 100 },
+  { id: "first-find", name: "First Find", isEarned: (s) => s.rareFindsCount >= 1 },
+  { id: "rare-collector", name: "Rare Collector", isEarned: (s) => s.rareFindsCount >= 5 },
+  { id: "fully-classified", name: "Fully Classified", isEarned: (s) => s.classificationPercent >= 100 },
+  { id: "appraiser", name: "Appraiser", isEarned: (s) => s.totalInsuredValue >= 500 },
+  { id: "well-traveled-shelf", name: "Well-Traveled Shelf", isEarned: (s) => s.librarySpacesUsedCount >= 3 },
+  { id: "networker", name: "Networker", isEarned: (s) => s.completedTradesCount >= 1 },
+  { id: "wantlist-wizard", name: "Wantlist Wizard", isEarned: (s) => s.fulfilledWantlistCount >= 3 },
+];
+
+/**
+ * Recomputes badge-earned status and notifies + records an award for any
+ * badge crossed for the first time. Called after catalog changes (the main
+ * driver of badge progress) -- see createLibraryVolume/updateLibraryVolume
+ * in libraryVolume.service.ts. Safe to call repeatedly: awards are recorded
+ * so a badge only ever notifies once.
+ */
+export async function checkAndNotifyNewBadges(): Promise<void> {
+  const stats = await getLibraryAchievementStats();
+  const alreadyAwarded = new Set((await prisma.libraryBadgeAward.findMany({ select: { badgeId: true } })).map((a) => a.badgeId));
+
+  for (const badge of BADGE_DEFINITIONS) {
+    if (alreadyAwarded.has(badge.id) || !badge.isEarned(stats)) continue;
+
+    await prisma.libraryBadgeAward.create({ data: { badgeId: badge.id } });
+    await prisma.libraryNotification.create({
+      data: {
+        title: `Badge earned: ${badge.name}`,
+        detail: `You've unlocked the "${badge.name}" badge on your Collector Level page.`,
+        type: "BADGE",
+        actionUrl: `/library/achievements`,
+      },
+    });
+  }
+}
