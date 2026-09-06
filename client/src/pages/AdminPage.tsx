@@ -29,6 +29,22 @@ function DeploymentStatusCard(): JSX.Element {
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api";
+const ADMIN_KEY_STORAGE = "colophon-admin-master-key";
+
+function getStoredAdminKey(): string {
+  try {
+    return window.localStorage.getItem(ADMIN_KEY_STORAGE) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Headers for every /api/admin request: the dev-subdomain header is a no-op in production
+ *  (the server only honors it outside NODE_ENV=production) and the master key is the real
+ *  gate everywhere else -- see requireSuperAdmin in server/src/middleware/tenantContext.ts. */
+function adminHeaders(): Record<string, string> {
+  return { "X-Dev-Subdomain": "admin", "x-admin-master-key": getStoredAdminKey() };
+}
 const adminSections = [
   ["overview", "Overview", LayoutDashboard],
   ["stores", "Bookstores", Building2],
@@ -63,9 +79,25 @@ function AdminPage(): JSX.Element {
   const [members, setMembers] = useState<StoreMember[]>([]);
   const [memberDraft, setMemberDraft] = useState({ email: "", displayName: "", password: "", role: "ASSOCIATE" });
   const [apiHealth, setApiHealth] = useState<ApiHealth | null>(null);
+  const [authState, setAuthState] = useState<"checking" | "unlocked" | "locked">("checking");
+  const [keyInput, setKeyInput] = useState("");
+  const [authAttempt, setAuthAttempt] = useState(0);
+  const [newStoreDraft, setNewStoreDraft] = useState({ storeName: "", storeSlug: "", email: "", displayName: "", password: "" });
+  const [creatingStore, setCreatingStore] = useState(false);
+
+  function handleUnlock(event: React.FormEvent): void {
+    event.preventDefault();
+    try {
+      window.localStorage.setItem(ADMIN_KEY_STORAGE, keyInput.trim());
+    } catch {
+      // localStorage unavailable -- the key will just need to be re-entered next session.
+    }
+    setAuthState("checking");
+    setAuthAttempt((n) => n + 1);
+  }
 
   async function adminPost(path: string, body: Record<string, unknown>): Promise<void> {
-    const response = await fetch(`${API_BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" }, body: JSON.stringify(body) });
+    const response = await fetch(`${API_BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(body) });
     const payload = (await response.json().catch(() => ({}))) as { error?: string; token?: string };
     if (!response.ok) throw new Error(payload.error ?? "Admin action failed.");
     setActionMessage(payload.token ? "A short-lived impersonation session was created." : "Admin action completed.");
@@ -79,17 +111,25 @@ function AdminPage(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    fetch(`${API_BASE}/admin/stores`, { headers: { "X-Dev-Subdomain": "admin" } })
+    fetch(`${API_BASE}/admin/stores`, { headers: adminHeaders() })
       .then(async (response) => {
+        if (response.status === 401) {
+          setAuthState("locked");
+          throw new Error("Unauthorized");
+        }
         if (!response.ok) throw new Error("Admin API unavailable");
         return (await response.json()) as { stores: AdminStore[] };
       })
-      .then((payload) => { setStores(payload.stores); setMessage("Platform data synced."); })
+      .then((payload) => {
+        setStores(payload.stores);
+        setMessage("Platform data synced.");
+        setAuthState("unlocked");
+      })
       .catch(() => setMessage("Admin API unavailable. Configure the admin subdomain and credentials for live data."));
-  }, []);
+  }, [authAttempt]);
 
   useEffect(() => {
-    fetch(`${API_BASE}/admin/integrations`, { headers: { "X-Dev-Subdomain": "admin" } })
+    fetch(`${API_BASE}/admin/integrations`, { headers: adminHeaders() })
       .then(async (response) => (response.ok ? (await response.json()) as { integrations: GlobalIntegration[] } : { integrations: [] }))
       .then((payload) => setIntegrations(payload.integrations))
       .catch(() => setIntegrations([]));
@@ -109,7 +149,7 @@ function AdminPage(): JSX.Element {
       return;
     }
 
-    fetch(`${API_BASE}/stores/${selectedStoreId}/ecommerce`, { headers: { "X-Dev-Subdomain": "admin" } })
+    fetch(`${API_BASE}/stores/${selectedStoreId}/ecommerce`, { headers: adminHeaders() })
       .then(async (response) => {
         if (!response.ok) {
           setShopifyStatus("No Shopify connection configured.");
@@ -135,16 +175,54 @@ function AdminPage(): JSX.Element {
 
   useEffect(() => {
     if (!selectedStoreId) return;
-    fetch(`${API_BASE}/admin/stores/${selectedStoreId}/members`, { headers: { "X-Dev-Subdomain": "admin" } })
+    fetch(`${API_BASE}/admin/stores/${selectedStoreId}/members`, { headers: adminHeaders() })
       .then(async (response) => response.ok ? (await response.json()) as { members: StoreMember[] } : { members: [] })
       .then((payload) => setMembers(payload.members))
       .catch(() => setMembers([]));
   }, [selectedStoreId]);
 
+  async function createBetaStore(): Promise<void> {
+    const { storeName, storeSlug, email, displayName, password } = newStoreDraft;
+    if (!storeName.trim() || !storeSlug.trim() || !email.trim() || !displayName.trim() || !password) {
+      setActionMessage("Fill in all fields to create a beta store.");
+      return;
+    }
+    setCreatingStore(true);
+    try {
+      // Registration is the normal public signup endpoint -- a beta tester's
+      // account is a real tenant store, not a special-cased admin object.
+      const response = await fetch(`${API_BASE}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          storeName: storeName.trim(),
+          storeSlug: storeSlug.trim().toLowerCase(),
+          email: email.trim(),
+          displayName: displayName.trim(),
+          password,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { store?: { id: string; storeName: string }; error?: string };
+      if (!response.ok || !payload.store) throw new Error(payload.error ?? "Store could not be created.");
+
+      await adminPost("/admin/stores/update-subscription", { storeId: payload.store.id, status: "trial" });
+
+      const refreshed = await fetch(`${API_BASE}/admin/stores`, { headers: adminHeaders() });
+      if (refreshed.ok) setStores(((await refreshed.json()) as { stores: AdminStore[] }).stores);
+
+      setNewStoreDraft({ storeName: "", storeSlug: "", email: "", displayName: "", password: "" });
+      setActionMessage(`Beta store "${payload.store.storeName}" created on the Trial plan. Share the login (${email.trim()}) with your tester.`);
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Store could not be created.");
+    } finally {
+      setCreatingStore(false);
+    }
+  }
+
   async function inviteMember(): Promise<void> {
     if (!selectedStoreId) return;
     try {
-      const response = await fetch(`${API_BASE}/admin/stores/${selectedStoreId}/members`, { method: "POST", headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" }, body: JSON.stringify(memberDraft) });
+      const response = await fetch(`${API_BASE}/admin/stores/${selectedStoreId}/members`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(memberDraft) });
       const payload = (await response.json().catch(() => ({}))) as StoreMember & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Member could not be added.");
       setMembers((current) => [...current, payload]);
@@ -155,7 +233,7 @@ function AdminPage(): JSX.Element {
 
   async function updateMember(member: StoreMember, role: string): Promise<void> {
     try {
-      const response = await fetch(`${API_BASE}/admin/store-members/${member.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" }, body: JSON.stringify({ role }) });
+      const response = await fetch(`${API_BASE}/admin/store-members/${member.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ role }) });
       if (!response.ok) throw new Error("Member role could not be changed.");
       const updated = (await response.json()) as StoreMember;
       setMembers((current) => current.map((item) => item.id === updated.id ? updated : item));
@@ -164,7 +242,7 @@ function AdminPage(): JSX.Element {
 
   async function addIntegration(): Promise<void> {
     try {
-      const response = await fetch(`${API_BASE}/admin/integrations`, { method: "POST", headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" }, body: JSON.stringify({ key: integrationKey, name: integrationName, category: integrationCategory }) });
+      const response = await fetch(`${API_BASE}/admin/integrations`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ key: integrationKey, name: integrationName, category: integrationCategory }) });
       if (!response.ok) throw new Error("Integration could not be added.");
       const integration = (await response.json()) as GlobalIntegration;
       setIntegrations((current) => [...current, integration].sort((left, right) => left.name.localeCompare(right.name)));
@@ -178,7 +256,7 @@ function AdminPage(): JSX.Element {
 
   async function toggleIntegration(integration: GlobalIntegration): Promise<void> {
     try {
-      const response = await fetch(`${API_BASE}/admin/integrations/${integration.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" }, body: JSON.stringify({ enabled: !integration.enabled }) });
+      const response = await fetch(`${API_BASE}/admin/integrations/${integration.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ enabled: !integration.enabled }) });
       if (!response.ok) throw new Error("Integration status could not be changed.");
       setIntegrations((current) => current.map((item) => item.id === integration.id ? { ...item, enabled: !item.enabled } : item));
     } catch (error) {
@@ -195,7 +273,7 @@ function AdminPage(): JSX.Element {
     try {
       const response = await fetch(`${API_BASE}/stores/${selectedStoreId}/ecommerce/shopify`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" },
+        headers: { "Content-Type": "application/json", ...adminHeaders() },
         body: JSON.stringify({
           storeUrl: shopifyConnector.storeUrl,
           config: { accessToken: shopifyConnector.accessToken },
@@ -223,7 +301,7 @@ function AdminPage(): JSX.Element {
     try {
       const response = await fetch(`${API_BASE}/stores/${selectedStoreId}/ecommerce/shopify/inventory-sync`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Dev-Subdomain": "admin" },
+        headers: { "Content-Type": "application/json", ...adminHeaders() },
         body: JSON.stringify({ sku: "BK-9780143127741-USED-GOOD", quantity: 4 }),
       });
       const payload = (await response.json().catch(() => ({}))) as { success?: boolean; message?: string; error?: string };
@@ -243,7 +321,42 @@ function AdminPage(): JSX.Element {
   const totalBalance = stores.reduce((sum, store) => sum + store.ledgerBalance, 0);
   // The legacy JSX panel is declared below this focused workspace expression.
   // @ts-ignore
-  const adminWorkspace = activeSection === "overview" ? null : <main className="min-h-screen bg-[#f1f1f3] p-3 text-slate-800 md:p-5"><div className="mx-auto max-w-[1500px] rounded-[32px] border border-white/80 bg-[linear-gradient(145deg,#ececef_0%,#dfe0e3_100%)] p-4 shadow-[0_20px_50px_rgba(60,70,86,0.16)] md:p-7"><header className="flex flex-wrap items-end justify-between gap-4 border-b border-white/80 pb-6"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-600">Colophon Control Plane</p><h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-700">{adminSections.find(([key]) => key === activeSection)?.[1] ?? "Admin Workspace"}</h1><p className="mt-2 text-sm text-slate-500">Focused controls for the selected platform workspace.</p></div><span className="rounded-full bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white">Super-admin surface</span></header><nav className="mt-5 flex flex-wrap gap-2">{adminSections.map(([key, label, Icon]) => <button key={key} type="button" onClick={() => setActiveSection(key)} className={["flex items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold", activeSection === key ? "bg-[#e9ff63] text-slate-800" : "bg-white/70 text-slate-600"].join(" ")}><Icon size={16} /><span>{label}</span></button>)}</nav><section className="mt-5 grid gap-5">{activeSection === "members" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Site Access</h2><p className="mt-1 text-sm text-slate-500">Add accounts to a bookstore and control their role.</p><div className="mt-4 grid gap-2">{members.map((member) => <div key={member.id} className="flex items-center justify-between rounded-xl bg-white/75 p-3"><span><strong>{member.displayName}</strong><small className="ml-2 text-slate-500">{member.email}</small></span><span className="text-xs font-semibold text-slate-600">{member.role}</span></div>)}</div></SurfaceCard> : null}{activeSection === "overview" ? deploymentPanel : null}{activeSection === "stores" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Bookstores</h2><p className="mt-1 text-sm text-slate-500">Manage tenant status, ownership, and store access.</p><div className="mt-4 grid gap-2">{visibleStores.map((store) => <div key={store.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white/75 p-3"><div><p className="font-semibold">{store.storeName}</p><p className="text-xs text-slate-500">{store.ownerEmail} · {store.slug}</p></div><select value={store.subscriptionStatus} onChange={(event) => void adminPost("/admin/stores/update-subscription", { storeId: store.id, status: event.target.value })} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"><option value="trial">Trial</option><option value="active">Active</option><option value="past_due">Past due</option><option value="cancelled">Cancelled</option></select></div>)}</div></SurfaceCard> : null}{activeSection === "integrations" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Integrations</h2><p className="mt-1 text-sm text-slate-500">Enable platform integrations for tenant bookstores.</p><div className="mt-4 grid gap-2 sm:grid-cols-2">{integrations.map((integration) => <div key={integration.id} className="flex items-center justify-between rounded-xl bg-white/75 p-3"><span className="text-sm font-semibold">{integration.name}</span><button type="button" onClick={() => void toggleIntegration(integration)} className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white">{integration.enabled ? "Enabled" : "Enable"}</button></div>)}</div></SurfaceCard> : null}{activeSection === "ledger" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Ledger</h2><p className="mt-1 text-sm text-slate-500">Review store balances and ledger adjustments.</p><div className="mt-4 grid gap-2">{stores.map((store) => <div key={store.id} className="flex items-center justify-between rounded-xl bg-white/75 p-3"><span className="font-semibold">{store.storeName}</span><span className="text-sm font-semibold">${store.ledgerBalance.toFixed(2)}</span></div>)}</div></SurfaceCard> : null}{activeSection === "network" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Network Orders</h2><p className="mt-1 text-sm text-slate-500">Review shared bookstore orders and disputes.</p><div className="mt-4 rounded-xl bg-white/75 p-4 text-sm text-slate-600">No open network disputes currently require action.</div></SurfaceCard> : null}{activeSection === "health" ? deploymentPanel : null}{activeSection === "settings" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Settings</h2><p className="mt-1 text-sm text-slate-500">Platform configuration and deployment links.</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><a href="https://dashboard.render.com" target="_blank" rel="noreferrer" className="rounded-xl bg-slate-800 px-4 py-3 text-sm font-semibold text-white">Open Render</a><a href="https://dev.shopify.com/dashboard" target="_blank" rel="noreferrer" className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-700">Open Shopify Dev Dashboard</a></div></SurfaceCard> : null}</section></div></main>;
+  const adminWorkspace = activeSection === "overview" ? null : <main className="min-h-screen bg-[#f1f1f3] p-3 text-slate-800 md:p-5"><div className="mx-auto max-w-[1500px] rounded-[32px] border border-white/80 bg-[linear-gradient(145deg,#ececef_0%,#dfe0e3_100%)] p-4 shadow-[0_20px_50px_rgba(60,70,86,0.16)] md:p-7"><header className="flex flex-wrap items-end justify-between gap-4 border-b border-white/80 pb-6"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-600">Colophon Control Plane</p><h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-700">{adminSections.find(([key]) => key === activeSection)?.[1] ?? "Admin Workspace"}</h1><p className="mt-2 text-sm text-slate-500">Focused controls for the selected platform workspace.</p></div><span className="rounded-full bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white">Super-admin surface</span></header><nav className="mt-5 flex flex-wrap gap-2">{adminSections.map(([key, label, Icon]) => <button key={key} type="button" onClick={() => setActiveSection(key)} className={["flex items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold", activeSection === key ? "bg-[#e9ff63] text-slate-800" : "bg-white/70 text-slate-600"].join(" ")}><Icon size={16} /><span>{label}</span></button>)}</nav><section className="mt-5 grid gap-5">{activeSection === "members" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Site Access</h2><p className="mt-1 text-sm text-slate-500">Add accounts to a bookstore and control their role.</p><div className="mt-4 grid gap-2">{members.map((member) => <div key={member.id} className="flex items-center justify-between rounded-xl bg-white/75 p-3"><span><strong>{member.displayName}</strong><small className="ml-2 text-slate-500">{member.email}</small></span><span className="text-xs font-semibold text-slate-600">{member.role}</span></div>)}</div></SurfaceCard> : null}{activeSection === "overview" ? deploymentPanel : null}{activeSection === "stores" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Bookstores</h2><p className="mt-1 text-sm text-slate-500">Manage tenant status, ownership, and store access.</p><div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 p-4"><h3 className="text-sm font-semibold text-slate-700">Create a Beta Test Store</h3><p className="mt-1 text-xs text-slate-500">Creates a real, separate tenant on the Trial plan -- its own login, own library. Exchange/Marketplace listings are shared across every tenant, so it can be tested exactly as designed.</p><div className="mt-3 grid gap-2 lg:grid-cols-5"><input value={newStoreDraft.storeName} onChange={(event) => setNewStoreDraft((current) => ({ ...current, storeName: event.target.value }))} placeholder="Store/Library name" aria-label="New store name" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><input value={newStoreDraft.storeSlug} onChange={(event) => setNewStoreDraft((current) => ({ ...current, storeSlug: event.target.value }))} placeholder="slug" aria-label="New store slug" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><input value={newStoreDraft.displayName} onChange={(event) => setNewStoreDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Tester's name" aria-label="New store owner name" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><input value={newStoreDraft.email} onChange={(event) => setNewStoreDraft((current) => ({ ...current, email: event.target.value }))} placeholder="Tester's email" aria-label="New store owner email" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><input type="password" value={newStoreDraft.password} onChange={(event) => setNewStoreDraft((current) => ({ ...current, password: event.target.value }))} placeholder="Temporary password" aria-label="New store owner password" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /></div><button type="button" onClick={() => void createBetaStore()} disabled={creatingStore} className="mt-3 h-10 rounded-xl bg-slate-800 px-4 text-sm font-semibold text-white disabled:opacity-50">{creatingStore ? "Creating..." : "Create Beta Store"}</button></div><div className="mt-4 grid gap-2">{visibleStores.map((store) => <div key={store.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white/75 p-3"><div><p className="font-semibold">{store.storeName}</p><p className="text-xs text-slate-500">{store.ownerEmail} · {store.slug}</p></div><select value={store.subscriptionStatus} onChange={(event) => void adminPost("/admin/stores/update-subscription", { storeId: store.id, status: event.target.value })} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"><option value="trial">Trial</option><option value="active">Active</option><option value="past_due">Past due</option><option value="cancelled">Cancelled</option></select></div>)}</div></SurfaceCard> : null}{activeSection === "integrations" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Integrations</h2><p className="mt-1 text-sm text-slate-500">Enable platform integrations for tenant bookstores.</p><div className="mt-4 grid gap-2 sm:grid-cols-2">{integrations.map((integration) => <div key={integration.id} className="flex items-center justify-between rounded-xl bg-white/75 p-3"><span className="text-sm font-semibold">{integration.name}</span><button type="button" onClick={() => void toggleIntegration(integration)} className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white">{integration.enabled ? "Enabled" : "Enable"}</button></div>)}</div></SurfaceCard> : null}{activeSection === "ledger" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Ledger</h2><p className="mt-1 text-sm text-slate-500">Review store balances and ledger adjustments.</p><div className="mt-4 grid gap-2">{stores.map((store) => <div key={store.id} className="flex items-center justify-between rounded-xl bg-white/75 p-3"><span className="font-semibold">{store.storeName}</span><span className="text-sm font-semibold">${store.ledgerBalance.toFixed(2)}</span></div>)}</div></SurfaceCard> : null}{activeSection === "network" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Network Orders</h2><p className="mt-1 text-sm text-slate-500">Review shared bookstore orders and disputes.</p><div className="mt-4 rounded-xl bg-white/75 p-4 text-sm text-slate-600">No open network disputes currently require action.</div></SurfaceCard> : null}{activeSection === "health" ? deploymentPanel : null}{activeSection === "settings" ? <SurfaceCard className="p-5"><h2 className="text-xl font-semibold">Settings</h2><p className="mt-1 text-sm text-slate-500">Platform configuration and deployment links.</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><a href="https://dashboard.render.com" target="_blank" rel="noreferrer" className="rounded-xl bg-slate-800 px-4 py-3 text-sm font-semibold text-white">Open Render</a><a href="https://dev.shopify.com/dashboard" target="_blank" rel="noreferrer" className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-700">Open Shopify Dev Dashboard</a></div></SurfaceCard> : null}</section></div></main>;
+
+  if (authState !== "unlocked") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f1f1f3] p-4">
+        <SurfaceCard className="w-full max-w-sm p-6">
+          <h1 className="text-lg font-semibold text-slate-800">Colophon Admin</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {authState === "checking" ? "Checking access..." : "Enter the admin master key to continue."}
+          </p>
+          <form onSubmit={handleUnlock} className="mt-4 space-y-3">
+            <input
+              type="password"
+              value={keyInput}
+              onChange={(event) => setKeyInput(event.target.value)}
+              placeholder="Admin master key"
+              autoFocus
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={!keyInput.trim() || authState === "checking"}
+              className="h-11 w-full rounded-xl bg-slate-800 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Unlock
+            </button>
+          </form>
+          {authState === "locked" && (
+            <p className="mt-3 text-xs text-rose-600">
+              That key wasn't accepted. It's stored in Render's API service environment variables as ADMIN_MASTER_KEY.
+            </p>
+          )}
+        </SurfaceCard>
+      </main>
+    );
+  }
 
   if (adminWorkspace) return adminWorkspace;
   const accessPanel = <SurfaceCard className="mt-5 p-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-xl font-semibold">Site Access</h2><p className="mt-1 text-sm text-slate-500">Add accounts to a bookstore and control their role.</p></div><select value={selectedStoreId} onChange={(event) => setSelectedStoreId(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Select a bookstore</option>{stores.map((store) => <option key={store.id} value={store.id}>{store.storeName}</option>)}</select></div><div className="mt-4 grid gap-2 lg:grid-cols-[1fr_1fr_1fr_140px_auto]"><input value={memberDraft.displayName} onChange={(event) => setMemberDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Name" aria-label="New member name" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><input value={memberDraft.email} onChange={(event) => setMemberDraft((current) => ({ ...current, email: event.target.value }))} placeholder="Email" aria-label="New member email" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><input type="password" value={memberDraft.password} onChange={(event) => setMemberDraft((current) => ({ ...current, password: event.target.value }))} placeholder="Temporary password" aria-label="New member password" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><select value={memberDraft.role} onChange={(event) => setMemberDraft((current) => ({ ...current, role: event.target.value }))} aria-label="New member role" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="CASHIER">Cashier</option><option value="VIEWER">Viewer</option><option value="MANAGER">Manager</option><option value="ADMIN">Admin</option></select><button type="button" onClick={() => void inviteMember()} className="h-10 rounded-xl bg-slate-800 px-4 text-sm font-semibold text-white">Add account</button></div><div className="mt-4 grid gap-2">{members.map((member) => <div key={member.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5"><div><p className="text-sm font-semibold text-slate-700">{member.displayName}</p><p className="text-xs text-slate-500">{member.email} · {member.isActive ? "Active" : "Inactive"}</p></div><select value={member.role} onChange={(event) => void updateMember(member, event.target.value)} aria-label={`Role for ${member.displayName}`} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs"><option value="CASHIER">Cashier</option><option value="VIEWER">Viewer</option><option value="MANAGER">Manager</option><option value="ADMIN">Admin</option></select></div>)}</div></SurfaceCard>;
