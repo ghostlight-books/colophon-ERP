@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { BookOpen, CheckCircle2, Clock, Wallet } from "lucide-react";
 import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
 import { useLibrarySpace } from "../../context/LibrarySpaceContext";
 import {
@@ -24,6 +25,25 @@ const CATEGORY_PILLS = [
   { label: "Science & Tech", dewey: "5" },
   { label: "Social Science", dewey: "3" },
 ];
+
+// One color per Dewey division (000-900) so category breakdowns and pills
+// read as distinct subjects at a glance instead of a uniform gray/indigo list.
+const DEWEY_COLORS: Record<string, { dot: string; bar: string; text: string; pill: string }> = {
+  "0": { dot: "bg-slate-500", bar: "bg-slate-500", text: "text-slate-600 dark:text-slate-400", pill: "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700" },
+  "1": { dot: "bg-purple-500", bar: "bg-purple-500", text: "text-purple-600 dark:text-purple-400", pill: "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800" },
+  "2": { dot: "bg-amber-500", bar: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", pill: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800" },
+  "3": { dot: "bg-blue-500", bar: "bg-blue-500", text: "text-blue-600 dark:text-blue-400", pill: "bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-800" },
+  "4": { dot: "bg-teal-500", bar: "bg-teal-500", text: "text-teal-600 dark:text-teal-400", pill: "bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-300 dark:border-teal-800" },
+  "5": { dot: "bg-emerald-500", bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", pill: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800" },
+  "6": { dot: "bg-cyan-500", bar: "bg-cyan-500", text: "text-cyan-600 dark:text-cyan-400", pill: "bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 border-cyan-300 dark:border-cyan-800" },
+  "7": { dot: "bg-pink-500", bar: "bg-pink-500", text: "text-pink-600 dark:text-pink-400", pill: "bg-pink-50 dark:bg-pink-950/40 text-pink-700 dark:text-pink-300 border-pink-300 dark:border-pink-800" },
+  "8": { dot: "bg-rose-500", bar: "bg-rose-500", text: "text-rose-600 dark:text-rose-400", pill: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800" },
+  "9": { dot: "bg-orange-500", bar: "bg-orange-500", text: "text-orange-600 dark:text-orange-400", pill: "bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border-orange-300 dark:border-orange-800" },
+};
+
+function deweyColor(key: string) {
+  return DEWEY_COLORS[key] ?? DEWEY_COLORS["0"];
+}
 
 export default function LibraryDashboardPage() {
   const navigate = useNavigate();
@@ -201,10 +221,13 @@ export default function LibraryDashboardPage() {
       {/* 2. Total Books, Total Value & Primary Stat Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {/* Card 1: Total Volumes */}
-        <div className="p-4 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-1">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-            Total Books
-          </p>
+        <div className="p-4 bg-white dark:bg-indigo-950/30 rounded-3xl border border-indigo-200 dark:border-indigo-800 shadow-xs space-y-1">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+              Total Books
+            </p>
+            <BookOpen size={14} className="text-indigo-500 dark:text-indigo-400" />
+          </div>
           <p className="text-2xl font-semibold text-slate-900 dark:text-white">
             {totalBooks}
           </p>
@@ -214,10 +237,13 @@ export default function LibraryDashboardPage() {
         </div>
 
         {/* Card 2: Total Replacement Value */}
-        <div className="p-4 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-1">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-            Total Value
-          </p>
+        <div className="p-4 bg-white dark:bg-emerald-950/30 rounded-3xl border border-emerald-200 dark:border-emerald-800 shadow-xs space-y-1">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+              Total Value
+            </p>
+            <Wallet size={14} className="text-emerald-500 dark:text-emerald-400" />
+          </div>
           <p className="text-2xl font-semibold text-emerald-700 dark:text-emerald-400">
             {formatCurrency(totalValue)}
           </p>
@@ -227,11 +253,14 @@ export default function LibraryDashboardPage() {
         </div>
 
         {/* Card 3: % Read Completed */}
-        <div className="p-4 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-1">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-            % Read
-          </p>
-          <p className="text-2xl font-semibold text-slate-900 dark:text-indigo-400">
+        <div className="p-4 bg-white dark:bg-purple-950/30 rounded-3xl border border-purple-200 dark:border-purple-800 shadow-xs space-y-1">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wider">
+              % Read
+            </p>
+            <CheckCircle2 size={14} className="text-purple-500 dark:text-purple-400" />
+          </div>
+          <p className="text-2xl font-semibold text-slate-900 dark:text-purple-400">
             {readingStats.readPercentage}%
           </p>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
@@ -240,10 +269,13 @@ export default function LibraryDashboardPage() {
         </div>
 
         {/* Card 4: Reading / In Progress */}
-        <div className="p-4 bg-[#f1f5f9] dark:bg-slate-800 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-xs space-y-1">
-          <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-            Reading Now
-          </p>
+        <div className="p-4 bg-white dark:bg-sky-950/30 rounded-3xl border border-sky-200 dark:border-sky-800 shadow-xs space-y-1">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-medium text-sky-600 dark:text-sky-400 uppercase tracking-wider">
+              Reading Now
+            </p>
+            <Clock size={14} className="text-sky-500 dark:text-sky-400" />
+          </div>
           <p className="text-2xl font-semibold text-slate-900 dark:text-sky-400">
             {readingStats.reading}
           </p>
@@ -376,40 +408,44 @@ export default function LibraryDashboardPage() {
           </p>
         ) : (
           <div className="space-y-2">
-            {categoryReport.map((cat, idx) => (
-              <div
-                key={cat.key}
-                onClick={() => navigate(`/library/catalog?dewey=${cat.key}`)}
-                className="group cursor-pointer space-y-1.5 p-2 rounded-xl hover:bg-white/80 dark:hover:bg-slate-700/50 transition"
-              >
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-medium text-slate-400 w-4">
-                      #{idx + 1}
-                    </span>
-                    <span className="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
-                      {cat.label}
-                    </span>
+            {categoryReport.map((cat, idx) => {
+              const color = deweyColor(cat.key);
+              return (
+                <div
+                  key={cat.key}
+                  onClick={() => navigate(`/library/catalog?dewey=${cat.key}`)}
+                  className="group cursor-pointer space-y-1.5 p-2 rounded-xl hover:bg-white/80 dark:hover:bg-slate-700/50 transition"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-medium text-slate-400 w-4">
+                        #{idx + 1}
+                      </span>
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${color.dot}`} />
+                      <span className="font-medium text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition">
+                        {cat.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-normal text-slate-500 dark:text-slate-400">
+                        {cat.count} {cat.count === 1 ? "book" : "books"}
+                      </span>
+                      <span className={`font-semibold w-10 text-right ${color.text}`}>
+                        {cat.percentage}%
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-normal text-slate-500 dark:text-slate-400">
-                      {cat.count} {cat.count === 1 ? "book" : "books"}
-                    </span>
-                    <span className="font-semibold text-slate-800 dark:text-indigo-400 w-10 text-right">
-                      {cat.percentage}%
-                    </span>
-                  </div>
-                </div>
 
-                {/* Proportional Progress Bar */}
-                <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                  <div
-                    style={{ width: `${Math.max(cat.percentage, 4)}%` }}
-                    className="h-full bg-slate-600 dark:bg-indigo-500 rounded-full transition-all duration-300"
-                  />
+                  {/* Proportional Progress Bar */}
+                  <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      style={{ width: `${Math.max(cat.percentage, 4)}%` }}
+                      className={`h-full rounded-full transition-all duration-300 ${color.bar}`}
+                    />
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -434,7 +470,7 @@ export default function LibraryDashboardPage() {
             key={pill.label}
             type="button"
             onClick={() => navigate(`/library/catalog?dewey=${pill.dewey}`)}
-            className="px-4 py-1.5 rounded-full text-xs font-medium tracking-tight shrink-0 shadow-2xs transition active:scale-95 cursor-pointer bg-[#e2e8f0] hover:bg-[#cbd5e1] dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700"
+            className={`px-4 py-1.5 rounded-full text-xs font-medium tracking-tight shrink-0 shadow-2xs transition active:scale-95 cursor-pointer border hover:brightness-95 dark:hover:brightness-125 ${deweyColor(pill.dewey).pill}`}
           >
             {pill.label}
           </button>
