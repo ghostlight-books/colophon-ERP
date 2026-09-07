@@ -152,6 +152,8 @@ model Store {
   ownerEmail         String
   ledgerBalance      Float               @default(0)
   subscriptionStatus String              @default("trial")
+  hasStoreAccess     Boolean             @default(true)
+  hasLibraryAccess   Boolean             @default(true)
   processorType      String              @default("manual_terminal")
   processorConfigJson String?
   createdAt          DateTime            @default(now())

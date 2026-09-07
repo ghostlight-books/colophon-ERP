@@ -607,6 +607,25 @@ export function createApp(): express.Express {
     }
   });
 
+  // Store product tier: "STORE" (Bookstore ERP, which bundles Library) or
+  // "LIBRARY_ONLY" (no Bookstore access at all).
+  app.post("/api/admin/stores/update-access", async (req, res, next) => {
+    try {
+      const { storeId, tier } = req.body as { storeId?: string; tier?: string };
+      if (!storeId || !["STORE", "LIBRARY_ONLY"].includes(tier ?? "")) {
+        res.status(400).json({ error: "storeId and a valid tier (STORE or LIBRARY_ONLY) are required." });
+        return;
+      }
+      const store = await prisma.store.update({
+        where: { id: storeId },
+        data: tier === "LIBRARY_ONLY" ? { hasStoreAccess: false, hasLibraryAccess: true } : { hasStoreAccess: true, hasLibraryAccess: true },
+      });
+      res.json({ success: true, storeId: store.id, hasStoreAccess: store.hasStoreAccess, hasLibraryAccess: store.hasLibraryAccess });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/admin/stores/:storeId/members", async (req, res, next) => {
     try {
       const members = await prisma.storeMembership.findMany({ where: { storeId: req.params.storeId }, include: { user: { select: { id: true, email: true, displayName: true, isActive: true } } }, orderBy: { createdAt: "asc" } });
