@@ -389,11 +389,14 @@ export default function CameraBarcodeScanner({
     }
   };
 
-  // Capture video frame and identify book by cover image
-  const handleIdentifyCover = async (imageOverrideBase64?: string) => {
+  // Capture video frame and identify book by cover image. `silent` is used by
+  // the automatic background loop (see effect below) so a frame with no book
+  // in view doesn't flash an alarming error every cycle -- failures are only
+  // surfaced when the user explicitly taps "Scan Now".
+  const handleIdentifyCover = async (imageOverrideBase64?: string, silent = false) => {
     if (isRecognizingCover) return;
     setIsRecognizingCover(true);
-    setOcrStatusText("Analyzing cover image & catalog matching…");
+    if (!silent) setOcrStatusText("Analyzing cover image & catalog matching…");
     setCoverMatches([]);
 
     try {
@@ -402,7 +405,7 @@ export default function CameraBarcodeScanner({
       if (!base64Payload) {
         const video = videoRef.current;
         if (!video || video.readyState < 2) {
-          setOcrStatusText("Camera preview not ready. Please try again.");
+          if (!silent) setOcrStatusText("Camera preview not ready. Please try again.");
           setIsRecognizingCover(false);
           return;
         }
@@ -440,16 +443,33 @@ export default function CameraBarcodeScanner({
         if (continuous && result.topMatch && result.topMatch.isbn && result.topMatch.isbn.length >= 8) {
           void onScan(result.topMatch.isbn);
         }
-      } else {
+      } else if (!silent) {
         setOcrStatusText(result.error || "No matching book found. Try holding the cover under better light.");
       }
     } catch (err) {
       console.warn("Cover identification error:", err);
-      setOcrStatusText(err instanceof Error ? err.message : "Visual cover identification failed.");
+      if (!silent) setOcrStatusText(err instanceof Error ? err.message : "Visual cover identification failed.");
     } finally {
       setIsRecognizingCover(false);
     }
   };
+
+  // Automatically attempt cover/ISBN-text identification every few seconds
+  // while that mode is active, so the user never has to tap a button --
+  // mirrors how barcode mode continuously decodes every frame.
+  useEffect(() => {
+    if (scanMode !== "cover" && scanMode !== "ocr") return;
+    if (isInitializing || errorMessage) return;
+
+    const interval = setInterval(() => {
+      if (!isRecognizingCover && coverMatches.length === 0) {
+        void handleIdentifyCover(undefined, true);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanMode, isInitializing, errorMessage, isRecognizingCover, coverMatches.length]);
 
   // Upload an image file from disk / photo album
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -513,7 +533,7 @@ export default function CameraBarcodeScanner({
             onClick={() => {
               setScanMode("cover");
               setCoverMatches([]);
-              setOcrStatusText("Aim camera at front cover artwork & tap Snap");
+              setOcrStatusText("Aim camera at front cover artwork -- detecting automatically");
             }}
             className={`px-3 py-1 rounded-lg transition cursor-pointer font-medium flex items-center gap-1.5 ${
               scanMode === "cover"
@@ -530,7 +550,7 @@ export default function CameraBarcodeScanner({
             onClick={() => {
               setScanMode("ocr");
               setCoverMatches([]);
-              setOcrStatusText("Aim at printed ISBN text on copyright page & tap Snap");
+              setOcrStatusText("Aim at printed ISBN text on copyright page -- detecting automatically");
             }}
             className={`px-3 py-1 rounded-lg transition cursor-pointer font-medium flex items-center gap-1.5 ${
               scanMode === "ocr"
@@ -637,9 +657,9 @@ export default function CameraBarcodeScanner({
 
             <p className="mt-3 text-[11px] font-medium text-slate-200 bg-slate-950/75 px-3 py-1 rounded-full backdrop-blur-xs shadow-md">
               {scanMode === "cover"
-                ? "Align book cover artwork inside frame & tap Snap"
+                ? "Align book cover artwork inside frame · Scanning automatically"
                 : scanMode === "ocr"
-                ? "Align printed ISBN text & tap Snap"
+                ? "Align printed ISBN text · Scanning automatically"
                 : "Continuous autofocus active · Tap screen to refocus"}
             </p>
           </div>
@@ -689,12 +709,12 @@ export default function CameraBarcodeScanner({
               {isRecognizingCover ? (
                 <>
                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Identifying Book Cover…</span>
+                  <span>Scanning…</span>
                 </>
               ) : (
                 <>
                   <span>📸</span>
-                  <span>{scanMode === "cover" ? "Snap & Identify Cover" : "Snap & Read ISBN"}</span>
+                  <span>Scan Now</span>
                 </>
               )}
             </button>

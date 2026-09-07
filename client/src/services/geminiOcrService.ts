@@ -1,4 +1,4 @@
-const GEMINI_MODEL = "gemini-1.5-flash";
+const GEMINI_MODEL = "gemini-3.6-flash";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const TRANSCRIBE_PROMPT = `Transcribe all readable body text from this photo of a book or document page, exactly as printed, preserving paragraph breaks. Ignore page headers, footers, and running heads unless they are the only text visible. Output only the transcribed text -- no commentary, no markdown, no quotation marks around it.`;

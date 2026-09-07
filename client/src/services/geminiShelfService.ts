@@ -1,6 +1,6 @@
 import type { BindingFormat, DetectedSpine, SpineBoundingBox } from "../types/shelfScanner";
 
-const GEMINI_MODEL = "gemini-1.5-flash";
+const GEMINI_MODEL = "gemini-3.6-flash";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const MAX_DIMENSION = 1920;
 const JPEG_QUALITY = 0.85;
