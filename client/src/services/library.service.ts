@@ -300,7 +300,14 @@ async function fetchWithTimeout(url: string, options?: RequestInit): Promise<Res
 
     const res = await fetch(url, { ...options, headers, signal: controller.signal });
 
-    if (res.status === 401) {
+    // The admin portal (/admin) uses its own separate master-key auth, not a
+    // login-derived bearer token. LibrarySpaceProvider fetches library data
+    // on every page (including /admin) regardless of route, so a 401 there
+    // is expected noise -- it must not clear a real session or bounce the
+    // admin off their own page.
+    const onAdminPortal = typeof window !== "undefined" && window.location.pathname.startsWith("/admin");
+
+    if (res.status === 401 && !onAdminPortal) {
       try {
         localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
         localStorage.removeItem("colophon-current-user");
