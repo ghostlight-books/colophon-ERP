@@ -226,7 +226,6 @@ function App(): JSX.Element {
               {/* Colophon Library Edition Routes */}
               <Route path="library" element={<LibraryDashboardPage />} />
               <Route path="library/scan" element={<LibraryScannerPage />} />
-              <Route path="library/quick-scan" element={<LibraryQuickScanPage />} />
               <Route path="library/catalog" element={<LibraryCatalogPage />} />
               <Route path="library/shelves" element={<LibraryShelvesPage />} />
               <Route path="library/exchange" element={<LibraryExchangePage />} />

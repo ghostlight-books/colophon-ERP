@@ -349,7 +349,7 @@ export default function LibraryShelvesPage() {
                   </p>
                 </div>
                 <Link
-                  to="/library/quick-scan"
+                  to={`/library/quick-scan?shelfId=${encodeURIComponent(selectedShelf.id)}`}
                   className="px-3 py-1.5 bg-white dark:bg-slate-700 hover:bg-slate-100 text-slate-800 dark:text-slate-200 font-medium text-xs rounded-xl border border-slate-300 dark:border-slate-600 shadow-2xs transition"
                 >
                   + Scan into Shelf

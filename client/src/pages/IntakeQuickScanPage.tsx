@@ -132,6 +132,12 @@ export default function IntakeQuickScanPage() {
   const [scanSessions, setScanSessions] = useState<ScanSession[]>(readScanSessions);
   const [currentSessionId] = useState(() => `INTAKE-${Date.now()}`);
 
+  // Covers that failed to load client-side (e.g. hotlink-protected sources
+  // that verify fine server-side but 403 for a browser <img> request) --
+  // fall back to the placeholder instead of a broken-image icon.
+  const [failedCoverIsbns, setFailedCoverIsbns] = useState<Set<string>>(new Set());
+  const markCoverFailed = (isbn: string) => setFailedCoverIsbns((prev) => new Set(prev).add(isbn));
+
   useEffect(() => {
     window.localStorage.setItem("colophon-scan-sessions", JSON.stringify(scanSessions));
   }, [scanSessions]);
@@ -285,6 +291,7 @@ export default function IntakeQuickScanPage() {
           onScan={handleProcessIsbn}
           continuous={batchMode}
           className="w-full h-full max-h-none rounded-none border-none"
+          hideManualInput
         />
 
         {/* Processing Spinner Overlay */}
@@ -301,8 +308,13 @@ export default function IntakeQuickScanPage() {
           return (
             <div className={`absolute top-4 left-4 right-4 z-20 p-3 rounded-2xl border-2 ${tote.border} bg-slate-950/95 backdrop-blur-md shadow-xl flex items-center gap-3 animate-slideDown`}>
               <div className="w-12 h-16 rounded-lg overflow-hidden shrink-0 border border-slate-700 bg-slate-800 flex items-center justify-center">
-                {lastScannedBook.coverUrl ? (
-                  <img src={lastScannedBook.coverUrl} alt="" className="w-full h-full object-cover" />
+                {lastScannedBook.coverUrl && !failedCoverIsbns.has(lastScannedBook.isbn) ? (
+                  <img
+                    src={lastScannedBook.coverUrl}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    onError={() => markCoverFailed(lastScannedBook.isbn)}
+                  />
                 ) : (
                   <span className="text-xl">📖</span>
                 )}
@@ -378,8 +390,13 @@ export default function IntakeQuickScanPage() {
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-10 h-14 bg-slate-800 rounded-lg overflow-hidden shrink-0 border border-slate-700 flex items-center justify-center">
-                      {book.coverUrl ? (
-                        <img src={book.coverUrl} alt="" className="w-full h-full object-cover" />
+                      {book.coverUrl && !failedCoverIsbns.has(book.isbn) ? (
+                        <img
+                          src={book.coverUrl}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          onError={() => markCoverFailed(book.isbn)}
+                        />
                       ) : (
                         <span>📖</span>
                       )}

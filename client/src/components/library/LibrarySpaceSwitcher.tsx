@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLibrarySpace } from "../../context/LibrarySpaceContext";
 import type { LibrarySpace } from "../../services/library.service";
 
@@ -28,9 +29,26 @@ export default function LibrarySpaceSwitcher() {
     deleteSpace,
   } = useLibrarySpace();
 
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [editingSpace, setEditingSpace] = useState<LibrarySpace | null>(null);
+
+  // Computed fresh every open so it accounts for the trigger's actual
+  // position -- the popover is portaled to <body> (see render below) so it
+  // isn't clipped/mispositioned by an ancestor with backdrop-filter/transform
+  // (e.g. the Quick Scan screen's blurred header), which otherwise creates a
+  // new containing block for fixed-position descendants.
+  const toggleOpen = () => {
+    if (!isOpen && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const width = Math.min(384, window.innerWidth - 32);
+      const left = Math.min(Math.max(16, rect.left), window.innerWidth - width - 16);
+      setDropdownPos({ top: rect.bottom + 8, left, width });
+    }
+    setIsOpen((prev) => !prev);
+  };
 
   // Form State
   const [name, setName] = useState("");
@@ -128,8 +146,9 @@ export default function LibrarySpaceSwitcher() {
     <div className="relative inline-block text-left font-sans">
       {/* Active Library Pill Button */}
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={toggleOpen}
         className="flex items-center gap-2.5 px-3 py-1.5 bg-[#e8eef5] hover:bg-[#dce4ee] dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 rounded-xl shadow-2xs transition cursor-pointer text-xs group"
       >
         <span
@@ -149,11 +168,15 @@ export default function LibrarySpaceSwitcher() {
         </div>
       </button>
 
-      {/* Switcher Dropdown Popover */}
-      {isOpen && (
+      {/* Switcher Dropdown Popover -- portaled to <body> so it can't be
+          clipped/mispositioned by an ancestor establishing a new containing
+          block (e.g. a header with backdrop-filter). */}
+      {isOpen && dropdownPos && createPortal(
         <>
           <div className="fixed inset-0 z-[9990]" onClick={() => setIsOpen(false)} />
-          <div className="absolute left-0 mt-2 w-80 sm:w-96 max-w-[calc(100vw-2rem)] bg-[#f1f5f9] dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-300 dark:border-slate-800 z-[9999] overflow-hidden animate-scaleUp p-3.5 space-y-3">
+          <div
+            style={{ position: "fixed", top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
+            className="bg-[#f1f5f9] dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-300 dark:border-slate-800 z-[9999] overflow-hidden animate-scaleUp p-3.5 space-y-3">
             <div className="flex items-center justify-between px-1 pb-2 border-b border-slate-200 dark:border-slate-800">
               <div>
                 <h3 className="text-xs font-semibold text-slate-800 dark:text-white uppercase tracking-wider">Your Libraries & Spaces</h3>
@@ -261,11 +284,12 @@ export default function LibrarySpaceSwitcher() {
               })}
             </div>
           </div>
-        </>
+        </>,
+        document.body
       )}
 
-      {/* Create / Edit Modal */}
-      {isCreating && (
+      {/* Create / Edit Modal -- also portaled to <body> for the same reason. */}
+      {isCreating && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4">
           <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm animate-fadeIn" onClick={() => setIsCreating(false)} />
           <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 z-10 animate-scaleUp space-y-4">
@@ -363,7 +387,8 @@ export default function LibrarySpaceSwitcher() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

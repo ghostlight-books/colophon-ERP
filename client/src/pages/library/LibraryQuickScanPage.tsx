@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
 import CameraBarcodeScanner from "../../components/common/CameraBarcodeScanner";
 import { useLibrarySpace } from "../../context/LibrarySpaceContext";
@@ -47,6 +47,7 @@ function triggerHapticSuccess() {
 
 export default function LibraryQuickScanPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { activeSpace, activeSpaceId } = useLibrarySpace();
 
   // Continuous Batch Mode
@@ -70,8 +71,21 @@ export default function LibraryQuickScanPage() {
   const [shelves, setShelves] = useState<LibraryShelfLocation[]>([]);
   const [selectedShelfId, setSelectedShelfId] = useState<string>("");
 
+  // Covers that failed to load client-side (e.g. hotlink-protected sources
+  // that verify fine server-side but 403 for a browser <img> request) --
+  // fall back to the placeholder instead of a broken-image icon.
+  const [failedCoverIds, setFailedCoverIds] = useState<Set<string>>(new Set());
+  const markCoverFailed = (id: string) => setFailedCoverIds((prev) => new Set(prev).add(id));
+
   useEffect(() => {
-    void fetchShelves().then(setShelves);
+    void fetchShelves().then((fetched) => {
+      setShelves(fetched);
+      const shelfIdFromLink = searchParams.get("shelfId");
+      if (shelfIdFromLink && fetched.some((s) => s.id === shelfIdFromLink)) {
+        setSelectedShelfId(shelfIdFromLink);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Process and Intake ISBN
@@ -211,12 +225,31 @@ export default function LibraryQuickScanPage() {
         </div>
       </header>
 
+      {/* Shelf Assignment Bar -- every scan on this screen is saved with
+          whatever shelf is selected here (or unassigned if none). */}
+      <div className="px-3.5 py-2 bg-slate-950/70 backdrop-blur-xl border-b border-slate-800/80 flex items-center gap-2 z-30 shrink-0">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0">🗄️ Shelf</span>
+        <select
+          value={selectedShelfId}
+          onChange={(e) => setSelectedShelfId(e.target.value)}
+          className="flex-1 min-w-0 bg-slate-800 border border-slate-700 text-white rounded-lg px-2 py-1 text-[11px] font-bold focus:outline-none focus:border-indigo-500"
+        >
+          <option value="">No shelf assigned</option>
+          {shelves.map((shelf) => (
+            <option key={shelf.id} value={shelf.id}>
+              {shelf.fullLocationLabel} ({shelf.volumeCount ?? 0} books)
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* 2. Main Full-Screen Viewfinder Area */}
       <main className="relative flex-1 flex flex-col items-center justify-center overflow-hidden bg-black">
         <CameraBarcodeScanner
           onScan={handleProcessIsbn}
           continuous={batchMode}
           className="w-full h-full max-h-none rounded-none border-none"
+          hideManualInput
         />
 
         {/* Processing Spinner Overlay */}
@@ -231,8 +264,13 @@ export default function LibraryQuickScanPage() {
         {scannedVolume && (
           <div className="absolute top-4 left-4 right-4 z-20 p-3 rounded-2xl border-2 border-indigo-400/60 bg-slate-950/95 backdrop-blur-md shadow-xl flex items-center gap-3 animate-slideDown">
             <div className="w-12 h-16 rounded-lg overflow-hidden shrink-0 border border-slate-700 bg-slate-800 flex items-center justify-center">
-              {scannedVolume.coverUrl ? (
-                <img src={scannedVolume.coverUrl} alt="" className="w-full h-full object-cover" />
+              {scannedVolume.coverUrl && !failedCoverIds.has(scannedVolume.id) ? (
+                <img
+                  src={scannedVolume.coverUrl}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  onError={() => markCoverFailed(scannedVolume.id)}
+                />
               ) : (
                 <span className="text-xl">📖</span>
               )}
@@ -306,8 +344,13 @@ export default function LibraryQuickScanPage() {
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-10 h-14 bg-slate-800 rounded-lg overflow-hidden shrink-0 border border-slate-700 flex items-center justify-center">
-                      {vol.coverUrl ? (
-                        <img src={vol.coverUrl} alt="" className="w-full h-full object-cover" />
+                      {vol.coverUrl && !failedCoverIds.has(vol.id) ? (
+                        <img
+                          src={vol.coverUrl}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          onError={() => markCoverFailed(vol.id)}
+                        />
                       ) : (
                         <span>📖</span>
                       )}

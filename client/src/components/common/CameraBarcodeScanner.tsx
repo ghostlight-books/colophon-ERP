@@ -100,6 +100,13 @@ export interface CameraBarcodeScannerProps {
   cooldownMs?: number;
   continuous?: boolean;
   className?: string;
+  /** Hide the built-in manual-ISBN text field -- set this when the host
+   * screen already provides its own manual-entry UI (e.g. a dedicated
+   * modal), so there's exactly one manual-entry affordance and it isn't
+   * sitting in the DOM (and stealing taps/focus) while camera mode is
+   * active. Defaults to false so existing consumers relying on this field
+   * (e.g. the full Library Scanner page) are unaffected. */
+  hideManualInput?: boolean;
 }
 
 export default function CameraBarcodeScanner({
@@ -108,6 +115,7 @@ export default function CameraBarcodeScanner({
   cooldownMs = 1500,
   continuous = true,
   className = "",
+  hideManualInput = false,
 }: CameraBarcodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -780,22 +788,24 @@ export default function CameraBarcodeScanner({
 
       {/* 4. Manual ISBN Input & Camera Switcher Bar */}
       <div className="w-full p-3 bg-slate-900/95 border-t border-slate-800 space-y-2 text-xs">
-        <form onSubmit={handleManualSubmit} className="flex gap-2">
-          <input
-            type="text"
-            placeholder="Type or paste ISBN (e.g. 9780141439518)..."
-            value={manualIsbnInput}
-            onChange={(e) => setManualIsbnInput(e.target.value)}
-            className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-          />
-          <button
-            type="submit"
-            disabled={!manualIsbnInput.trim()}
-            className="px-4 py-1.5 bg-slate-700 hover:bg-slate-600 active:scale-95 disabled:opacity-40 text-white font-medium rounded-xl text-xs transition cursor-pointer"
-          >
-            Scan & Submit
-          </button>
-        </form>
+        {!hideManualInput && (
+          <form onSubmit={handleManualSubmit} className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Type or paste ISBN (e.g. 9780141439518)..."
+              value={manualIsbnInput}
+              onChange={(e) => setManualIsbnInput(e.target.value)}
+              className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            />
+            <button
+              type="submit"
+              disabled={!manualIsbnInput.trim()}
+              className="px-4 py-1.5 bg-slate-700 hover:bg-slate-600 active:scale-95 disabled:opacity-40 text-white font-medium rounded-xl text-xs transition cursor-pointer"
+            >
+              Scan & Submit
+            </button>
+          </form>
+        )}
 
         {cameras.length > 1 && (
           <div className="flex items-center justify-between text-slate-400 pt-1">
