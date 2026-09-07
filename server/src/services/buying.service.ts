@@ -1,4 +1,5 @@
 import { prisma } from "../config/database.js";
+import { env } from "../config/env.js";
 import { lookupBookByIsbn, resolveSmartBookPrice, autoCorrectIsbn, parseIsbn, lookupGoogleBooks } from "./isbnScanner.service.js";
 import { lookupThriftbooksDetails } from "./thriftbooksScraper.service.js";
 import { lookupAbeBooksPrice } from "./abebooksScraper.service.js";
@@ -133,7 +134,10 @@ export async function searchBuyingEditions(params: BookBuyingSearchParams): Prom
       if (params.publisher) gbQueries.push(`inpublisher:${params.publisher}`);
       if (params.isbn) gbQueries.push(`isbn:${params.isbn.replace(/[^0-9X]/gi, "")}`);
 
-      const gbUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(gbQueries.join("+"))}&maxResults=10`;
+      const gbApiKey = env.GOOGLE_BOOKS_API_KEY;
+      const gbUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(gbQueries.join("+"))}&maxResults=10${
+        gbApiKey ? `&key=${encodeURIComponent(gbApiKey)}` : ""
+      }`;
       const res = await fetchWithTimeout(gbUrl);
       if (res.ok) {
         const data = (await res.json()) as {

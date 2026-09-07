@@ -1,3 +1,4 @@
+import { env } from "../config/env.js";
 import { resolveBestCoverUrl } from "./isbn/coverFetcher.service.js";
 import {
   cleanDeweyNumber,
@@ -188,7 +189,10 @@ async function searchGoogleBooksByTitleAuthor(
 
     if (queryParts.length === 0) return [];
 
-    const url = `https://www.googleapis.com/books/v1/volumes?q=${queryParts.join("+")}&maxResults=6`;
+    const apiKey = env.GOOGLE_BOOKS_API_KEY;
+    const url = `https://www.googleapis.com/books/v1/volumes?q=${queryParts.join("+")}&maxResults=6${
+      apiKey ? `&key=${encodeURIComponent(apiKey)}` : ""
+    }`;
     const res = await fetch(url, { headers: { "User-Agent": "ColophonERP-CoverVision/1.0" } });
     if (!res.ok) return [];
 

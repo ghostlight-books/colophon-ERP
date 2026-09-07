@@ -22,6 +22,10 @@ services:
         value: production
       - key: GEMINI_API_KEY
         sync: false
+      - key: GOOGLE_BOOKS_API_KEY
+        sync: false
+      - key: ISBNDB_API_KEY
+        sync: false
     disk:
       name: colophon-data
       mountPath: /var/data

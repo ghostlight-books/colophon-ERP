@@ -9,6 +9,8 @@
  * 6. LibraryThing & Syndetics
  */
 
+import { env } from "../../config/env.js";
+
 export interface CoverCandidate {
   source: "Google Books" | "Open Library" | "ThriftBooks" | "AbeBooks" | "ISBNdb" | "LibraryThing";
   url: string;
@@ -82,11 +84,13 @@ export function upgradeGoogleBooksCoverUrl(rawUrl: string | null | undefined): s
  */
 export async function fetchGoogleBooksCover(isbn: string, title?: string, author?: string): Promise<string | null> {
   const cleanIsbn = isbn.replace(/[^0-9X]/gi, "").toUpperCase();
+  const apiKey = env.GOOGLE_BOOKS_API_KEY;
+  const keyParam = apiKey ? `&key=${encodeURIComponent(apiKey)}` : "";
 
   // 1. Try by ISBN
   if (cleanIsbn) {
     try {
-      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(cleanIsbn)}`, {
+      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(cleanIsbn)}${keyParam}`, {
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
         signal: AbortSignal.timeout(4000),
       });
@@ -105,7 +109,7 @@ export async function fetchGoogleBooksCover(isbn: string, title?: string, author
   if (title && title.length > 2) {
     try {
       const q = author ? `intitle:${title}+inauthor:${author}` : `intitle:${title}`;
-      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=1`, {
+      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=1${keyParam}`, {
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
         signal: AbortSignal.timeout(4000),
       });

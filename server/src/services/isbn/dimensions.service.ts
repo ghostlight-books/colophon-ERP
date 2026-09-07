@@ -1,4 +1,5 @@
 import type { BookPhysicalDimensions, PackageType } from "@colophon/shared";
+import { env } from "../../config/env.js";
 
 export interface RawDimensionInput {
   dimensionsRaw?: string | null;
@@ -285,7 +286,8 @@ export function resolveBookDimensions(input: RawDimensionInput): BookPhysicalDim
 export async function queryGoogleBooksDimensions(isbn: string): Promise<Partial<RawDimensionInput> | null> {
   const cleanIsbn = isbn.replace(/[^0-9X]/gi, "");
   try {
-    const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}`;
+    const apiKey = env.GOOGLE_BOOKS_API_KEY;
+    const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}${apiKey ? `&key=${encodeURIComponent(apiKey)}` : ""}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
     if (!res.ok) return null;
 
