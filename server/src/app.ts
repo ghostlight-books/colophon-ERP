@@ -705,6 +705,66 @@ export function createApp(): express.Express {
     }
   });
 
+  // ONE-OFF MIGRATION UTILITY: reassigns Library rows still tagged with the
+  // pre-tenant-isolation "ghostlight-demo" placeholder (or left NULL) to a
+  // real store, so existing data isn't orphaned by the per-account isolation
+  // rollout. Safe to call more than once. Remove after the one-time cutover.
+  app.post("/api/admin/library/reassign-legacy-data", async (req, res, next) => {
+    try {
+      const { targetStoreId } = req.body as { targetStoreId?: string };
+      if (!targetStoreId?.trim()) {
+        res.status(400).json({ error: "targetStoreId is required." });
+        return;
+      }
+      const LEGACY_STORE_ID = "ghostlight-demo";
+
+      const volumes = await prisma.libraryVolume.updateMany({
+        where: { OR: [{ storeId: LEGACY_STORE_ID }, { storeId: null }] },
+        data: { storeId: targetStoreId },
+      });
+      const shelves = await prisma.libraryShelfLocation.updateMany({
+        where: { OR: [{ storeId: LEGACY_STORE_ID }, { storeId: null }] },
+        data: { storeId: targetStoreId },
+      });
+      const spaces = await prisma.librarySpace.updateMany({
+        where: { OR: [{ storeId: LEGACY_STORE_ID }, { storeId: null }] },
+        data: { storeId: targetStoreId },
+      });
+      const wantlist = await prisma.libraryWantlistItem.updateMany({
+        where: { OR: [{ storeId: LEGACY_STORE_ID }, { storeId: null }] },
+        data: { storeId: targetStoreId },
+      });
+      const notifications = await prisma.libraryNotification.updateMany({
+        where: { storeId: null },
+        data: { storeId: targetStoreId },
+      });
+
+      const orphanBadges = await prisma.libraryBadgeAward.findMany({ where: { storeId: null } });
+      let badgesMoved = 0;
+      for (const badge of orphanBadges) {
+        const existing = await prisma.libraryBadgeAward.findFirst({ where: { storeId: targetStoreId, badgeId: badge.badgeId } });
+        if (existing) {
+          await prisma.libraryBadgeAward.delete({ where: { id: badge.id } });
+        } else {
+          await prisma.libraryBadgeAward.update({ where: { id: badge.id }, data: { storeId: targetStoreId } });
+          badgesMoved++;
+        }
+      }
+
+      res.json({
+        success: true,
+        volumes: volumes.count,
+        shelves: shelves.count,
+        spaces: spaces.count,
+        wantlist: wantlist.count,
+        notifications: notifications.count,
+        badges: badgesMoved,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/stores/:storeId/ecommerce", async (req, res, next) => {
     try {
       const store = await prisma.store.findFirst({ where: { OR: [{ id: req.params.storeId }, { slug: req.params.storeId }] } });
