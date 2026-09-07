@@ -6,6 +6,7 @@ import { errorMiddleware } from "./middleware/error.middleware.js";
 import { env } from "./config/env.js";
 import { requestLogger } from "./middleware/requestLogger.js";
 import { requireSuperAdmin, tenantContext } from "./middleware/tenantContext.js";
+import { authMiddleware } from "./middleware/auth.middleware.js";
 import { createStoreImpersonationSession, createUser, signIn } from "./services/auth.service.js";
 import { prisma } from "./config/database.js";
 import { lookupBookByIsbn, pullOpenLibraryMetadata, autoCorrectIsbn } from "./services/isbnScanner.service.js";
@@ -1939,11 +1940,15 @@ export function createApp(): express.Express {
   // COLOPHON LIBRARY EDITION ROUTES
   // ==========================================
 
+  // Every /api/library/* route requires a real, logged-in account. storeId is
+  // always derived from the authenticated session below (req.authContext),
+  // never from a client-supplied query/body param.
+  app.use("/api/library", authMiddleware);
+
   // Dashboard summary & analytics
   app.get("/api/library/dashboard", async (req, res) => {
     try {
-      const storeId = typeof req.query?.storeId === "string" ? req.query.storeId : "ghostlight-demo";
-      const summary = await getLibraryDashboardSummary(storeId);
+      const summary = await getLibraryDashboardSummary(req.authContext!.storeId);
       res.json(summary);
     } catch (error) {
       console.error("Library dashboard error:", error);
@@ -1952,9 +1957,9 @@ export function createApp(): express.Express {
   });
 
   // Library Spaces (Multi-Library Management)
-  app.get("/api/library/spaces", async (_req, res) => {
+  app.get("/api/library/spaces", async (req, res) => {
     try {
-      const spaces = await listLibrarySpaces();
+      const spaces = await listLibrarySpaces(req.authContext!.storeId);
       res.json(spaces);
     } catch (error) {
       console.error("List library spaces error:", error);
@@ -1968,7 +1973,7 @@ export function createApp(): express.Express {
       if (!name || typeof name !== "string") {
         return res.status(400).json({ error: "Library name is required." });
       }
-      const space = await createLibrarySpace({ name, description, location, icon, color, isDefault });
+      const space = await createLibrarySpace({ name, description, location, icon, color, isDefault, storeId: req.authContext!.storeId });
       res.json(space);
     } catch (error) {
       console.error("Create library space error:", error);
@@ -1978,7 +1983,7 @@ export function createApp(): express.Express {
 
   app.get("/api/library/spaces/:id", async (req, res) => {
     try {
-      const space = await getLibrarySpace(req.params.id);
+      const space = await getLibrarySpace(req.params.id, req.authContext!.storeId);
       if (!space) return res.status(404).json({ error: "Library space not found." });
       res.json(space);
     } catch (error) {
@@ -1989,7 +1994,8 @@ export function createApp(): express.Express {
 
   app.patch("/api/library/spaces/:id", async (req, res) => {
     try {
-      const updated = await updateLibrarySpace(req.params.id, req.body);
+      const updated = await updateLibrarySpace(req.params.id, req.authContext!.storeId, req.body);
+      if (!updated) return res.status(404).json({ error: "Library space not found." });
       res.json(updated);
     } catch (error) {
       console.error("Update library space error:", error);
@@ -1999,7 +2005,8 @@ export function createApp(): express.Express {
 
   app.delete("/api/library/spaces/:id", async (req, res) => {
     try {
-      const result = await deleteLibrarySpace(req.params.id);
+      const result = await deleteLibrarySpace(req.params.id, req.authContext!.storeId);
+      if (!result) return res.status(404).json({ error: "Library space not found." });
       res.json(result);
     } catch (error) {
       console.error("Delete library space error:", error);
@@ -2023,6 +2030,7 @@ export function createApp(): express.Express {
       const offset = typeof req.query?.offset === "string" ? parseInt(req.query.offset, 10) : 0;
 
       const result = await listLibraryVolumes({
+        storeId: req.authContext!.storeId,
         query,
         deweyPrefix,
         locPrefix,
@@ -2045,7 +2053,7 @@ export function createApp(): express.Express {
   // Create / add single volume
   app.post("/api/library/volumes", async (req, res) => {
     try {
-      const volume = await createLibraryVolume(req.body);
+      const volume = await createLibraryVolume({ ...req.body, storeId: req.authContext!.storeId });
       res.json(volume);
     } catch (error) {
       console.error("Create library volume error:", error);
@@ -2060,7 +2068,7 @@ export function createApp(): express.Express {
       if (!isbn || typeof isbn !== "string") {
         return res.status(400).json({ error: "ISBN is required for scanning." });
       }
-      const volume = await scanAndIntakeVolume(isbn, shelfLocationId, customData);
+      const volume = await scanAndIntakeVolume(isbn, req.authContext!.storeId, shelfLocationId, customData);
       res.json(volume);
     } catch (error) {
       console.error("Library scan intake error:", error);
@@ -2071,7 +2079,7 @@ export function createApp(): express.Express {
   // Get single volume
   app.get("/api/library/volumes/:id", async (req, res) => {
     try {
-      const volume = await getLibraryVolume(req.params.id);
+      const volume = await getLibraryVolume(req.params.id, req.authContext!.storeId);
       if (!volume) return res.status(404).json({ error: "Library volume not found." });
       res.json(volume);
     } catch (error) {
@@ -2083,7 +2091,8 @@ export function createApp(): express.Express {
   // Update volume
   app.patch("/api/library/volumes/:id", async (req, res) => {
     try {
-      const updated = await updateLibraryVolume(req.params.id, req.body);
+      const updated = await updateLibraryVolume(req.params.id, req.authContext!.storeId, req.body);
+      if (!updated) return res.status(404).json({ error: "Library volume not found." });
       res.json(updated);
     } catch (error) {
       console.error("Update library volume error:", error);
@@ -2094,7 +2103,8 @@ export function createApp(): express.Express {
   // Delete volume
   app.delete("/api/library/volumes/:id", async (req, res) => {
     try {
-      await deleteLibraryVolume(req.params.id);
+      const deleted = await deleteLibraryVolume(req.params.id, req.authContext!.storeId);
+      if (!deleted) return res.status(404).json({ error: "Library volume not found." });
       res.json({ success: true });
     } catch (error) {
       console.error("Delete library volume error:", error);
@@ -2109,7 +2119,7 @@ export function createApp(): express.Express {
       if (!Array.isArray(ids) || ids.length === 0) {
         return res.status(400).json({ error: "ids array is required for bulk delete." });
       }
-      const result = await bulkDeleteLibraryVolumes(ids);
+      const result = await bulkDeleteLibraryVolumes(ids, req.authContext!.storeId);
       res.json({ success: true, count: result.count });
     } catch (error) {
       console.error("Bulk delete library volumes error:", error);
@@ -2145,8 +2155,7 @@ export function createApp(): express.Express {
   // Shelves & Location Management
   app.get("/api/library/shelves", async (req, res) => {
     try {
-      const storeId = typeof req.query?.storeId === "string" ? req.query.storeId : "ghostlight-demo";
-      const shelves = await listShelfLocations(storeId);
+      const shelves = await listShelfLocations(req.authContext!.storeId);
       res.json({ shelves });
     } catch (error) {
       console.error("List shelves error:", error);
@@ -2156,7 +2165,7 @@ export function createApp(): express.Express {
 
   app.post("/api/library/shelves", async (req, res) => {
     try {
-      const shelf = await createShelfLocation(req.body);
+      const shelf = await createShelfLocation({ ...req.body, storeId: req.authContext!.storeId });
       res.json(shelf);
     } catch (error) {
       console.error("Create shelf error:", error);
@@ -2166,7 +2175,8 @@ export function createApp(): express.Express {
 
   app.delete("/api/library/shelves/:id", async (req, res) => {
     try {
-      await deleteShelfLocation(req.params.id);
+      const deleted = await deleteShelfLocation(req.params.id, req.authContext!.storeId);
+      if (!deleted) return res.status(404).json({ error: "Shelf location not found." });
       res.json({ success: true });
     } catch (error) {
       console.error("Delete shelf error:", error);
@@ -2179,7 +2189,8 @@ export function createApp(): express.Express {
     try {
       const { borrowerName, borrowerContact, dueDate } = req.body || {};
       if (!borrowerName) return res.status(400).json({ error: "Borrower name is required to loan a volume." });
-      const loaned = await loanVolume(req.params.id, borrowerName, borrowerContact, dueDate);
+      const loaned = await loanVolume(req.params.id, req.authContext!.storeId, borrowerName, borrowerContact, dueDate);
+      if (!loaned) return res.status(404).json({ error: "Library volume not found." });
       res.json(loaned);
     } catch (error) {
       console.error("Loan volume error:", error);
@@ -2189,7 +2200,8 @@ export function createApp(): express.Express {
 
   app.post("/api/library/volumes/:id/return", async (req, res) => {
     try {
-      const returned = await returnVolume(req.params.id);
+      const returned = await returnVolume(req.params.id, req.authContext!.storeId);
+      if (!returned) return res.status(404).json({ error: "Library volume not found." });
       res.json(returned);
     } catch (error) {
       console.error("Return volume error:", error);
@@ -2200,8 +2212,7 @@ export function createApp(): express.Express {
   // Insurance & Estate Appraisal Report
   app.get("/api/library/valuation-report", async (req, res) => {
     try {
-      const storeId = typeof req.query?.storeId === "string" ? req.query.storeId : "ghostlight-demo";
-      const report = await generateValuationReport(storeId);
+      const report = await generateValuationReport(req.authContext!.storeId);
       res.json(report);
     } catch (error) {
       console.error("Valuation report error:", error);
@@ -2284,7 +2295,8 @@ export function createApp(): express.Express {
   app.post("/api/library/volumes/:id/cover", async (req, res) => {
     try {
       const { coverUrl } = req.body || {};
-      const updated = await updateLibraryVolume(req.params.id, { coverUrl: coverUrl || null });
+      const updated = await updateLibraryVolume(req.params.id, req.authContext!.storeId, { coverUrl: coverUrl || null });
+      if (!updated) return res.status(404).json({ error: "Library volume not found." });
       res.json(updated);
     } catch (error) {
       console.error("Update cover error:", error);
@@ -2295,7 +2307,7 @@ export function createApp(): express.Express {
   // Enrich single volume with full online metadata (Description, Publisher, Year, Page Count, Subjects, Dewey)
   app.post("/api/library/volumes/:id/enrich-metadata", async (req, res) => {
     try {
-      const volume = await getLibraryVolume(req.params.id);
+      const volume = await getLibraryVolume(req.params.id, req.authContext!.storeId);
       if (!volume) return res.status(404).json({ error: "Library volume not found." });
 
       const enrichment = await enrichLibraryClassification(volume.isbn);
@@ -2329,7 +2341,7 @@ export function createApp(): express.Express {
         if (enrichment.coverUrl) updateData.coverUrl = enrichment.coverUrl;
       }
 
-      const updated = await updateLibraryVolume(volume.id, updateData);
+      const updated = await updateLibraryVolume(volume.id, req.authContext!.storeId, updateData);
       res.json({ success: true, volume: updated, enrichment });
     } catch (error) {
       console.error("Enrich volume metadata error:", error);
@@ -2342,6 +2354,7 @@ export function createApp(): express.Express {
     try {
       const volumesWithoutCover = await prisma.libraryVolume.findMany({
         where: {
+          storeId: req.authContext!.storeId,
           OR: [{ coverUrl: null }, { coverUrl: "" }],
         },
         take: 50,
@@ -2394,7 +2407,7 @@ export function createApp(): express.Express {
 
   app.post("/api/library/exchange/offers", async (req, res) => {
     try {
-      const offer = await submitLibraryOffer(req.body);
+      const offer = await submitLibraryOffer(req.body, req.authContext!.storeId);
       res.json(offer);
     } catch (error) {
       console.error("Submit offer error:", error);
@@ -2402,9 +2415,9 @@ export function createApp(): express.Express {
     }
   });
 
-  app.get("/api/library/exchange/offers", async (_req, res) => {
+  app.get("/api/library/exchange/offers", async (req, res) => {
     try {
-      const offers = await listIncomingLibraryOffers();
+      const offers = await listIncomingLibraryOffers(req.authContext!.storeId);
       res.json({ offers });
     } catch (error) {
       console.error("List incoming offers error:", error);
@@ -2420,7 +2433,7 @@ export function createApp(): express.Express {
         action,
         counterAmount,
         counterNotes,
-      });
+      }, req.authContext!.storeId);
       res.json(updated);
     } catch (error) {
       console.error("Respond offer error:", error);
@@ -2430,7 +2443,8 @@ export function createApp(): express.Express {
 
   app.get("/api/library/exchange/offers/:id/messages", async (req, res) => {
     try {
-      const messages = await listOfferMessages(req.params.id);
+      const messages = await listOfferMessages(req.params.id, req.authContext!.storeId);
+      if (messages === null) return res.status(404).json({ error: "Offer not found." });
       res.json({ messages });
     } catch (error) {
       console.error("List offer messages error:", error);
@@ -2440,13 +2454,12 @@ export function createApp(): express.Express {
 
   app.post("/api/library/exchange/offers/:id/messages", async (req, res) => {
     try {
-      const { senderRole, senderName, body } = req.body || {};
+      const { senderName, body } = req.body || {};
       const message = await sendOfferMessage({
         offerId: req.params.id,
-        senderRole: senderRole === "OFFERER" ? "OFFERER" : "OWNER",
         senderName,
         body,
-      });
+      }, req.authContext!.storeId);
       res.json(message);
     } catch (error) {
       console.error("Send offer message error:", error);
@@ -2459,7 +2472,7 @@ export function createApp(): express.Express {
   app.get("/api/library/wantlist", async (req, res) => {
     try {
       const librarySpaceId = typeof req.query?.librarySpaceId === "string" ? req.query.librarySpaceId : undefined;
-      const items = await listWantlistItems(librarySpaceId);
+      const items = await listWantlistItems(req.authContext!.storeId, librarySpaceId);
       res.json({ items });
     } catch (error) {
       console.error("List wantlist error:", error);
@@ -2469,7 +2482,7 @@ export function createApp(): express.Express {
 
   app.post("/api/library/wantlist", async (req, res) => {
     try {
-      const item = await createWantlistItem(req.body);
+      const item = await createWantlistItem({ ...req.body, storeId: req.authContext!.storeId });
       res.json(item);
     } catch (error) {
       console.error("Create wantlist item error:", error);
@@ -2479,7 +2492,8 @@ export function createApp(): express.Express {
 
   app.patch("/api/library/wantlist/:id", async (req, res) => {
     try {
-      const item = await updateWantlistItem(req.params.id, req.body);
+      const item = await updateWantlistItem(req.params.id, req.authContext!.storeId, req.body);
+      if (!item) return res.status(404).json({ error: "Wantlist item not found." });
       res.json(item);
     } catch (error) {
       console.error("Update wantlist item error:", error);
@@ -2489,7 +2503,7 @@ export function createApp(): express.Express {
 
   app.delete("/api/library/wantlist/:id", async (req, res) => {
     try {
-      const result = await deleteWantlistItem(req.params.id);
+      const result = await deleteWantlistItem(req.params.id, req.authContext!.storeId);
       res.json(result);
     } catch (error) {
       console.error("Delete wantlist item error:", error);
@@ -2501,7 +2515,7 @@ export function createApp(): express.Express {
   app.get("/api/library/notifications", async (req, res) => {
     try {
       const limit = typeof req.query?.limit === "string" ? parseInt(req.query.limit, 10) : 20;
-      const notifications = await getLibraryNotifications(limit);
+      const notifications = await getLibraryNotifications(req.authContext!.storeId, limit);
       res.json({ notifications });
     } catch (error) {
       console.error("Get library notifications error:", error);
@@ -2511,7 +2525,7 @@ export function createApp(): express.Express {
 
   app.post("/api/library/notifications/:id/read", async (req, res) => {
     try {
-      const updated = await markLibraryNotificationRead(req.params.id);
+      const updated = await markLibraryNotificationRead(req.params.id, req.authContext!.storeId);
       res.json(updated);
     } catch (error) {
       console.error("Mark notification read error:", error);
@@ -2519,9 +2533,9 @@ export function createApp(): express.Express {
     }
   });
 
-  app.post("/api/library/notifications/read-all", async (_req, res) => {
+  app.post("/api/library/notifications/read-all", async (req, res) => {
     try {
-      await markAllLibraryNotificationsRead();
+      await markAllLibraryNotificationsRead(req.authContext!.storeId);
       res.json({ success: true });
     } catch (error) {
       console.error("Mark all read error:", error);
@@ -2530,9 +2544,9 @@ export function createApp(): express.Express {
   });
 
   // Library Authors -- unification, author pages, related-authors
-  app.get("/api/library/authors", async (_req, res) => {
+  app.get("/api/library/authors", async (req, res) => {
     try {
-      const authors = await listAuthors();
+      const authors = await listAuthors(req.authContext!.storeId);
       res.json({ authors });
     } catch (error) {
       console.error("List library authors error:", error);
@@ -2544,7 +2558,7 @@ export function createApp(): express.Express {
     try {
       const name = typeof req.query?.name === "string" ? req.query.name : "";
       if (!name.trim()) return res.status(400).json({ error: "A name query param is required." });
-      const detail = await getAuthorDetail(name);
+      const detail = await getAuthorDetail(name, req.authContext!.storeId);
       res.json(detail);
     } catch (error) {
       console.error("Get author detail error:", error);
@@ -2600,7 +2614,9 @@ export function createApp(): express.Express {
     try {
       const volumeId = typeof req.query?.volumeId === "string" ? req.query.volumeId : undefined;
       const query = typeof req.query?.query === "string" ? req.query.query : undefined;
-      const notes = volumeId ? await listNotesForVolume(volumeId) : await listAllNotes(query);
+      const notes = volumeId
+        ? await listNotesForVolume(volumeId, req.authContext!.storeId)
+        : await listAllNotes(req.authContext!.storeId, query);
       res.json({ notes });
     } catch (error) {
       console.error("List library notes error:", error);
@@ -2610,7 +2626,7 @@ export function createApp(): express.Express {
 
   app.post("/api/library/notes", async (req, res) => {
     try {
-      const note = await createLibraryNote(req.body);
+      const note = await createLibraryNote(req.body, req.authContext!.storeId);
       res.json(note);
     } catch (error) {
       console.error("Create library note error:", error);
@@ -2620,7 +2636,8 @@ export function createApp(): express.Express {
 
   app.patch("/api/library/notes/:id", async (req, res) => {
     try {
-      const note = await updateLibraryNote(req.params.id, req.body);
+      const note = await updateLibraryNote(req.params.id, req.authContext!.storeId, req.body);
+      if (!note) return res.status(404).json({ error: "Note not found." });
       res.json(note);
     } catch (error) {
       console.error("Update library note error:", error);
@@ -2630,7 +2647,7 @@ export function createApp(): express.Express {
 
   app.delete("/api/library/notes/:id", async (req, res) => {
     try {
-      const result = await deleteLibraryNote(req.params.id);
+      const result = await deleteLibraryNote(req.params.id, req.authContext!.storeId);
       res.json(result);
     } catch (error) {
       console.error("Delete library note error:", error);
@@ -2639,9 +2656,9 @@ export function createApp(): express.Express {
   });
 
   // Collector Level & Achievements
-  app.get("/api/library/achievements", async (_req, res) => {
+  app.get("/api/library/achievements", async (req, res) => {
     try {
-      const stats = await getLibraryAchievementStats();
+      const stats = await getLibraryAchievementStats(req.authContext!.storeId);
       res.json(stats);
     } catch (error) {
       console.error("Get library achievements error:", error);
@@ -2650,9 +2667,9 @@ export function createApp(): express.Express {
   });
 
   // Collection Health & Completeness (for Library UI Shell)
-  app.get("/api/library/collection-health", async (_req, res) => {
+  app.get("/api/library/collection-health", async (req, res) => {
     try {
-      const health = await getLibraryCollectionHealth();
+      const health = await getLibraryCollectionHealth(req.authContext!.storeId);
       res.json(health);
     } catch (error) {
       console.error("Get collection health error:", error);

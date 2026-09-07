@@ -17,14 +17,15 @@ export interface LibraryAchievementStats {
 // separate from getLibraryCollectionHealth (a different, already-consumed
 // widget) rather than overloading it -- these are two different concerns
 // that happen to read from the same tables.
-export async function getLibraryAchievementStats(): Promise<LibraryAchievementStats> {
+export async function getLibraryAchievementStats(storeId: string): Promise<LibraryAchievementStats> {
   await ensureLibraryTablesExist();
 
   const [totalVolumes, classifiedDeweyCount, allVolumes, completedTradesCount, fulfilledWantlistCount] =
     await Promise.all([
-      prisma.libraryVolume.count(),
-      prisma.libraryVolume.count({ where: { deweyDecimal: { not: null } } }),
+      prisma.libraryVolume.count({ where: { storeId } }),
+      prisma.libraryVolume.count({ where: { storeId, deweyDecimal: { not: null } } }),
       prisma.libraryVolume.findMany({
+        where: { storeId },
         select: {
           replacementValue: true,
           rareMarketValue: true,
@@ -35,8 +36,8 @@ export async function getLibraryAchievementStats(): Promise<LibraryAchievementSt
           librarySpaceId: true,
         },
       }),
-      prisma.libraryOffer.count({ where: { status: { in: ["ACCEPTED", "COMPLETED"] } } }),
-      prisma.libraryWantlistItem.count({ where: { status: "FULFILLED" } }),
+      prisma.libraryOffer.count({ where: { status: { in: ["ACCEPTED", "COMPLETED"] }, volume: { storeId } } }),
+      prisma.libraryWantlistItem.count({ where: { storeId, status: "FULFILLED" } }),
     ]);
 
   const totalInsuredValue = allVolumes.reduce((sum, v) => sum + (v.rareMarketValue || v.replacementValue || 0), 0);
@@ -90,20 +91,23 @@ const BADGE_DEFINITIONS: Array<{ id: string; name: string; isEarned: (stats: Lib
  * in libraryVolume.service.ts. Safe to call repeatedly: awards are recorded
  * so a badge only ever notifies once.
  */
-export async function checkAndNotifyNewBadges(): Promise<void> {
-  const stats = await getLibraryAchievementStats();
-  const alreadyAwarded = new Set((await prisma.libraryBadgeAward.findMany({ select: { badgeId: true } })).map((a) => a.badgeId));
+export async function checkAndNotifyNewBadges(storeId: string): Promise<void> {
+  const stats = await getLibraryAchievementStats(storeId);
+  const alreadyAwarded = new Set(
+    (await prisma.libraryBadgeAward.findMany({ where: { storeId }, select: { badgeId: true } })).map((a) => a.badgeId)
+  );
 
   for (const badge of BADGE_DEFINITIONS) {
     if (alreadyAwarded.has(badge.id) || !badge.isEarned(stats)) continue;
 
-    await prisma.libraryBadgeAward.create({ data: { badgeId: badge.id } });
+    await prisma.libraryBadgeAward.create({ data: { badgeId: badge.id, storeId } });
     await prisma.libraryNotification.create({
       data: {
         title: `Badge earned: ${badge.name}`,
         detail: `You've unlocked the "${badge.name}" badge on your Collector Level page.`,
         type: "BADGE",
         actionUrl: `/library/achievements`,
+        storeId,
       },
     });
   }

@@ -73,7 +73,7 @@ export async function listExchangeMarketplace(filters: ExchangeMarketplaceFilter
 }
 
 // 2. Submit a Cash or Trade Offer on a Library Volume
-export async function submitLibraryOffer(input: CreateOfferInput) {
+export async function submitLibraryOffer(input: CreateOfferInput, offererStoreId: string) {
   await ensureLibraryTablesExist();
 
   const volume = await prisma.libraryVolume.findUnique({
@@ -93,7 +93,7 @@ export async function submitLibraryOffer(input: CreateOfferInput) {
       volumeId: input.volumeId,
       offerType: input.offerType,
       offererType: input.offererType || "COLLECTOR",
-      offererId: input.offererId,
+      offererId: offererStoreId,
       offererName: input.offererName,
       offererEmail: input.offererEmail,
       offererStoreName: input.offererStoreName,
@@ -116,6 +116,7 @@ export async function submitLibraryOffer(input: CreateOfferInput) {
       detail: `${offererDesc} offered ${formattedAmount} for "${volume.title}".`,
       type: input.offerType === "TRADE" ? "TRADE" : "OFFER",
       actionUrl: `/library/exchange?offerId=${offer.id}`,
+      storeId: volume.storeId,
     },
   });
 
@@ -123,7 +124,7 @@ export async function submitLibraryOffer(input: CreateOfferInput) {
 }
 
 // 3. List all incoming offers for the current user's library
-export async function listIncomingLibraryOffers() {
+export async function listIncomingLibraryOffers(storeId: string) {
   await ensureLibraryTablesExist();
 
   // Clean up any orphaned offers from deleted volumes
@@ -132,6 +133,7 @@ export async function listIncomingLibraryOffers() {
   ).catch(() => null);
 
   const offers = await prisma.libraryOffer.findMany({
+    where: { volume: { storeId } },
     orderBy: { createdAt: "desc" },
     include: {
       volume: {
@@ -157,7 +159,7 @@ export async function listIncomingLibraryOffers() {
 }
 
 // 4. Respond to an Offer (Accept, Counter, Decline, Complete)
-export async function respondToLibraryOffer(input: RespondOfferInput) {
+export async function respondToLibraryOffer(input: RespondOfferInput, storeId: string) {
   await ensureLibraryTablesExist();
 
   const offer = await prisma.libraryOffer.findUnique({
@@ -166,6 +168,10 @@ export async function respondToLibraryOffer(input: RespondOfferInput) {
   });
 
   if (!offer) {
+    throw new Error(`Offer with ID ${input.offerId} not found.`);
+  }
+
+  if (offer.volume.storeId !== storeId) {
     throw new Error(`Offer with ID ${input.offerId} not found.`);
   }
 
@@ -206,6 +212,7 @@ export async function respondToLibraryOffer(input: RespondOfferInput) {
         : `Owner ${actionLabel} on "${offer.volume.title}".`,
       type: isSale ? "SALE" : "OFFER",
       actionUrl: `/library/exchange?offerId=${offer.id}`,
+      storeId: offer.offererId,
     },
   });
 
@@ -217,31 +224,45 @@ export async function respondToLibraryOffer(input: RespondOfferInput) {
 // initial note on the offer itself.
 export interface SendOfferMessageInput {
   offerId: string;
-  senderRole: "OWNER" | "OFFERER";
   senderName: string;
   body: string;
 }
 
-export async function listOfferMessages(offerId: string) {
+// Only the volume's owning store or the store that made the offer may see/participate in a thread.
+async function assertOfferParticipant(offerId: string, storeId: string) {
+  const offer = await prisma.libraryOffer.findUnique({ where: { id: offerId }, include: { volume: true } });
+  if (!offer) return null;
+  if (offer.volume.storeId !== storeId && offer.offererId !== storeId) return null;
+  return offer;
+}
+
+export async function listOfferMessages(offerId: string, storeId: string) {
   await ensureLibraryTablesExist();
+  const offer = await assertOfferParticipant(offerId, storeId);
+  if (!offer) return null;
   return prisma.libraryOfferMessage.findMany({
     where: { offerId },
     orderBy: { createdAt: "asc" },
   });
 }
 
-export async function sendOfferMessage(input: SendOfferMessageInput) {
+export async function sendOfferMessage(input: SendOfferMessageInput, storeId: string) {
   await ensureLibraryTablesExist();
 
-  const offer = await prisma.libraryOffer.findUnique({ where: { id: input.offerId }, include: { volume: true } });
+  const offer = await assertOfferParticipant(input.offerId, storeId);
   if (!offer) {
     throw new Error(`Offer with ID ${input.offerId} not found.`);
   }
 
+  // Derive the sender's role from which side of the trade they authenticated as,
+  // rather than trusting a client-supplied role.
+  const senderRole: "OWNER" | "OFFERER" = offer.volume.storeId === storeId ? "OWNER" : "OFFERER";
+  const recipientStoreId = senderRole === "OWNER" ? offer.offererId : offer.volume.storeId;
+
   const message = await prisma.libraryOfferMessage.create({
     data: {
       offerId: input.offerId,
-      senderRole: input.senderRole,
+      senderRole,
       senderName: input.senderName,
       body: input.body,
     },
@@ -253,6 +274,7 @@ export async function sendOfferMessage(input: SendOfferMessageInput) {
       detail: `Re: "${offer.volume.title}" -- ${input.body.length > 120 ? `${input.body.slice(0, 120)}…` : input.body}`,
       type: "MESSAGE",
       actionUrl: `/library/exchange?offerId=${offer.id}`,
+      storeId: recipientStoreId,
     },
   });
 
@@ -260,10 +282,11 @@ export async function sendOfferMessage(input: SendOfferMessageInput) {
 }
 
 // 5. Get Notifications for Library
-export async function getLibraryNotifications(limit = 20) {
+export async function getLibraryNotifications(storeId: string, limit = 20) {
   await ensureLibraryTablesExist();
 
   const notifications = await prisma.libraryNotification.findMany({
+    where: { storeId },
     orderBy: { createdAt: "desc" },
     take: limit,
   });
@@ -271,49 +294,53 @@ export async function getLibraryNotifications(limit = 20) {
   return notifications;
 }
 
-export async function markLibraryNotificationRead(id: string) {
+export async function markLibraryNotificationRead(id: string, storeId: string) {
   await ensureLibraryTablesExist();
-  return prisma.libraryNotification.update({
-    where: { id },
+  const { count } = await prisma.libraryNotification.updateMany({
+    where: { id, storeId },
     data: { read: true },
   });
+  return { success: count > 0 };
 }
 
-export async function markAllLibraryNotificationsRead() {
+export async function markAllLibraryNotificationsRead(storeId: string) {
   await ensureLibraryTablesExist();
   return prisma.libraryNotification.updateMany({
-    where: { read: false },
+    where: { read: false, storeId },
     data: { read: true },
   });
 }
 
 // 6. Comprehensive Collection Health & Insights (distinct from Store Health)
-export async function getLibraryCollectionHealth() {
+export async function getLibraryCollectionHealth(storeId: string) {
   await ensureLibraryTablesExist();
 
   const [totalVolumes, classifiedDewey, classifiedLoc, loanedVolumes, openOffers, unreadNotes, allVolumes] =
     await Promise.all([
-      prisma.libraryVolume.count(),
+      prisma.libraryVolume.count({ where: { storeId } }),
       prisma.libraryVolume.count({
         where: {
+          storeId,
           deweyDecimal: { not: null },
         },
       }),
       prisma.libraryVolume.count({
         where: {
+          storeId,
           locClassification: { not: null },
         },
       }),
       prisma.libraryVolume.count({
-        where: { isLoaned: true },
+        where: { storeId, isLoaned: true },
       }),
       prisma.libraryOffer.count({
-        where: { status: "PENDING" },
+        where: { status: "PENDING", volume: { storeId } },
       }),
       prisma.libraryNotification.count({
-        where: { read: false },
+        where: { read: false, storeId },
       }),
       prisma.libraryVolume.findMany({
+        where: { storeId },
         select: { replacementValue: true },
       }),
     ]);

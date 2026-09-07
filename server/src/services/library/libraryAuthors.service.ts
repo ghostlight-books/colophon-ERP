@@ -55,11 +55,11 @@ export interface AuthorSummary {
   sampleCoverUrl: string | null;
 }
 
-export async function listAuthors(): Promise<AuthorSummary[]> {
+export async function listAuthors(storeId: string): Promise<AuthorSummary[]> {
   await ensureLibraryTablesExist();
 
   const [volumes, aliasMap] = await Promise.all([
-    prisma.libraryVolume.findMany({ select: { author: true, coverUrl: true } }),
+    prisma.libraryVolume.findMany({ where: { storeId }, select: { author: true, coverUrl: true } }),
     getAliasMap(),
   ]);
 
@@ -96,11 +96,12 @@ export interface AuthorDetail {
   relatedAuthors: string[];
 }
 
-export async function getAuthorDetail(canonicalName: string): Promise<AuthorDetail> {
+export async function getAuthorDetail(canonicalName: string, storeId: string): Promise<AuthorDetail> {
   await ensureLibraryTablesExist();
 
   const [volumes, aliasMap] = await Promise.all([
     prisma.libraryVolume.findMany({
+      where: { storeId },
       select: { id: true, title: true, author: true, isbn: true, coverUrl: true, deweyDecimal: true, subjects: true, rating: true },
     }),
     getAliasMap(),

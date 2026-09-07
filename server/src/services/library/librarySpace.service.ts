@@ -7,7 +7,7 @@ export interface CreateLibrarySpaceInput {
   icon?: string | null;
   color?: string | null;
   isDefault?: boolean;
-  storeId?: string;
+  storeId: string;
 }
 
 export interface UpdateLibrarySpaceInput {
@@ -36,7 +36,7 @@ export interface LibrarySpaceSummary {
   shelvesCount: number;
 }
 
-export async function ensureLibrarySpacesExist(): Promise<void> {
+export async function ensureLibrarySpacesExist(storeId: string): Promise<void> {
   try {
     // 1. Create table if not exists in SQLite
     await prisma.$executeRawUnsafe(`
@@ -64,8 +64,8 @@ export async function ensureLibrarySpacesExist(): Promise<void> {
       ALTER TABLE "LibraryShelfLocation" ADD COLUMN "librarySpaceId" TEXT;
     `).catch(() => null);
 
-    // 3. Ensure at least one default library space exists
-    const count = await prisma.librarySpace.count();
+    // 3. Ensure this store has at least one default library space
+    const count = await prisma.librarySpace.count({ where: { storeId } });
     if (count === 0) {
       const defaultSpace = await prisma.librarySpace.create({
         data: {
@@ -76,18 +76,18 @@ export async function ensureLibrarySpacesExist(): Promise<void> {
           icon: "🏛️",
           color: "#6366f1",
           isDefault: true,
-          storeId: "ghostlight-demo",
+          storeId,
         },
       });
 
-      // Link any existing orphaned volumes/shelves to the default library
+      // Link any of this store's orphaned volumes/shelves to the new default library
       await prisma.libraryVolume.updateMany({
-        where: { librarySpaceId: null },
+        where: { librarySpaceId: null, storeId },
         data: { librarySpaceId: defaultSpace.id },
       });
 
       await prisma.libraryShelfLocation.updateMany({
-        where: { librarySpaceId: null },
+        where: { librarySpaceId: null, storeId },
         data: { librarySpaceId: defaultSpace.id },
       });
     }
@@ -96,10 +96,11 @@ export async function ensureLibrarySpacesExist(): Promise<void> {
   }
 }
 
-export async function listLibrarySpaces(storeId: string = "ghostlight-demo"): Promise<LibrarySpaceSummary[]> {
-  await ensureLibrarySpacesExist();
+export async function listLibrarySpaces(storeId: string): Promise<LibrarySpaceSummary[]> {
+  await ensureLibrarySpacesExist(storeId);
 
   const spaces = await prisma.librarySpace.findMany({
+    where: { storeId },
     orderBy: [
       { isDefault: "desc" },
       { createdAt: "asc" },
@@ -147,11 +148,11 @@ export async function listLibrarySpaces(storeId: string = "ghostlight-demo"): Pr
   });
 }
 
-export async function getLibrarySpace(id: string): Promise<LibrarySpaceSummary | null> {
-  await ensureLibrarySpacesExist();
+export async function getLibrarySpace(id: string, storeId: string): Promise<LibrarySpaceSummary | null> {
+  await ensureLibrarySpacesExist(storeId);
 
-  const space = await prisma.librarySpace.findUnique({
-    where: { id },
+  const space = await prisma.librarySpace.findFirst({
+    where: { id, storeId },
     include: {
       volumes: {
         select: {
@@ -185,7 +186,7 @@ export async function getLibrarySpace(id: string): Promise<LibrarySpaceSummary |
     icon: space.icon || "🏛️",
     color: space.color || "#6366f1",
     isDefault: space.isDefault,
-    storeId: space.storeId || "ghostlight-demo",
+    storeId: space.storeId || storeId,
     createdAt: space.createdAt,
     updatedAt: space.updatedAt,
     volumeCount,
@@ -195,10 +196,11 @@ export async function getLibrarySpace(id: string): Promise<LibrarySpaceSummary |
 }
 
 export async function createLibrarySpace(input: CreateLibrarySpaceInput): Promise<LibrarySpaceSummary> {
-  await ensureLibrarySpacesExist();
+  await ensureLibrarySpacesExist(input.storeId);
 
   if (input.isDefault) {
     await prisma.librarySpace.updateMany({
+      where: { storeId: input.storeId },
       data: { isDefault: false },
     });
   }
@@ -214,7 +216,7 @@ export async function createLibrarySpace(input: CreateLibrarySpaceInput): Promis
       icon: input.icon || "🏛️",
       color: input.color || "#6366f1",
       isDefault: Boolean(input.isDefault),
-      storeId: input.storeId || "ghostlight-demo",
+      storeId: input.storeId,
     },
   });
 
@@ -227,7 +229,7 @@ export async function createLibrarySpace(input: CreateLibrarySpaceInput): Promis
     icon: space.icon || "🏛️",
     color: space.color || "#6366f1",
     isDefault: space.isDefault,
-    storeId: space.storeId || "ghostlight-demo",
+    storeId: space.storeId || input.storeId,
     createdAt: space.createdAt,
     updatedAt: space.updatedAt,
     volumeCount: 0,
@@ -236,12 +238,15 @@ export async function createLibrarySpace(input: CreateLibrarySpaceInput): Promis
   };
 }
 
-export async function updateLibrarySpace(id: string, input: UpdateLibrarySpaceInput): Promise<LibrarySpaceSummary> {
-  await ensureLibrarySpacesExist();
+export async function updateLibrarySpace(id: string, storeId: string, input: UpdateLibrarySpaceInput): Promise<LibrarySpaceSummary | null> {
+  await ensureLibrarySpacesExist(storeId);
+
+  const existing = await prisma.librarySpace.findFirst({ where: { id, storeId } });
+  if (!existing) return null;
 
   if (input.isDefault) {
     await prisma.librarySpace.updateMany({
-      where: { id: { not: id } },
+      where: { id: { not: id }, storeId },
       data: { isDefault: false },
     });
   }
@@ -262,26 +267,29 @@ export async function updateLibrarySpace(id: string, input: UpdateLibrarySpaceIn
     data: updateData,
   });
 
-  const updated = await getLibrarySpace(id);
+  const updated = await getLibrarySpace(id, storeId);
   if (!updated) throw new Error("Library space not found after update.");
   return updated;
 }
 
-export async function deleteLibrarySpace(id: string): Promise<{ success: boolean; movedToDefaultId?: string }> {
-  await ensureLibrarySpacesExist();
+export async function deleteLibrarySpace(id: string, storeId: string): Promise<{ success: boolean; movedToDefaultId?: string } | null> {
+  await ensureLibrarySpacesExist(storeId);
 
-  const count = await prisma.librarySpace.count();
+  const existing = await prisma.librarySpace.findFirst({ where: { id, storeId } });
+  if (!existing) return null;
+
+  const count = await prisma.librarySpace.count({ where: { storeId } });
   if (count <= 1) {
     throw new Error("Cannot delete the only remaining library space. Create another library first.");
   }
 
-  // Find another default space to move volumes and shelves to
+  // Find another default space (within this store) to move volumes and shelves to
   let defaultSpace = await prisma.librarySpace.findFirst({
-    where: { id: { not: id }, isDefault: true },
+    where: { id: { not: id }, storeId, isDefault: true },
   });
   if (!defaultSpace) {
     defaultSpace = await prisma.librarySpace.findFirst({
-      where: { id: { not: id } },
+      where: { id: { not: id }, storeId },
     });
   }
 

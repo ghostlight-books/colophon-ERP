@@ -735,7 +735,7 @@ model LibraryShelfLocation {
   updatedAt             DateTime              @updatedAt
   volumes               LibraryVolume[]
 
-  @@unique([roomName, bookcaseName, shelfName])
+  @@unique([storeId, roomName, bookcaseName, shelfName])
   @@index([roomName])
   @@index([librarySpaceId])
 }
@@ -784,15 +784,20 @@ model LibraryNotification {
   type                  String                @default("CATALOG") // "OFFER" | "TRADE" | "SALE" | "WISHLIST_MATCH" | "BADGE" | "MESSAGE" | "LOAN_DUE" | "CATALOG"
   read                  Boolean               @default(false)
   actionUrl             String?
+  storeId               String?
   createdAt             DateTime              @default(now())
 
   @@index([read, createdAt])
+  @@index([storeId, createdAt])
 }
 
 model LibraryBadgeAward {
   id                    String                @id @default(uuid())
-  badgeId               String                @unique
+  badgeId               String
+  storeId               String?
   awardedAt             DateTime              @default(now())
+
+  @@unique([storeId, badgeId])
 }
 
 model LibraryWantlistItem {

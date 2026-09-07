@@ -16,6 +16,9 @@ import {
 } from "../libraryVolume.service.js";
 import { prisma } from "../../../config/database.js";
 
+const STORE_ID = "test-store-exchange";
+const OFFERER_STORE_ID = "test-store-exchange-offerer";
+
 describe("Library Exchange & Offers Engine", () => {
   const createdVolumeIds: string[] = [];
   const createdOfferIds: string[] = [];
@@ -34,7 +37,7 @@ describe("Library Exchange & Offers Engine", () => {
     // Delete created volumes
     for (const volId of createdVolumeIds) {
       try {
-        await deleteLibraryVolume(volId);
+        await deleteLibraryVolume(volId, STORE_ID);
       } catch {}
     }
   });
@@ -49,6 +52,7 @@ describe("Library Exchange & Offers Engine", () => {
       listingStatus: "OPEN_FOR_TRADE",
       askingPrice: 120.0,
       tradePreferences: "Looking for vintage Faulkner or Steinbeck",
+      storeId: STORE_ID,
     });
 
     createdVolumeIds.push(volume.id);
@@ -71,6 +75,7 @@ describe("Library Exchange & Offers Engine", () => {
       replacementValue: 45.0,
       listingStatus: "ALLOW_OFFERS",
       askingPrice: 40.0,
+      storeId: STORE_ID,
     });
 
     createdVolumeIds.push(volume.id);
@@ -84,12 +89,13 @@ describe("Library Exchange & Offers Engine", () => {
       offererEmail: "arthur@earth.org",
       cashOfferAmount: 35.0,
       notes: "Will pay via PayPal or in cash at book fair.",
-    });
+    }, OFFERER_STORE_ID);
 
     createdOfferIds.push(offer.id);
     assert.ok(offer.id);
     assert.equal(offer.status, "PENDING");
     assert.equal(offer.cashOfferAmount, 35.0);
+    assert.equal(offer.offererId, OFFERER_STORE_ID);
 
     // 2. Submit a bookstore buy offer
     const storeOffer = await submitLibraryOffer({
@@ -101,31 +107,31 @@ describe("Library Exchange & Offers Engine", () => {
       offererEmail: "buyer@ghostlightbooks.com",
       cashOfferAmount: 28.0,
       notes: "Offering $28 cash or $38 store trade credit.",
-    });
+    }, OFFERER_STORE_ID);
 
     createdOfferIds.push(storeOffer.id);
     assert.ok(storeOffer.id);
     assert.equal(storeOffer.offerType, "BOOKSTORE_BUY_OFFER");
 
-    // 3. List incoming offers
-    const incoming = await listIncomingLibraryOffers();
+    // 3. List incoming offers (as the volume's owning store)
+    const incoming = await listIncomingLibraryOffers(STORE_ID);
     const volumeOffers = incoming.filter((o) => o.volumeId === volume.id);
     assert.equal(volumeOffers.length, 2);
 
-    // 4. Respond to offer (Counter-offer)
+    // 4. Respond to offer (Counter-offer), as the volume's owning store
     const countered = await respondToLibraryOffer({
       offerId: offer.id,
       action: "COUNTER",
       counterAmount: 38.0,
       counterNotes: "Meet in the middle at $38?",
-    });
+    }, STORE_ID);
 
     assert.equal(countered.status, "COUNTERED");
     assert.equal(countered.counterAmount, 38.0);
   });
 
   test("generates collection health and completeness metrics", async () => {
-    const health = await getLibraryCollectionHealth();
+    const health = await getLibraryCollectionHealth(STORE_ID);
     assert.ok(typeof health.totalVolumes === "number");
     assert.ok(typeof health.classificationPercent === "number");
     assert.ok(typeof health.totalInsuredValue === "number");
@@ -133,11 +139,11 @@ describe("Library Exchange & Offers Engine", () => {
   });
 
   test("manages library-specific notifications", async () => {
-    const notifications = await getLibraryNotifications(5);
+    const notifications = await getLibraryNotifications(STORE_ID, 5);
     assert.ok(Array.isArray(notifications));
     if (notifications.length > 0) {
-      const read = await markLibraryNotificationRead(notifications[0].id);
-      assert.equal(read.read, true);
+      const result = await markLibraryNotificationRead(notifications[0].id, STORE_ID);
+      assert.equal(result.success, true);
     }
   });
 });

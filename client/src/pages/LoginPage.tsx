@@ -3,6 +3,9 @@ import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { useWorkspace, type WorkspaceMode } from "../contexts/WorkspaceContext";
 import BrandLogo from "../components/common/BrandLogo";
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api";
+const AUTH_TOKEN_STORAGE_KEY = "colophon-auth-token";
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -34,61 +37,61 @@ export default function LoginPage() {
     return currentMode || "library";
   });
 
-  const [email, setEmail] = useState(() => (selectedEdition === "library" ? "morgan@personalstacks.org" : "owner@ghostlightbooks.com"));
-  const [password, setPassword] = useState("••••••••••••");
-  const [displayName, setDisplayName] = useState(() => (selectedEdition === "library" ? "Morgan" : "Sarah"));
-  const [role, setRole] = useState("Owner");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Update defaults if edition toggle changes without manual typing
   const handleEditionChange = (edition: WorkspaceMode) => {
     setSelectedEdition(edition);
-    if (edition === "library" && (displayName === "Sarah" || !displayName)) {
-      setDisplayName("Morgan");
-      setEmail("morgan@personalstacks.org");
-    } else if (edition === "bookstore" && (displayName === "Morgan" || !displayName)) {
-      setDisplayName("Sarah");
-      setEmail("owner@ghostlightbooks.com");
-    }
   };
 
-  const handleLogin = (e: FormEvent) => {
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
     setIsLoading(true);
 
-    const userObj = {
-      name: displayName.trim() || (selectedEdition === "library" ? "Morgan" : "Sarah"),
-      email: email.trim() || (selectedEdition === "library" ? "morgan@personalstacks.org" : "owner@ghostlightbooks.com"),
-      role: role || "Owner",
-    };
-
     try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Invalid email or password.");
+      }
+
+      const data = (await res.json()) as { token: string; storeId: string | null; role: string | null };
+
+      const userObj = {
+        name: displayName.trim() || email.trim(),
+        email: email.trim(),
+        role: data.role || "Owner",
+      };
+
       localStorage.setItem("colophon-current-user", JSON.stringify(userObj));
-    } catch {}
+      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, data.token);
 
-    setMode(selectedEdition);
+      setMode(selectedEdition);
 
-    // If redirected from a specific page, go back there; else go to the edition home
-    const fromState = (location.state as { from?: { pathname: string } })?.from?.pathname;
-    const targetPath = fromState && fromState !== "/login"
-      ? fromState
-      : selectedEdition === "library"
-      ? "/library"
-      : "/dashboard";
+      // If redirected from a specific page, go back there; else go to the edition home
+      const fromState = (location.state as { from?: { pathname: string } })?.from?.pathname;
+      const targetPath = fromState && fromState !== "/login"
+        ? fromState
+        : selectedEdition === "library"
+        ? "/library"
+        : "/dashboard";
 
-    setTimeout(() => {
-      setIsLoading(false);
       navigate(targetPath, { replace: true });
-    }, 350);
-  };
-
-  const selectDemoProfile = (profile: { name: string; email: string; role: string; edition: WorkspaceMode }) => {
-    setDisplayName(profile.name);
-    setEmail(profile.email);
-    setRole(profile.role);
-    setSelectedEdition(profile.edition);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Login failed. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -195,7 +198,7 @@ export default function LoginPage() {
               required
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="e.g. Morgan or Sarah"
+              placeholder="How should we address you?"
               className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 font-normal"
             />
           </div>
@@ -207,7 +210,7 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="e.g. user@colophon.app"
+              placeholder="you@example.com"
               className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 font-normal"
             />
           </div>
@@ -244,6 +247,12 @@ export default function LoginPage() {
             </label>
           </div>
 
+          {errorMessage && (
+            <div className="px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-[11px] font-medium">
+              {errorMessage}
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={isLoading}
@@ -259,32 +268,6 @@ export default function LoginPage() {
             )}
           </button>
         </form>
-
-        {/* 1-Click Quick Demo Profiles */}
-        <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
-          <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider text-center">
-            Quick 1-Click Profiles
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => selectDemoProfile({ name: "Morgan", email: "morgan@personalstacks.org", role: "Owner", edition: "library" })}
-              className="p-2.5 bg-white dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl border border-slate-300 dark:border-slate-700 text-left transition cursor-pointer shadow-2xs"
-            >
-              <p className="text-[11px] font-semibold text-slate-900 dark:text-white">Morgan (Librarian)</p>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-normal mt-0.5">Personal Library Edition</p>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => selectDemoProfile({ name: "Sarah", email: "owner@ghostlightbooks.com", role: "Owner", edition: "bookstore" })}
-              className="p-2.5 bg-white dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl border border-slate-300 dark:border-slate-700 text-left transition cursor-pointer shadow-2xs"
-            >
-              <p className="text-[11px] font-semibold text-slate-900 dark:text-white">Sarah (Store Owner)</p>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-normal mt-0.5">Bookstore ERP Edition</p>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -39,18 +39,18 @@ function buildCitation(
   return `${citation}.`;
 }
 
-export async function listNotesForVolume(volumeId: string) {
+export async function listNotesForVolume(volumeId: string, storeId: string) {
   await ensureLibraryTablesExist();
   return prisma.libraryNote.findMany({
-    where: { volumeId },
+    where: { volumeId, volume: { storeId } },
     orderBy: { createdAt: "desc" },
   });
 }
 
-export async function listAllNotes(query?: string) {
+export async function listAllNotes(storeId: string, query?: string) {
   await ensureLibraryTablesExist();
 
-  const where: any = {};
+  const where: any = { volume: { storeId } };
   if (query && query.trim()) {
     const q = query.trim();
     where.OR = [
@@ -72,15 +72,15 @@ export async function listAllNotes(query?: string) {
   });
 }
 
-export async function createNote(input: CreateNoteInput) {
+export async function createNote(input: CreateNoteInput, storeId: string) {
   await ensureLibraryTablesExist();
 
   if (!input.quoteText?.trim() && !input.personalNote?.trim()) {
     throw new Error("Add a quote or a note before saving.");
   }
 
-  const volume = await prisma.libraryVolume.findUnique({
-    where: { id: input.volumeId },
+  const volume = await prisma.libraryVolume.findFirst({
+    where: { id: input.volumeId, storeId },
     select: { title: true, author: true, publisher: true, publishYear: true },
   });
   if (!volume) {
@@ -98,15 +98,15 @@ export async function createNote(input: CreateNoteInput) {
   });
 }
 
-export async function updateNote(id: string, input: UpdateNoteInput) {
+export async function updateNote(id: string, storeId: string, input: UpdateNoteInput) {
   await ensureLibraryTablesExist();
 
-  const existing = await prisma.libraryNote.findUnique({
-    where: { id },
+  const existing = await prisma.libraryNote.findFirst({
+    where: { id, volume: { storeId } },
     include: { volume: { select: { title: true, author: true, publisher: true, publishYear: true } } },
   });
   if (!existing) {
-    throw new Error(`Note ${id} not found.`);
+    return null;
   }
 
   const nextPageNumber = input.pageNumber !== undefined ? input.pageNumber : existing.pageNumber;
@@ -122,8 +122,8 @@ export async function updateNote(id: string, input: UpdateNoteInput) {
   });
 }
 
-export async function deleteNote(id: string) {
+export async function deleteNote(id: string, storeId: string) {
   await ensureLibraryTablesExist();
-  await prisma.libraryNote.delete({ where: { id } });
-  return { success: true };
+  const { count } = await prisma.libraryNote.deleteMany({ where: { id, volume: { storeId } } });
+  return { success: count > 0 };
 }

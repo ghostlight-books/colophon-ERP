@@ -284,12 +284,33 @@ function resolveApiUrl(endpointPath: string): string {
 }
 
 const PROVIDER_TIMEOUT_MS = 15000;
+const AUTH_TOKEN_STORAGE_KEY = "colophon-auth-token";
 
 async function fetchWithTimeout(url: string, options?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    let token: string | null = null;
+    try {
+      token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    } catch {}
+
+    const headers = new Headers(options?.headers);
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+
+    const res = await fetch(url, { ...options, headers, signal: controller.signal });
+
+    if (res.status === 401) {
+      try {
+        localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+        localStorage.removeItem("colophon-current-user");
+      } catch {}
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+    }
+
+    return res;
   } finally {
     clearTimeout(timeout);
   }

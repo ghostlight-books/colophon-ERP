@@ -8,6 +8,7 @@ export interface CreateWantlistItemInput {
   notes?: string | null;
   maxPrice?: number | null;
   librarySpaceId?: string | null;
+  storeId: string;
 }
 
 export interface UpdateWantlistItemInput {
@@ -83,12 +84,21 @@ export async function notifyWantlistMatchesForVolume(volume: {
   if (activeItems.length === 0) return;
 
   const actionUrl = `/library/exchange?volumeId=${volume.id}`;
-  const alreadyNotified = await prisma.libraryNotification.findFirst({ where: { type: "WISHLIST_MATCH", actionUrl } });
-  if (alreadyNotified) return;
+  const notifiedStoreIds = new Set<string>();
 
   for (const item of activeItems) {
+    if (!item.storeId || notifiedStoreIds.has(item.storeId)) continue;
+
     const matches = await findMatchesForItem({ isbn: item.isbn, title: item.title, author: item.author });
     if (!matches.some((m) => m.id === volume.id)) continue;
+
+    const alreadyNotified = await prisma.libraryNotification.findFirst({
+      where: { type: "WISHLIST_MATCH", actionUrl, storeId: item.storeId },
+    });
+    if (alreadyNotified) {
+      notifiedStoreIds.add(item.storeId);
+      continue;
+    }
 
     await prisma.libraryNotification.create({
       data: {
@@ -96,16 +106,17 @@ export async function notifyWantlistMatchesForVolume(volume: {
         detail: `"${volume.title}"${volume.author ? ` by ${volume.author}` : ""} is now available and matches your wishlist item.`,
         type: "WISHLIST_MATCH",
         actionUrl,
+        storeId: item.storeId,
       },
     });
-    return; // one notification per newly-listed volume is enough, even if it matches multiple wantlist items
+    notifiedStoreIds.add(item.storeId); // one notification per store per newly-listed volume, even if multiple items match
   }
 }
 
-export async function listWantlistItems(librarySpaceId?: string) {
+export async function listWantlistItems(storeId: string, librarySpaceId?: string) {
   await ensureLibraryTablesExist();
 
-  const where: any = { status: { not: "ARCHIVED" } };
+  const where: any = { storeId, status: { not: "ARCHIVED" } };
   if (librarySpaceId && librarySpaceId !== "ALL") {
     where.librarySpaceId = librarySpaceId;
   }
@@ -139,18 +150,19 @@ export async function createWantlistItem(input: CreateWantlistItemInput) {
       maxPrice: input.maxPrice ?? null,
       librarySpaceId: input.librarySpaceId || null,
       status: "ACTIVE",
+      storeId: input.storeId,
     },
   });
 
   return { ...item, matches: await findMatchesForItem(item) };
 }
 
-export async function updateWantlistItem(id: string, input: UpdateWantlistItemInput) {
+export async function updateWantlistItem(id: string, storeId: string, input: UpdateWantlistItemInput) {
   await ensureLibraryTablesExist();
 
-  const existing = await prisma.libraryWantlistItem.findUnique({ where: { id } });
+  const existing = await prisma.libraryWantlistItem.findFirst({ where: { id, storeId } });
   if (!existing) {
-    throw new Error(`Wantlist item ${id} not found.`);
+    return null;
   }
 
   const item = await prisma.libraryWantlistItem.update({
@@ -168,8 +180,8 @@ export async function updateWantlistItem(id: string, input: UpdateWantlistItemIn
   return { ...item, matches: await findMatchesForItem(item) };
 }
 
-export async function deleteWantlistItem(id: string) {
+export async function deleteWantlistItem(id: string, storeId: string) {
   await ensureLibraryTablesExist();
-  await prisma.libraryWantlistItem.delete({ where: { id } });
-  return { success: true };
+  const { count } = await prisma.libraryWantlistItem.deleteMany({ where: { id, storeId } });
+  return { success: count > 0 };
 }

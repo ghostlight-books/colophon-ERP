@@ -13,6 +13,8 @@ import {
   deleteLibraryVolume,
 } from "../libraryVolume.service.js";
 
+const STORE_ID = "test-store-spaces";
+
 describe("Library Spaces & Multi-Library Management Engine", () => {
   const createdSpaceIds: string[] = [];
   const createdVolumeIds: string[] = [];
@@ -21,19 +23,19 @@ describe("Library Spaces & Multi-Library Management Engine", () => {
     // Clean up all test volumes
     for (const volId of createdVolumeIds) {
       try {
-        await deleteLibraryVolume(volId);
+        await deleteLibraryVolume(volId, STORE_ID);
       } catch {}
     }
     // Clean up all test spaces
     for (const spaceId of createdSpaceIds) {
       try {
-        await deleteLibrarySpace(spaceId);
+        await deleteLibrarySpace(spaceId, STORE_ID);
       } catch {}
     }
   });
 
   it("ensures default library space exists", async () => {
-    const spaces = await listLibrarySpaces();
+    const spaces = await listLibrarySpaces(STORE_ID);
     assert.ok(spaces.length >= 1, "Should have at least 1 default library space");
     const defaultSpace = spaces.find((s) => s.isDefault);
     assert.ok(defaultSpace, "Should have a designated default library");
@@ -46,6 +48,7 @@ describe("Library Spaces & Multi-Library Management Engine", () => {
       description: "Legal reference, taxation, and jurisprudence library",
       icon: "🏢",
       color: "#0ea5e9",
+      storeId: STORE_ID,
     });
 
     createdSpaceIds.push(space.id);
@@ -55,7 +58,7 @@ describe("Library Spaces & Multi-Library Management Engine", () => {
     assert.equal(space.volumeCount, 0);
 
     // Fetch single
-    const fetched = await getLibrarySpace(space.id);
+    const fetched = await getLibrarySpace(space.id, STORE_ID);
     assert.ok(fetched);
     assert.equal(fetched.name, "Temporary Test Library Space");
   });
@@ -72,6 +75,7 @@ describe("Library Spaces & Multi-Library Management Engine", () => {
       librarySpaceId: spaceId,
       replacementValue: 45.0,
       condition: "FINE",
+      storeId: STORE_ID,
     });
 
     createdVolumeIds.push(volume.id);
@@ -79,11 +83,11 @@ describe("Library Spaces & Multi-Library Management Engine", () => {
     assert.equal(volume.librarySpaceId, spaceId);
 
     // List volumes filtered by this space
-    const filtered = await listLibraryVolumes({ librarySpaceId: spaceId });
+    const filtered = await listLibraryVolumes({ storeId: STORE_ID, librarySpaceId: spaceId });
     assert.ok(filtered.items.some((v) => v.id === volume.id));
 
     // Check space stats update
-    const updatedSpace = await getLibrarySpace(spaceId);
+    const updatedSpace = await getLibrarySpace(spaceId, STORE_ID);
     assert.ok(updatedSpace);
     assert.ok(updatedSpace.volumeCount >= 1);
     assert.ok(updatedSpace.totalValue >= 45.0);
@@ -93,11 +97,12 @@ describe("Library Spaces & Multi-Library Management Engine", () => {
     const spaceId = createdSpaceIds[0];
     if (!spaceId) return;
 
-    const updated = await updateLibrarySpace(spaceId, {
+    const updated = await updateLibrarySpace(spaceId, STORE_ID, {
       name: "Updated Temporary Test Space",
       description: "Expanded collection",
     });
 
+    assert.ok(updated);
     assert.equal(updated.name, "Updated Temporary Test Space");
     assert.equal(updated.description, "Expanded collection");
   });
@@ -107,6 +112,7 @@ describe("Library Spaces & Multi-Library Management Engine", () => {
     const temp = await createLibrarySpace({
       name: "Temporary Cabin Space For Delete Test",
       icon: "🏡",
+      storeId: STORE_ID,
     });
 
     // Add a book to it
@@ -115,16 +121,18 @@ describe("Library Spaces & Multi-Library Management Engine", () => {
       title: "Temporary Test Volume For Delete",
       librarySpaceId: temp.id,
       replacementValue: 15.0,
+      storeId: STORE_ID,
     });
     createdVolumeIds.push(tempVol.id);
 
     // Delete temporary space
-    const res = await deleteLibrarySpace(temp.id);
+    const res = await deleteLibrarySpace(temp.id, STORE_ID);
+    assert.ok(res);
     assert.equal(res.success, true);
     assert.ok(res.movedToDefaultId);
 
     // Verify book was moved to default library space
-    const movedVolumes = await listLibraryVolumes({ librarySpaceId: res.movedToDefaultId });
+    const movedVolumes = await listLibraryVolumes({ storeId: STORE_ID, librarySpaceId: res.movedToDefaultId });
     assert.ok(movedVolumes.items.some((v) => v.id === tempVol.id));
   });
 });

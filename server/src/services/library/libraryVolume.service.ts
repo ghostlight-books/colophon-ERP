@@ -47,10 +47,11 @@ export interface CreateLibraryVolumeInput {
   valuationNotes?: string | null;
   condition?: string;
   librarySpaceId?: string | null;
-  storeId?: string;
+  storeId: string;
 }
 
 export interface LibraryFilterOptions {
+  storeId: string;
   query?: string;
   deweyPrefix?: string;
   locPrefix?: string;
@@ -157,8 +158,12 @@ export async function ensureLibraryTablesExist(): Promise<void> {
         "type" TEXT NOT NULL DEFAULT 'CATALOG',
         "read" BOOLEAN NOT NULL DEFAULT false,
         "actionUrl" TEXT,
+        "storeId" TEXT,
         "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "LibraryNotification_storeId_createdAt_idx" ON "LibraryNotification"("storeId", "createdAt");
     `);
 
     await prisma.$executeRawUnsafe(`
@@ -208,12 +213,21 @@ export async function ensureLibraryTablesExist(): Promise<void> {
       CREATE TABLE IF NOT EXISTS "LibraryBadgeAward" (
         "id" TEXT NOT NULL PRIMARY KEY,
         "badgeId" TEXT NOT NULL,
+        "storeId" TEXT,
         "awardedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    // Badges used to be a single global award (bare unique on badgeId); now per-store.
+    await prisma.$executeRawUnsafe(`DROP INDEX IF EXISTS "LibraryBadgeAward_badgeId_key";`).catch(() => null);
     await prisma.$executeRawUnsafe(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "LibraryBadgeAward_badgeId_key" ON "LibraryBadgeAward"("badgeId");
+      CREATE UNIQUE INDEX IF NOT EXISTS "LibraryBadgeAward_storeId_badgeId_key" ON "LibraryBadgeAward"("storeId", "badgeId");
     `);
+
+    // Shelf names used to be unique app-wide; now unique per store.
+    await prisma.$executeRawUnsafe(`DROP INDEX IF EXISTS "LibraryShelfLocation_roomName_bookcaseName_shelfName_key";`).catch(() => null);
+    await prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "LibraryShelfLocation_storeId_roomName_bookcaseName_shelfName_key" ON "LibraryShelfLocation"("storeId", "roomName", "bookcaseName", "shelfName");
+    `).catch(() => null);
 
     await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "LibraryWantlistItem" (
@@ -243,6 +257,8 @@ export async function ensureLibraryTablesExist(): Promise<void> {
       `ALTER TABLE "LibraryVolume" ADD COLUMN "minimumOffer" REAL;`,
       `ALTER TABLE "LibraryVolume" ADD COLUMN "tradePreferences" TEXT;`,
       `ALTER TABLE "LibraryVolume" ADD COLUMN "condition" TEXT NOT NULL DEFAULT 'VERY_GOOD';`,
+      `ALTER TABLE "LibraryNotification" ADD COLUMN "storeId" TEXT;`,
+      `ALTER TABLE "LibraryBadgeAward" ADD COLUMN "storeId" TEXT;`,
     ];
 
     for (const sql of migrations) {
@@ -294,7 +310,7 @@ export async function createLibraryVolume(input: CreateLibraryVolumeInput) {
   let shelf = input.shelfName || null;
 
   if (input.shelfLocationId) {
-    const loc = await prisma.libraryShelfLocation.findUnique({ where: { id: input.shelfLocationId } });
+    const loc = await prisma.libraryShelfLocation.findFirst({ where: { id: input.shelfLocationId, storeId: input.storeId } });
     if (loc) {
       room = loc.roomName;
       bookcase = loc.bookcaseName;
@@ -304,8 +320,8 @@ export async function createLibraryVolume(input: CreateLibraryVolumeInput) {
 
   let librarySpaceId = input.librarySpaceId || null;
   if (!librarySpaceId) {
-    const defaultSpace = await prisma.librarySpace.findFirst({ where: { isDefault: true } }) ||
-      await prisma.librarySpace.findFirst();
+    const defaultSpace = await prisma.librarySpace.findFirst({ where: { storeId: input.storeId, isDefault: true } }) ||
+      await prisma.librarySpace.findFirst({ where: { storeId: input.storeId } });
     if (defaultSpace) librarySpaceId = defaultSpace.id;
   }
 
@@ -349,7 +365,7 @@ export async function createLibraryVolume(input: CreateLibraryVolumeInput) {
       askingPrice: input.askingPrice || null,
       minimumOffer: input.minimumOffer || null,
       tradePreferences: input.tradePreferences || null,
-      storeId: input.storeId || "ghostlight-demo",
+      storeId: input.storeId,
     },
     include: {
       shelfLocation: true,
@@ -358,13 +374,14 @@ export async function createLibraryVolume(input: CreateLibraryVolumeInput) {
   });
 
   notifyWantlistMatchesForVolume(createdVolume).catch(() => {});
-  checkAndNotifyNewBadges().catch(() => {});
+  checkAndNotifyNewBadges(input.storeId).catch(() => {});
 
   return createdVolume;
 }
 
 export async function scanAndIntakeVolume(
   isbn: string,
+  storeId: string,
   shelfLocationId?: string | null,
   customData?: Partial<CreateLibraryVolumeInput>
 ) {
@@ -401,14 +418,14 @@ export async function scanAndIntakeVolume(
     tradePreferences: customData?.tradePreferences || null,
     personalNotes: customData?.personalNotes || null,
     exLibrisTags: customData?.exLibrisTags || null,
-    storeId: customData?.storeId || "ghostlight-demo",
+    storeId,
   });
 }
 
-export async function listLibraryVolumes(filters: LibraryFilterOptions = {}) {
+export async function listLibraryVolumes(filters: LibraryFilterOptions) {
   await ensureLibraryTablesExist();
 
-  const where: Record<string, any> = {};
+  const where: Record<string, any> = { storeId: filters.storeId };
 
   if (filters.query) {
     const q = filters.query.trim();
@@ -470,16 +487,19 @@ export async function listLibraryVolumes(filters: LibraryFilterOptions = {}) {
   return { total, items };
 }
 
-export async function getLibraryVolume(id: string) {
+export async function getLibraryVolume(id: string, storeId: string) {
   await ensureLibraryTablesExist();
-  return prisma.libraryVolume.findUnique({
-    where: { id },
+  return prisma.libraryVolume.findFirst({
+    where: { id, storeId },
     include: { shelfLocation: true },
   });
 }
 
-export async function updateLibraryVolume(id: string, data: Partial<CreateLibraryVolumeInput>) {
+export async function updateLibraryVolume(id: string, storeId: string, data: Partial<CreateLibraryVolumeInput>) {
   await ensureLibraryTablesExist();
+
+  const existing = await prisma.libraryVolume.findFirst({ where: { id, storeId } });
+  if (!existing) return null;
 
   const updatePayload: Record<string, any> = {};
   if (data.title !== undefined) updatePayload.title = data.title;
@@ -518,7 +538,7 @@ export async function updateLibraryVolume(id: string, data: Partial<CreateLibrar
   if (data.shelfLocationId !== undefined) {
     updatePayload.shelfLocationId = data.shelfLocationId;
     if (data.shelfLocationId) {
-      const loc = await prisma.libraryShelfLocation.findUnique({ where: { id: data.shelfLocationId } });
+      const loc = await prisma.libraryShelfLocation.findFirst({ where: { id: data.shelfLocationId, storeId } });
       if (loc) {
         updatePayload.roomName = loc.roomName;
         updatePayload.bookcaseName = loc.bookcaseName;
@@ -540,36 +560,44 @@ export async function updateLibraryVolume(id: string, data: Partial<CreateLibrar
   if (data.listingStatus !== undefined) {
     notifyWantlistMatchesForVolume(updatedVolume).catch(() => {});
   }
-  checkAndNotifyNewBadges().catch(() => {});
+  checkAndNotifyNewBadges(storeId).catch(() => {});
 
   return updatedVolume;
 }
 
-export async function deleteLibraryVolume(id: string) {
+export async function deleteLibraryVolume(id: string, storeId: string) {
   await ensureLibraryTablesExist();
+  const existing = await prisma.libraryVolume.findFirst({ where: { id, storeId } });
+  if (!existing) return null;
   await prisma.$executeRawUnsafe(`DELETE FROM "LibraryOffer" WHERE "volumeId" = ?`, id).catch(() => null);
   await prisma.$executeRawUnsafe(`DELETE FROM "LibraryLoan" WHERE "volumeId" = ?`, id).catch(() => null);
   return prisma.libraryVolume.delete({ where: { id } });
 }
 
-export async function bulkDeleteLibraryVolumes(ids: string[]) {
+export async function bulkDeleteLibraryVolumes(ids: string[], storeId: string) {
   await ensureLibraryTablesExist();
   if (!Array.isArray(ids) || ids.length === 0) {
     return { count: 0 };
   }
-  for (const id of ids) {
+  const ownedIds = (
+    await prisma.libraryVolume.findMany({ where: { id: { in: ids }, storeId }, select: { id: true } })
+  ).map((v) => v.id);
+  if (ownedIds.length === 0) {
+    return { count: 0 };
+  }
+  for (const id of ownedIds) {
     await prisma.$executeRawUnsafe(`DELETE FROM "LibraryOffer" WHERE "volumeId" = ?`, id).catch(() => null);
     await prisma.$executeRawUnsafe(`DELETE FROM "LibraryLoan" WHERE "volumeId" = ?`, id).catch(() => null);
   }
   return prisma.libraryVolume.deleteMany({
     where: {
-      id: { in: ids },
+      id: { in: ownedIds },
     },
   });
 }
 
 // Shelves Management
-export async function listShelfLocations(storeId = "ghostlight-demo") {
+export async function listShelfLocations(storeId: string) {
   await ensureLibraryTablesExist();
 
   const locations = await prisma.libraryShelfLocation.findMany({
@@ -607,7 +635,7 @@ export async function createShelfLocation(input: {
   shelfName: string;
   description?: string;
   capacity?: number;
-  storeId?: string;
+  storeId: string;
 }) {
   await ensureLibraryTablesExist();
   const room = input.roomName.trim();
@@ -617,7 +645,8 @@ export async function createShelfLocation(input: {
 
   return prisma.libraryShelfLocation.upsert({
     where: {
-      roomName_bookcaseName_shelfName: {
+      storeId_roomName_bookcaseName_shelfName: {
+        storeId: input.storeId,
         roomName: room,
         bookcaseName: bookcase,
         shelfName: shelf,
@@ -634,13 +663,15 @@ export async function createShelfLocation(input: {
       fullLocationLabel: label,
       description: input.description || null,
       capacity: input.capacity || 30,
-      storeId: input.storeId || "ghostlight-demo",
+      storeId: input.storeId,
     },
   });
 }
 
-export async function deleteShelfLocation(id: string) {
+export async function deleteShelfLocation(id: string, storeId: string) {
   await ensureLibraryTablesExist();
+  const existing = await prisma.libraryShelfLocation.findFirst({ where: { id, storeId } });
+  if (!existing) return null;
   // Unlink volumes first
   await prisma.libraryVolume.updateMany({
     where: { shelfLocationId: id },
@@ -652,11 +683,14 @@ export async function deleteShelfLocation(id: string) {
 // Circulation & Lending
 export async function loanVolume(
   volumeId: string,
+  storeId: string,
   borrowerName: string,
   borrowerContact?: string | null,
   dueDate?: Date | string | null
 ) {
   await ensureLibraryTablesExist();
+  const existing = await prisma.libraryVolume.findFirst({ where: { id: volumeId, storeId } });
+  if (!existing) return null;
   return prisma.libraryVolume.update({
     where: { id: volumeId },
     data: {
@@ -670,8 +704,10 @@ export async function loanVolume(
   });
 }
 
-export async function returnVolume(volumeId: string) {
+export async function returnVolume(volumeId: string, storeId: string) {
   await ensureLibraryTablesExist();
+  const existing = await prisma.libraryVolume.findFirst({ where: { id: volumeId, storeId } });
+  if (!existing) return null;
   return prisma.libraryVolume.update({
     where: { id: volumeId },
     data: {
@@ -686,7 +722,7 @@ export async function returnVolume(volumeId: string) {
 }
 
 // Library Dashboard Summary
-export async function getLibraryDashboardSummary(storeId = "ghostlight-demo") {
+export async function getLibraryDashboardSummary(storeId: string) {
   await ensureLibraryTablesExist();
 
   const [volumes, shelves] = await Promise.all([
@@ -771,7 +807,7 @@ export async function getLibraryDashboardSummary(storeId = "ghostlight-demo") {
 }
 
 // Insurance & Estate Appraisal Report
-export async function generateValuationReport(storeId = "ghostlight-demo") {
+export async function generateValuationReport(storeId: string) {
   await ensureLibraryTablesExist();
 
   const volumes = await prisma.libraryVolume.findMany({
