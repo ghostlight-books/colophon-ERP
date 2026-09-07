@@ -705,7 +705,7 @@ export default function LibraryCatalogPage() {
                   )}
 
                   {/* Checkbox (in selection mode or on card hover) */}
-                  {(isSelectionMode || isSelected) ? (
+                  {(isSelectionMode || isSelected) && (
                     <div
                       onClick={(e) => toggleSelectVolume(vol.id, e)}
                       className="absolute top-2 left-2 z-10 w-6 h-6 rounded-lg bg-white/95 dark:bg-slate-900/95 shadow-md flex items-center justify-center border border-slate-300 dark:border-slate-600"
@@ -716,11 +716,6 @@ export default function LibraryCatalogPage() {
                         onChange={() => {}}
                         className="w-4 h-4 rounded text-indigo-600 cursor-pointer"
                       />
-                    </div>
-                  ) : (
-                    /* Sorting Rank Number Badge */
-                    <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-slate-900/80 text-white font-medium text-[9px] rounded-lg backdrop-blur-md shadow-xs">
-                      #{idx + 1}
                     </div>
                   )}
 
@@ -839,10 +834,6 @@ export default function LibraryCatalogPage() {
                 </div>
 
                 <div className="flex items-center gap-2.5 shrink-0">
-                  <div className="text-[11px] font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-700/70 border border-slate-300 dark:border-slate-600 px-2 py-0.5 rounded-lg" title="Sort Rank">
-                    #{idx + 1}
-                  </div>
-
                   <button
                     type="button"
                     onClick={(e) => toggleLike(vol.id, e)}
@@ -1194,9 +1185,6 @@ export default function LibraryCatalogPage() {
                       </div>
 
                       <div className="flex items-center gap-1.5 pt-1.5 flex-wrap">
-                        <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-black text-[10px] rounded-md">
-                          Rank #{volumes.findIndex(v => v.id === selectedVolume.id) + 1 || 1}
-                        </span>
                         {selectedVolume.isSigned && (
                           <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[10px] font-bold rounded-md">
                             ✍️ Signed
