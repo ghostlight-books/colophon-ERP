@@ -138,7 +138,40 @@ export function inferClassificationFromSubjects(
   if (combined.includes("philosophy") || combined.includes("psychology") || combined.includes("ethics")) {
     return { dewey: "100", loc: "B" };
   }
-  if (combined.includes("religion") || combined.includes("mythology") || combined.includes("bible")) {
+  // Religion & Theology -- check specific traditions/topics before falling
+  // back to the flat 200 (Religion, general) bucket, since Dewey has real
+  // subdivisions for each of these that a single catch-all was skipping.
+  if (combined.includes("quran") || combined.includes("koran") || combined.includes("islam") || combined.includes("muslim") || combined.includes("sufi")) {
+    return { dewey: "297", loc: "BP161" };
+  }
+  if (combined.includes("judaism") || combined.includes("jewish") || combined.includes("torah") || combined.includes("talmud") || combined.includes("kabbalah")) {
+    return { dewey: "296", loc: "BM155" };
+  }
+  if (combined.includes("buddhism") || combined.includes("buddhist") || combined.includes("zen") || combined.includes("dharma")) {
+    return { dewey: "294.3", loc: "BQ4022" };
+  }
+  if (combined.includes("hinduism") || combined.includes("hindu") || combined.includes("vedanta")) {
+    return { dewey: "294.5", loc: "BL1202" };
+  }
+  if (combined.includes("catholic")) {
+    return { dewey: "282", loc: "BX1751" };
+  }
+  if (combined.includes("bible") || combined.includes("scripture") || combined.includes("gospel") || combined.includes("testament")) {
+    return { dewey: "220", loc: "BS440" };
+  }
+  if (combined.includes("jesus") || combined.includes("christology")) {
+    return { dewey: "232", loc: "BT198" };
+  }
+  if (combined.includes("prayer") || combined.includes("devotional") || combined.includes("worship")) {
+    return { dewey: "242", loc: "BV245" };
+  }
+  if (combined.includes("church history") || combined.includes("history of christianity")) {
+    return { dewey: "270", loc: "BR145" };
+  }
+  if (combined.includes("christian") || combined.includes("christianity") || combined.includes("theology")) {
+    return { dewey: "230", loc: "BT75" };
+  }
+  if (combined.includes("religion") || combined.includes("mythology") || combined.includes("spirituality") || combined.includes("faith")) {
     return { dewey: "200", loc: "BL" };
   }
   if (combined.includes("economics") || combined.includes("politics") || combined.includes("sociology") || combined.includes("business") || combined.includes("finance")) {
