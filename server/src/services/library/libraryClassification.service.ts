@@ -256,9 +256,30 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
   let locClassification = cleanLocNumber(rawLoc);
   let locSubject = resolveLocSubject(locClassification);
 
+  // Subjects & Keywords -- gathered here (before the fallback inference
+  // below) so the inference actually has real subject/genre data to work
+  // with instead of just the title.
+  const subjectsSet = new Set<string>();
+  if (Array.isArray(openLib?.subjects)) {
+    openLib.subjects.slice(0, 10).forEach((s: string) => {
+      if (typeof s === "string" && s.trim()) subjectsSet.add(s.trim());
+    });
+  }
+  if (Array.isArray(google?.categories)) {
+    google.categories.forEach((c: string) => {
+      if (typeof c === "string" && c.trim()) subjectsSet.add(c.trim());
+    });
+  }
+  if (Array.isArray(isbndb?.subjects)) {
+    isbndb.subjects.slice(0, 10).forEach((s: string) => {
+      if (typeof s === "string" && s.trim()) subjectsSet.add(s.trim());
+    });
+  }
+  const subjects = Array.from(subjectsSet);
+
   // Smart fallback inference if no direct DDC/LOC catalog record exists
   if (!deweyDecimal || !locClassification) {
-    const inferred = inferClassificationFromSubjects(title, thrift?.category || thrift?.subcategory, []);
+    const inferred = inferClassificationFromSubjects(title, thrift?.category || thrift?.subcategory, subjects);
     if (!deweyDecimal) {
       deweyDecimal = inferred.dewey;
       deweyCategory = resolveDeweyCategory(deweyDecimal);
@@ -280,25 +301,6 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
     (Array.isArray(openLib?.oclc_number) ? openLib.oclc_number[0] : null) ||
     null
   );
-
-  // Subjects & Keywords
-  const subjectsSet = new Set<string>();
-  if (Array.isArray(openLib?.subjects)) {
-    openLib.subjects.slice(0, 10).forEach((s: string) => {
-      if (typeof s === "string" && s.trim()) subjectsSet.add(s.trim());
-    });
-  }
-  if (Array.isArray(google?.categories)) {
-    google.categories.forEach((c: string) => {
-      if (typeof c === "string" && c.trim()) subjectsSet.add(c.trim());
-    });
-  }
-  if (Array.isArray(isbndb?.subjects)) {
-    isbndb.subjects.slice(0, 10).forEach((s: string) => {
-      if (typeof s === "string" && s.trim()) subjectsSet.add(s.trim());
-    });
-  }
-  const subjects = Array.from(subjectsSet);
 
   // Publisher and Publish Year
   const publisher = (
