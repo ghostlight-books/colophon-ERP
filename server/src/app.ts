@@ -2368,6 +2368,54 @@ export function createApp(): express.Express {
     }
   });
 
+  // Re-runs Dewey/LOC classification for every volume in the caller's own
+  // library against current data sources, overwriting whatever is there now
+  // -- useful after a classification-accuracy fix or a new data source (e.g.
+  // a Google Books/ISBNdb key) goes live, since existing catalog entries
+  // don't automatically benefit from that on their own.
+  app.post("/api/library/volumes/reclassify-all", async (req, res) => {
+    try {
+      const storeId = req.authContext!.storeId;
+      const { items } = await listLibraryVolumes({ storeId, limit: 100000 });
+
+      const CONCURRENCY = 5;
+      let updatedCount = 0;
+      let unchangedCount = 0;
+      const errors: Array<{ id: string; title: string; error: string }> = [];
+
+      for (let i = 0; i < items.length; i += CONCURRENCY) {
+        const batch = items.slice(i, i + CONCURRENCY);
+        await Promise.all(
+          batch.map(async (volume) => {
+            try {
+              const enrichment = await enrichLibraryClassification(volume.isbn);
+              const changed =
+                enrichment.deweyDecimal !== volume.deweyDecimal ||
+                enrichment.locClassification !== volume.locClassification;
+
+              if (changed) {
+                await updateLibraryVolume(volume.id, storeId, {
+                  deweyDecimal: enrichment.deweyDecimal,
+                  locClassification: enrichment.locClassification,
+                });
+                updatedCount++;
+              } else {
+                unchangedCount++;
+              }
+            } catch (err) {
+              errors.push({ id: volume.id, title: volume.title, error: err instanceof Error ? err.message : "Unknown error" });
+            }
+          })
+        );
+      }
+
+      res.json({ success: true, total: items.length, updated: updatedCount, unchanged: unchangedCount, errors });
+    } catch (error) {
+      console.error("Reclassify all volumes error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to reclassify volumes." });
+    }
+  });
+
   // Batch refresh missing covers for catalog volumes
   app.post("/api/library/volumes/refresh-missing-covers", async (req, res) => {
     try {
