@@ -5,6 +5,7 @@ import { lookupAbeBooksPrice } from "../abebooksScraper.service.js";
 import { resolveBestCoverUrl } from "../isbn/coverFetcher.service.js";
 
 const PROVIDER_TIMEOUT_MS = 8000;
+const SCRAPER_FAST_TIMEOUT_MS = 5000;
 
 /**
  * Free, unlimited fallback for a book synopsis when OpenLibrary/Google/ISBNdb
@@ -231,8 +232,13 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
     }).catch(() => null),
     lookupGoogleBooks(cleanIsbn).catch(() => null),
     lookupIsbndb(cleanIsbn).catch(() => null),
-    lookupThriftbooksDetails(cleanIsbn).catch(() => null),
-    lookupAbeBooksPrice(cleanIsbn).catch(() => null),
+    // A fast, capped timeout here -- these are pricing scrapers, not the
+    // book's identity, so a slow/unresponsive one shouldn't hold up the
+    // whole scan. isbnScanner.service.ts's fuller lookup flow (used
+    // elsewhere for deeper valuation research) still uses their default,
+    // more patient timeout.
+    lookupThriftbooksDetails(cleanIsbn, SCRAPER_FAST_TIMEOUT_MS).catch(() => null),
+    lookupAbeBooksPrice(cleanIsbn, SCRAPER_FAST_TIMEOUT_MS).catch(() => null),
   ]);
 
   const openLib = openLibRes.status === "fulfilled" ? openLibRes.value : null;
@@ -250,9 +256,14 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
     `Book ISBN ${cleanIsbn}`
   ).trim();
 
-  // Author extraction
-  let author: string | null = null;
-  if (Array.isArray(openLib?.authors) && openLib.authors.length > 0) {
+  // Author extraction -- prefer names already returned directly by Google
+  // Books/ISBNdb/ThriftBooks (no extra network round-trip needed). Only
+  // fall back to resolving OpenLibrary's separate author record (a second,
+  // sequential fetch) when nothing else has a name at all, since that hop
+  // used to run unconditionally and add up to 4s to every scan even when a
+  // perfectly good author name was already sitting in hand.
+  let author: string | null = google?.author || isbndb?.author || thrift?.author || null;
+  if (!author && Array.isArray(openLib?.authors) && openLib.authors.length > 0) {
     try {
       const authorKey = openLib.authors[0]?.key;
       if (authorKey) {
@@ -269,9 +280,6 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
         }
       }
     } catch {}
-  }
-  if (!author) {
-    author = google?.author || isbndb?.author || thrift?.author || null;
   }
 
   // Classification Numbers

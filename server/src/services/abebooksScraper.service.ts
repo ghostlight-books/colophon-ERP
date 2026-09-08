@@ -68,10 +68,16 @@ export function extractAbeBooksPrice(html: string): { price: number | null; offe
   return { price: null, offers: [] };
 }
 
-export async function lookupAbeBooksPrice(isbn: string): Promise<number | null> {
+export async function lookupAbeBooksPrice(isbn: string, timeoutMs?: number): Promise<number | null> {
   const cached = priceCache.get(isbn);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.price;
+  }
+
+  // A caller-specified timeout (e.g. a fast scan flow) bypasses in-flight
+  // request sharing -- see the equivalent note in thriftbooksScraper.service.ts.
+  if (timeoutMs !== undefined) {
+    return fetchAbeBooksPrice(isbn, timeoutMs);
   }
 
   const existingRequest = inFlightRequests.get(isbn);
@@ -84,9 +90,9 @@ export async function lookupAbeBooksPrice(isbn: string): Promise<number | null> 
   return request.finally(() => inFlightRequests.delete(isbn));
 }
 
-async function fetchAbeBooksPrice(isbn: string): Promise<number | null> {
+async function fetchAbeBooksPrice(isbn: string, timeoutMs?: number): Promise<number | null> {
   const targetUrl = `https://www.abebooks.com/servlet/SearchResults?isbn=${encodeURIComponent(isbn)}`;
-  const { html } = await fetchScraperHtml(targetUrl);
+  const { html } = await fetchScraperHtml(targetUrl, timeoutMs !== undefined ? { timeoutMs } : {});
 
   if (!html) {
     return null;

@@ -207,7 +207,7 @@ export async function lookupThriftbooksPrice(isbn: string): Promise<number | nul
   return details?.price ?? null;
 }
 
-export async function lookupThriftbooksDetails(isbn: string): Promise<ThriftbooksDetails | null> {
+export async function lookupThriftbooksDetails(isbn: string, timeoutMs?: number): Promise<ThriftbooksDetails | null> {
   const cachedDetails = detailsCache.get(isbn);
   if (cachedDetails && cachedDetails.expiresAt > Date.now()) {
     return cachedDetails.details;
@@ -215,6 +215,14 @@ export async function lookupThriftbooksDetails(isbn: string): Promise<Thriftbook
   const cached = priceCache.get(isbn);
   if (cached && cached.expiresAt > Date.now()) {
     return { price: cached.price, title: null, author: null, category: null, subcategory: null };
+  }
+
+  // A caller-specified timeout (e.g. a fast scan flow) bypasses in-flight
+  // request sharing -- it wants its own short-timeout attempt rather than
+  // potentially waiting on a slower request already in progress for the
+  // same ISBN from a different, more patient caller.
+  if (timeoutMs !== undefined) {
+    return fetchThriftbooksDetails(isbn, timeoutMs);
   }
 
   const existingRequest = inFlightRequests.get(isbn);
@@ -227,9 +235,9 @@ export async function lookupThriftbooksDetails(isbn: string): Promise<Thriftbook
   return request.finally(() => inFlightRequests.delete(isbn));
 }
 
-async function fetchThriftbooksDetails(isbn: string): Promise<ThriftbooksDetails | null> {
+async function fetchThriftbooksDetails(isbn: string, timeoutMs?: number): Promise<ThriftbooksDetails | null> {
   const targetUrl = `https://www.thriftbooks.com/browse/?b.search=${encodeURIComponent(isbn)}`;
-  const { html, status } = await fetchScraperHtml(targetUrl);
+  const { html, status } = await fetchScraperHtml(targetUrl, timeoutMs !== undefined ? { timeoutMs } : {});
 
   if (!html) {
     return null;
