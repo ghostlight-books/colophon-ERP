@@ -258,23 +258,14 @@ export async function resolveBestCoverUrl(params: {
     googleCover,
   });
 
-  // 3. Probe candidates in parallel batches to find the first working high-quality cover
-  for (const candidate of candidates) {
-    // If it's already an verified HTTPS URL from Google or ISBNdb or ThriftBooks
-    if (candidate.source === "Google Books" && candidate.url) {
-      const isValid = await verifyCoverImageUrl(candidate.url);
-      if (isValid) return candidate.url;
-    } else if (candidate.source === "ThriftBooks" && candidate.url) {
-      const isValid = await verifyCoverImageUrl(candidate.url);
-      if (isValid) return candidate.url;
-    } else if (candidate.source === "ISBNdb" && candidate.url) {
-      const isValid = await verifyCoverImageUrl(candidate.url);
-      if (isValid) return candidate.url;
-    } else {
-      const isValid = await verifyCoverImageUrl(candidate.url);
-      if (isValid) return candidate.url;
-    }
-  }
+  // 3. Probe all candidates concurrently (not one at a time -- a single slow
+  // or unresponsive source used to block every lower-priority candidate
+  // behind it, which could push a single scan's total time past a minute
+  // when several free sources were degraded). Verify in parallel, then pick
+  // the highest-priority candidate that came back valid.
+  const verifiedFlags = await Promise.all(candidates.map((c) => verifyCoverImageUrl(c.url)));
+  const firstValid = candidates.find((_candidate, i) => verifiedFlags[i]);
+  if (firstValid) return firstValid.url;
 
   // Fallback: return unverified Google or OpenLibrary direct URL
   if (googleCover) return googleCover;

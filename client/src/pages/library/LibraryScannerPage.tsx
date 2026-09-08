@@ -350,8 +350,10 @@ export default function LibraryScannerPage() {
             </div>
           </div>
 
-          {/* Session totals pill & Quick Scanner Link */}
-          <div className="flex items-center gap-3">
+          {/* Session totals pill & Quick Scanner Link (hidden on phones -- see
+              the full-width banner below, which is the recommended path on
+              mobile since it shows scan confirmations in the same view) */}
+          <div className="hidden sm:flex items-center gap-3">
             <Link
               to="/library/quick-scan"
               className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 transition"
@@ -367,6 +369,18 @@ export default function LibraryScannerPage() {
             </div>
           </div>
         </div>
+
+        {/* Full-width mobile banner -- on a phone, this is the path that
+            actually shows you what was scanned as you scan it. The Device
+            Camera Scanner below takes over the whole screen with no
+            confirmation UI visible underneath it until you close it. */}
+        <Link
+          to="/library/quick-scan"
+          className="sm:hidden flex items-center justify-center gap-2 w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 active:from-indigo-500 active:to-purple-500 text-white rounded-2xl text-sm font-black shadow-md transition"
+        >
+          <span>📱</span>
+          <span>Open Quick Phone Scanner</span>
+        </Link>
 
         {/* Notifications */}
         {errorMessage && (
