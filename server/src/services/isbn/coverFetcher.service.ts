@@ -142,7 +142,18 @@ export function generateCoverCandidatesList(params: {
   const cleanIsbn = params.isbn.replace(/[^0-9X]/gi, "").toUpperCase();
   const candidates: CoverCandidate[] = [];
 
-  // 1. Google Books
+  // 1. ThriftBooks Scraped Cover -- checked first: in practice these have
+  // proven more reliable (fewer hotlink/verification failures) than the
+  // other sources below.
+  if (params.thriftbooksCover) {
+    candidates.push({
+      source: "ThriftBooks",
+      url: params.thriftbooksCover,
+      quality: "high",
+    });
+  }
+
+  // 2. Google Books
   if (params.googleCover) {
     candidates.push({
       source: "Google Books",
@@ -151,7 +162,7 @@ export function generateCoverCandidatesList(params: {
     });
   }
 
-  // 2. Open Library Cover ID (Large)
+  // 3. Open Library Cover ID (Large)
   if (params.openLibCoverId) {
     candidates.push({
       source: "Open Library",
@@ -160,20 +171,11 @@ export function generateCoverCandidatesList(params: {
     });
   }
 
-  // 3. Open Library Direct ISBN (Large)
+  // 4. Open Library Direct ISBN (Large)
   if (cleanIsbn) {
     candidates.push({
       source: "Open Library",
       url: `https://covers.openlibrary.org/b/isbn/${cleanIsbn}-L.jpg?default=false`,
-      quality: "high",
-    });
-  }
-
-  // 4. ThriftBooks Scraped Cover
-  if (params.thriftbooksCover) {
-    candidates.push({
-      source: "ThriftBooks",
-      url: params.thriftbooksCover,
       quality: "high",
     });
   }

@@ -427,6 +427,11 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
     lccn,
     isbndbCover: isbndb?.coverUrl,
     thriftbooksCover: thrift?.coverUrl,
+    // Already fetched above in the parallel lookup -- passing it explicitly
+    // (even as null) stops resolveBestCoverUrl from re-querying Google
+    // Books from scratch just for the cover, a second sequential network
+    // round-trip that was pure waste on every scan.
+    googleCover: google?.coverUrl ?? null,
   });
 
   // Physical specifications
