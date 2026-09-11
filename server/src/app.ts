@@ -551,6 +551,27 @@ export function createApp(): express.Express {
   });
 
   app.use("/api/admin", requireSuperAdmin);
+
+  // ONE-OFF MIGRATION UTILITY: dumps every row of every table as JSON, for
+  // the SQLite -> Postgres migration. Iterates Prisma's own model list so
+  // nothing is missed. Remove after the migration is verified complete.
+  app.get("/api/admin/export-all-data", async (_req, res, next) => {
+    try {
+      const { Prisma } = await import("@prisma/client");
+      const modelNames = Prisma.dmmf.datamodel.models.map((m) => m.name);
+      const dump: Record<string, unknown[]> = {};
+      for (const modelName of modelNames) {
+        const clientKey = modelName.charAt(0).toLowerCase() + modelName.slice(1);
+        const delegate = (prisma as any)[clientKey];
+        if (!delegate || typeof delegate.findMany !== "function") continue;
+        dump[modelName] = await delegate.findMany();
+      }
+      res.json(dump);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/admin/stores", async (_req, res, next) => {
     try {
       res.json({ stores: await prisma.store.findMany({ orderBy: { createdAt: "asc" } }) });
