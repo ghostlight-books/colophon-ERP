@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
 import { useLibrarySpace } from "../../context/LibrarySpaceContext";
@@ -13,6 +13,7 @@ import {
   updateVolumeCover,
   refreshMissingCovers,
   enrichVolumeMetadata,
+  reclassifyVolumesBatch,
   type LibraryVolume,
   type LibraryShelfLocation,
   type CoverCandidate,
@@ -77,6 +78,11 @@ export default function LibraryCatalogPage() {
   const [targetSpaceId, setTargetSpaceId] = useState("");
   const [targetShelfId, setTargetShelfId] = useState("");
   const [isSubmittingBulk, setIsSubmittingBulk] = useState(false);
+
+  // Re-classify All (Dewey/LOC) progress
+  const [isReclassifying, setIsReclassifying] = useState(false);
+  const [reclassifyProgress, setReclassifyProgress] = useState<{ processed: number; total: number; updated: number } | null>(null);
+  const reclassifyCancelledRef = useRef(false);
 
   // Toast Feedback state
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -246,6 +252,42 @@ export default function LibraryCatalogPage() {
       }
     });
   }, [volumes, sortOption]);
+
+  const handleReclassifyAll = async () => {
+    setIsReclassifying(true);
+    reclassifyCancelledRef.current = false;
+    setErrorMessage(null);
+    let offset = 0;
+    let totalUpdated = 0;
+    let total = totalCount || 0;
+    const allErrors: Array<{ id: string; title: string; error: string }> = [];
+
+    try {
+      while (true) {
+        const result = await reclassifyVolumesBatch(offset, 10);
+        total = result.total;
+        totalUpdated += result.updated;
+        allErrors.push(...result.errors);
+        offset = result.nextOffset;
+        setReclassifyProgress({ processed: offset, total, updated: totalUpdated });
+
+        if (reclassifyCancelledRef.current || !result.hasMore) break;
+      }
+
+      const scope = reclassifyCancelledRef.current ? `${offset} of ${total} books (stopped early)` : `all ${total} books`;
+      setActionMessage(
+        allErrors.length > 0
+          ? `Checked ${scope} -- ${totalUpdated} updated, ${allErrors.length} couldn't be checked.`
+          : `Checked ${scope} -- ${totalUpdated} got updated Dewey/LOC numbers.`
+      );
+      void loadVolumes();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Failed to re-classify catalog.");
+    } finally {
+      setIsReclassifying(false);
+      setReclassifyProgress(null);
+    }
+  };
 
   const handleExport = (format: "csv" | "json" | "bibtex") => {
     if (sortedVolumes.length === 0) return;
@@ -609,6 +651,18 @@ export default function LibraryCatalogPage() {
             </select>
           </div>
 
+          {/* Re-classify All (Dewey/LOC) */}
+          <button
+            type="button"
+            onClick={() => void handleReclassifyAll()}
+            disabled={isReclassifying}
+            title="Re-run Dewey Decimal & Library of Congress classification for every book against current data sources"
+            className="px-3 py-1.5 rounded-2xl border text-xs font-medium transition cursor-pointer shadow-2xs bg-[#e8eef5] dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-[#dce4ee] dark:hover:bg-slate-700 flex items-center gap-1.5 disabled:opacity-60"
+          >
+            <span>🏷️</span>
+            <span>Re-classify All</span>
+          </button>
+
           {/* Export Hub Dropdown */}
           <div className="relative">
             <button
@@ -930,6 +984,43 @@ export default function LibraryCatalogPage() {
                 ✕ Done
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Re-classify All Progress */}
+      {isReclassifying && (
+        <div className="fixed inset-0 z-[99999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 max-w-sm w-full animate-scaleUp space-y-4">
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shrink-0" />
+              <h3 className="text-sm font-black text-slate-900 dark:text-white">Re-classifying Catalog…</h3>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              Re-running Dewey Decimal & Library of Congress classification against current data sources. This can take a while for a large catalog -- feel free to leave this open.
+            </p>
+            {reclassifyProgress && (
+              <div className="space-y-1.5">
+                <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-600 transition-all"
+                    style={{
+                      width: `${reclassifyProgress.total > 0 ? Math.min(100, (reclassifyProgress.processed / reclassifyProgress.total) * 100) : 0}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                  {reclassifyProgress.processed} / {reclassifyProgress.total} checked &bull; {reclassifyProgress.updated} updated so far
+                </p>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => { reclassifyCancelledRef.current = true; }}
+              className="w-full py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs transition cursor-pointer"
+            >
+              Stop After Current Batch
+            </button>
           </div>
         </div>
       )}

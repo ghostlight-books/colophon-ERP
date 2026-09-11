@@ -2368,15 +2368,25 @@ export function createApp(): express.Express {
     }
   });
 
-  // Re-runs Dewey/LOC classification for every volume in the caller's own
+  // Re-runs Dewey/LOC classification for one page of the caller's own
   // library against current data sources, overwriting whatever is there now
   // -- useful after a classification-accuracy fix or a new data source (e.g.
   // a Google Books/ISBNdb key) goes live, since existing catalog entries
-  // don't automatically benefit from that on their own.
-  app.post("/api/library/volumes/reclassify-all", async (req, res) => {
+  // don't automatically benefit from that on their own. Deliberately
+  // paginated (client drives the loop, one batch per call) rather than
+  // processing the whole library in a single request: at several hundred
+  // books and ~5-15s per uncached lookup, one giant request would risk the
+  // exact multi-minute hang this whole reliability pass was fixing, with no
+  // progress feedback until it finally returned.
+  app.post("/api/library/volumes/reclassify-batch", async (req, res) => {
     try {
       const storeId = req.authContext!.storeId;
-      const { items } = await listLibraryVolumes({ storeId, limit: 100000 });
+      const offset = typeof req.body?.offset === "number" && req.body.offset >= 0 ? req.body.offset : 0;
+      const limit = typeof req.body?.limit === "number" && req.body.limit > 0 ? Math.min(req.body.limit, 25) : 10;
+
+      // listLibraryVolumes orders by createdAt desc consistently, so offset
+      // pagination stays stable across calls in this loop.
+      const { items, total } = await listLibraryVolumes({ storeId, limit, offset });
 
       const CONCURRENCY = 5;
       let updatedCount = 0;
@@ -2409,9 +2419,19 @@ export function createApp(): express.Express {
         );
       }
 
-      res.json({ success: true, total: items.length, updated: updatedCount, unchanged: unchangedCount, errors });
+      const nextOffset = offset + items.length;
+      res.json({
+        success: true,
+        total,
+        processed: items.length,
+        updated: updatedCount,
+        unchanged: unchangedCount,
+        errors,
+        nextOffset,
+        hasMore: nextOffset < total,
+      });
     } catch (error) {
-      console.error("Reclassify all volumes error:", error);
+      console.error("Reclassify batch error:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "Failed to reclassify volumes." });
     }
   });

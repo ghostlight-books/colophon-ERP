@@ -286,9 +286,9 @@ function resolveApiUrl(endpointPath: string): string {
 const PROVIDER_TIMEOUT_MS = 15000;
 const AUTH_TOKEN_STORAGE_KEY = "colophon-auth-token";
 
-async function fetchWithTimeout(url: string, options?: RequestInit): Promise<Response> {
+async function fetchWithTimeout(url: string, options?: RequestInit, timeoutMs: number = PROVIDER_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     let token: string | null = null;
     try {
@@ -965,6 +965,36 @@ export async function refreshMissingCovers(): Promise<{ totalChecked: number; up
   const res = await fetchWithTimeout(url, { method: "POST" });
   if (!res.ok) throw new Error("Failed to refresh covers.");
   return res.json() as Promise<{ totalChecked: number; updatedCount: number }>;
+}
+
+export interface ReclassifyBatchResult {
+  total: number;
+  processed: number;
+  updated: number;
+  unchanged: number;
+  errors: Array<{ id: string; title: string; error: string }>;
+  nextOffset: number;
+  hasMore: boolean;
+}
+
+// Re-runs Dewey/LOC classification for one page of the catalog at a time.
+// Deliberately batched rather than one big request -- see the server route
+// for why (several hundred books at several seconds each would risk the
+// same request-timeout problem the scan-reliability fixes addressed).
+// Callers should loop, passing back nextOffset, until hasMore is false.
+export async function reclassifyVolumesBatch(offset: number, limit = 10): Promise<ReclassifyBatchResult> {
+  const url = resolveApiUrl("/library/volumes/reclassify-batch");
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ offset, limit }),
+    },
+    45000
+  );
+  if (!res.ok) throw new Error("Failed to reclassify volumes.");
+  return res.json() as Promise<ReclassifyBatchResult>;
 }
 
 export interface RecognizedCoverMatch {
