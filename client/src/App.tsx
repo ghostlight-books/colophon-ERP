@@ -38,6 +38,7 @@ import LibraryAuthorsPage from "./pages/library/LibraryAuthorsPage";
 import LibraryAuthorDetailPage from "./pages/library/LibraryAuthorDetailPage";
 import { WorkspaceProvider, useWorkspace } from "./contexts/WorkspaceContext";
 import { LibrarySpaceProvider } from "./context/LibrarySpaceContext";
+import { LibraryReclassifyProvider } from "./context/LibraryReclassifyContext";
 import { hasModuleAccess, normalizeRole, type SystemModule } from "@colophon/shared";
 
 function EbayIcon(): JSX.Element {
@@ -196,6 +197,7 @@ function App(): JSX.Element {
     <ErrorBoundary>
     <WorkspaceProvider>
       <LibrarySpaceProvider>
+        <LibraryReclassifyProvider>
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
@@ -238,6 +240,7 @@ function App(): JSX.Element {
             </Route>
           </Routes>
         </BrowserRouter>
+        </LibraryReclassifyProvider>
       </LibrarySpaceProvider>
     </WorkspaceProvider>
     </ErrorBoundary>

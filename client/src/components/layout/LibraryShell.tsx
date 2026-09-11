@@ -4,6 +4,7 @@ import MobileBottomNav from "./MobileBottomNav";
 import InstallAppPrompt from "../common/InstallAppPrompt";
 import BrandLogo from "../common/BrandLogo";
 import LibrarySpaceSwitcher from "../library/LibrarySpaceSwitcher";
+import { useLibraryReclassify } from "../../context/LibraryReclassifyContext";
 import {
   fetchLibraryDashboard,
   fetchLibraryNotifications,
@@ -60,6 +61,7 @@ function LibraryShell({
   onWorkspaceModeChange,
   children,
 }: ShellProps): JSX.Element {
+  const { isRunning: isReclassifying, progress: reclassifyProgress, cancelReclassify } = useLibraryReclassify();
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window === "undefined") {
       return "light";
@@ -1120,6 +1122,41 @@ function LibraryShell({
           </div>
         )}
       </div>
+
+      {/* Re-classify All -- persistent, non-blocking indicator. Stays
+          visible across every Library page since it lives in the shell,
+          not the Catalog page that started it, so the job keeps running
+          (and stays visible) no matter where you navigate to. */}
+      {isReclassifying && (
+        <div className="fixed bottom-4 right-4 z-[9998] w-64 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl p-3.5 space-y-2 animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <div className="w-3.5 h-3.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shrink-0" />
+            <p className="text-xs font-bold text-slate-900 dark:text-white truncate">Re-classifying Catalog…</p>
+          </div>
+          {reclassifyProgress && (
+            <>
+              <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-indigo-600 transition-all"
+                  style={{
+                    width: `${reclassifyProgress.total > 0 ? Math.min(100, (reclassifyProgress.processed / reclassifyProgress.total) * 100) : 0}%`,
+                  }}
+                />
+              </div>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                {reclassifyProgress.processed} / {reclassifyProgress.total} checked &bull; {reclassifyProgress.updated} updated
+              </p>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={cancelReclassify}
+            className="text-[10px] font-bold text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 cursor-pointer transition"
+          >
+            Stop After Current Batch
+          </button>
+        </div>
+      )}
     </div>
   );
 }
