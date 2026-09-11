@@ -132,9 +132,15 @@ export function cleanDeweyNumber(raw: string | null | undefined): string | null 
 export function inferClassificationFromSubjects(
   title: string,
   category: string | null | undefined,
-  subjects: string[]
+  subjects: string[],
+  description?: string | null
 ): { dewey: string; loc: string } {
-  const combined = [title, category, ...subjects].filter(Boolean).join(" ").toLowerCase();
+  // The description is usually a real paragraph of synopsis text, so it
+  // often carries a genre/topic signal that a single generic subject tag
+  // (or a title with no revealing keyword at all) doesn't -- e.g. a book
+  // tagged only "Religion" with a title that gives no hint on its own may
+  // still mention "Buddhist" or "the Quran" in its own synopsis.
+  const combined = [title, category, ...subjects, description].filter(Boolean).join(" ").toLowerCase();
 
   if (combined.includes("philosophy") || combined.includes("psychology") || combined.includes("ethics")) {
     return { dewey: "100", loc: "B" };
@@ -318,9 +324,23 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
   }
   const subjects = Array.from(subjectsSet);
 
+  // Description (fast tier only -- whatever's already sitting in the
+  // responses fetched above, no extra network calls). Feeding this into the
+  // classification fallback below gives it real synopsis text to search
+  // instead of just a title and a single generic category word; the fuller
+  // description resolution (OpenLibrary work record, Wikipedia, etc. --
+  // each its own network round-trip) still happens later, unchanged, and
+  // only replaces this value if nothing here was available.
+  let description: string | null = (
+    isbndb?.description ||
+    google?.description ||
+    (typeof openLib?.description === "string" ? openLib.description : openLib?.description?.value) ||
+    null
+  );
+
   // Smart fallback inference if no direct DDC/LOC catalog record exists
   if (!deweyDecimal || !locClassification) {
-    const inferred = inferClassificationFromSubjects(title, thrift?.category || thrift?.subcategory, subjects);
+    const inferred = inferClassificationFromSubjects(title, thrift?.category || thrift?.subcategory, subjects, description);
     if (!deweyDecimal) {
       deweyDecimal = inferred.dewey;
       deweyCategory = resolveDeweyCategory(deweyDecimal);
@@ -359,15 +379,10 @@ export async function enrichLibraryClassification(isbnInput: string): Promise<Li
   const yearMatch = rawYear ? String(rawYear).match(/\b(18|19|20)\d{2}\b/) : null;
   const publishYear = yearMatch ? yearMatch[0] : null;
 
-  // Description / Book Synopsis -- priority order: ISBNdb (paid, purpose-built
-  // bibliographic data -- most reliable when configured) > Google Books >
-  // OpenLibrary edition > OpenLibrary work record > Wikipedia > opening line.
-  let description: string | null = (
-    isbndb?.description ||
-    google?.description ||
-    (typeof openLib?.description === "string" ? openLib.description : openLib?.description?.value) ||
-    null
-  );
+  // Description / Book Synopsis -- the fast tier (ISBNdb > Google Books >
+  // OpenLibrary edition) was already resolved above for classification;
+  // continue down the slower fallback chain (OpenLibrary work record >
+  // Wikipedia > opening line) only if none of those had anything.
 
   // If description not on edition, check OpenLibrary Work record
   if (!description && Array.isArray(openLib?.works) && openLib.works.length > 0) {
