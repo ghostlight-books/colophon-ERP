@@ -572,6 +572,33 @@ export function createApp(): express.Express {
     }
   });
 
+  // ONE-OFF UTILITY: resets a user's password directly, for account recovery
+  // when no self-serve reset flow exists yet. Matches the hash format used by
+  // auth.service.ts's hashPassword (scrypt, "salt:hex"). Remove after use.
+  app.post("/api/admin/reset-password", async (req, res, next) => {
+    try {
+      const { email, newPassword } = req.body as { email?: string; newPassword?: string };
+      if (!email || !newPassword || newPassword.length < 12) {
+        res.status(400).json({ error: "A valid email and a newPassword of at least 12 characters are required." });
+        return;
+      }
+      const { scrypt: scryptCallback, randomBytes } = await import("node:crypto");
+      const { promisify } = await import("node:util");
+      const scrypt = promisify(scryptCallback);
+      const salt = randomBytes(16).toString("hex");
+      const derived = (await scrypt(newPassword, salt, 64)) as Buffer;
+      const passwordHash = `${salt}:${derived.toString("hex")}`;
+
+      const user = await prisma.user.update({
+        where: { email: email.trim().toLowerCase() },
+        data: { passwordHash },
+      });
+      res.json({ success: true, email: user.email });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/admin/stores", async (_req, res, next) => {
     try {
       res.json({ stores: await prisma.store.findMany({ orderBy: { createdAt: "asc" } }) });
