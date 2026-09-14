@@ -30,6 +30,20 @@ type SalesNote = {
   priority: "high" | "normal";
 };
 
+type ShopifySalesSummary = {
+  connected: boolean;
+  totalRevenue: number;
+  totalOrders: number;
+  totalCustomers: number;
+  avgTicket: number;
+  salesToday: number;
+  salesThisMonth: number;
+  salesTotal: number;
+  fulfillmentRate: number;
+  topProducts: Array<{ title: string; unitsSold: number }>;
+  dailySeries: Array<{ date: string; orders: number; revenue: number }>;
+};
+
 type DashboardSummary = {
   activeTitles: number;
   unitsOnHand: number;
@@ -37,6 +51,28 @@ type DashboardSummary = {
   inventoryValue: number;
   lowStock: number;
   recentTitles: Array<{ title: string; sku: string }>;
+  shopify: ShopifySalesSummary;
+};
+
+function formatCurrency(amount: number): string {
+  return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Falls back safely if the API responds with the older shape (no `shopify`
+// field) during a brief client/server deploy-skew window, rather than
+// throwing when reading into an undefined summary.
+const EMPTY_SHOPIFY_SUMMARY: ShopifySalesSummary = {
+  connected: false,
+  totalRevenue: 0,
+  totalOrders: 0,
+  totalCustomers: 0,
+  avgTicket: 0,
+  salesToday: 0,
+  salesThisMonth: 0,
+  salesTotal: 0,
+  fulfillmentRate: 0,
+  topProducts: [],
+  dailySeries: [],
 };
 
 const dashboardTabs: Array<{ key: DashboardTab; label: string }> = [
@@ -212,19 +248,54 @@ function DashboardPage(): JSX.Element {
       };
     }
     if (activeTab === "overview") {
+      const shopify = dashboardSummary.shopify ?? EMPTY_SHOPIFY_SUMMARY;
       return {
         ...activeData,
         cards: [
-          { label: "Inventory Value", value: `$${dashboardSummary.inventoryValue.toFixed(2)}`, delta: "Live", tone: "amber" as const },
-          { label: "Active Titles", value: String(dashboardSummary.activeTitles), delta: "Live", tone: "violet" as const },
-          { label: "Units On Hand", value: String(dashboardSummary.unitsOnHand), delta: "Live", tone: "mint" as const },
-          { label: "Priced Titles", value: String(dashboardSummary.pricedTitles), delta: "Live", tone: "rose" as const },
+          { label: "Total Revenue", value: formatCurrency(shopify.totalRevenue), delta: "Live", tone: "amber" as const },
+          { label: "Total Orders", value: String(shopify.totalOrders), delta: "Live", tone: "violet" as const },
+          { label: "Total Customers", value: String(shopify.totalCustomers), delta: "Live", tone: "mint" as const },
+          { label: "Avg Ticket", value: formatCurrency(shopify.avgTicket), delta: "Live", tone: "rose" as const },
         ],
+        salesNumbers: [
+          ["Total Sales", String(shopify.salesTotal)],
+          ["This Month", String(shopify.salesThisMonth)],
+          ["Today", String(shopify.salesToday)],
+        ] as Array<[string, string]>,
+        topProducts:
+          shopify.topProducts.length > 0
+            ? (shopify.topProducts.map((p) => [p.title, `${p.unitsSold} sold`]) as Array<[string, string]>)
+            : ([["No sales yet", "--"]] as Array<[string, string]>),
       };
     }
     return activeData;
   }, [activeData, activeTab, dashboardSummary]);
   const userBoardKey = useMemo(() => resolveBoardKey(currentUser.name), [currentUser.name]);
+
+  // Turns the last 10 days of real Shopify orders/revenue into two SVG
+  // polylines for the Orders Overview chart. null while the summary hasn't
+  // loaded yet; hasActivity is false for a store with no orders yet (the
+  // common case pre-launch) so the chart can show an honest flat line
+  // instead of implying a fake trend.
+  const ordersChart = useMemo(() => {
+    const series = dashboardSummary?.shopify?.dailySeries;
+    if (!series || series.length === 0) return null;
+
+    const width = 700;
+    const top = 20;
+    const bottom = 200;
+    const maxOrders = Math.max(1, ...series.map((d) => d.orders));
+    const maxRevenue = Math.max(1, ...series.map((d) => d.revenue));
+    const stepX = series.length > 1 ? width / (series.length - 1) : 0;
+    const toY = (value: number, max: number) => bottom - (value / max) * (bottom - top);
+
+    const ordersPath = series.map((d, i) => `${i === 0 ? "M" : "L"}${(i * stepX).toFixed(1)},${toY(d.orders, maxOrders).toFixed(1)}`).join(" ");
+    const revenuePath = series.map((d, i) => `${i === 0 ? "M" : "L"}${(i * stepX).toFixed(1)},${toY(d.revenue, maxRevenue).toFixed(1)}`).join(" ");
+    const hasActivity = series.some((d) => d.orders > 0 || d.revenue > 0);
+    const latest = series[series.length - 1];
+
+    return { ordersPath, revenuePath, hasActivity, latest };
+  }, [dashboardSummary]);
 
   useEffect(() => {
     window.localStorage.setItem(SALES_NOTES_STORAGE_KEY, JSON.stringify(salesNotes));
@@ -472,7 +543,13 @@ function DashboardPage(): JSX.Element {
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-sm font-medium text-emerald-500">↗ 20% increased</p>
+            {activeTab === "overview" && dashboardSummary ? (
+              <p className="mt-3 text-sm font-medium text-slate-400">
+                {dashboardSummary.shopify?.connected ? "Live from Shopify" : "Shopify not connected yet"}
+              </p>
+            ) : (
+              <p className="mt-3 text-sm font-medium text-emerald-500">↗ 20% increased</p>
+            )}
           </SurfaceCard>
         </SurfaceCard>
 
@@ -499,22 +576,29 @@ function DashboardPage(): JSX.Element {
                 ))}
               </div>
 
-              <svg viewBox="0 0 700 220" className="absolute inset-0 h-full w-full" preserveAspectRatio="none" aria-hidden="true">
-                <path
-                  d="M0,170 C70,150 90,130 140,120 C210,108 220,70 270,98 C320,126 340,80 390,82 C450,84 470,140 520,110 C580,70 610,138 700,95"
-                  fill="none"
-                  stroke="#f6b742"
-                  strokeWidth="3"
-                />
-                <path
-                  d="M0,120 C80,100 100,150 160,135 C230,120 250,62 300,72 C350,82 370,145 430,122 C510,90 550,125 610,96 C650,76 675,130 700,110"
-                  fill="none"
-                  stroke="#8b5cf6"
-                  strokeWidth="3"
-                />
-              </svg>
-
-              <div className="absolute left-[58%] top-[35%] rounded-lg bg-[#e9ff63] px-3 py-1 text-sm font-semibold text-slate-700">21,345</div>
+              {ordersChart ? (
+                <>
+                  <svg viewBox="0 0 700 220" className="absolute inset-0 h-full w-full" preserveAspectRatio="none" aria-hidden="true">
+                    <path d={ordersChart.ordersPath} fill="none" stroke="#f6b742" strokeWidth="3" />
+                    <path d={ordersChart.revenuePath} fill="none" stroke="#8b5cf6" strokeWidth="3" />
+                  </svg>
+                  {ordersChart.hasActivity ? (
+                    <div className="absolute right-4 top-4 rounded-lg bg-[#e9ff63] px-3 py-1 text-sm font-semibold text-slate-700">
+                      {ordersChart.latest.orders} orders today
+                    </div>
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <p className="rounded-full bg-slate-50 px-4 py-1.5 text-sm font-medium text-slate-400">
+                        No orders yet -- this will fill in once Shopify goes live
+                      </p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <p className="text-sm text-slate-400">Loading order history...</p>
+                </div>
+              )}
             </div>
           </SurfaceCard>
 
@@ -522,14 +606,33 @@ function DashboardPage(): JSX.Element {
             <SurfaceCard className="min-h-[215px]">
               <h3 className="text-[1.8rem] font-semibold text-slate-700">Sale Analytics</h3>
               <div className="mt-5 flex items-center justify-center">
-                <div className="relative grid h-40 w-40 place-items-center rounded-full border-[14px] border-cyan-400">
-                  <div className="absolute h-40 w-40 rotate-[35deg] rounded-full border-[14px] border-transparent border-r-violet-500"></div>
-                  <div className="absolute h-40 w-40 -rotate-[30deg] rounded-full border-[14px] border-transparent border-l-amber-400"></div>
-                  <div className="grid h-24 w-24 place-items-center rounded-full bg-white text-center">
-                    <p className="text-3xl font-semibold leading-none text-slate-700">100%</p>
-                    <p className="text-xs text-slate-400">Completed</p>
-                  </div>
-                </div>
+                {(() => {
+                  const rate = dashboardSummary?.shopify?.fulfillmentRate ?? 0;
+                  const radius = 70;
+                  const circumference = 2 * Math.PI * radius;
+                  const filled = (rate / 100) * circumference;
+                  return (
+                    <div className="relative grid h-40 w-40 place-items-center">
+                      <svg viewBox="0 0 160 160" className="absolute inset-0 h-40 w-40 -rotate-90">
+                        <circle cx="80" cy="80" r={radius} fill="none" stroke="#e2e8f0" strokeWidth="14" />
+                        <circle
+                          cx="80"
+                          cy="80"
+                          r={radius}
+                          fill="none"
+                          stroke="#8b5cf6"
+                          strokeWidth="14"
+                          strokeLinecap="round"
+                          strokeDasharray={`${filled} ${circumference - filled}`}
+                        />
+                      </svg>
+                      <div className="grid h-24 w-24 place-items-center rounded-full bg-white text-center">
+                        <p className="text-3xl font-semibold leading-none text-slate-700">{rate}%</p>
+                        <p className="text-xs text-slate-400">Fulfilled</p>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </SurfaceCard>
 

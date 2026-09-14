@@ -1,8 +1,21 @@
 import { useEffect, useState, useMemo } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import LibrarySpaceSwitcher from "../../components/library/LibrarySpaceSwitcher";
+import CustomSortBuilder from "../../components/library/CustomSortBuilder";
 import { useLibrarySpace } from "../../context/LibrarySpaceContext";
 import { useLibraryReclassify } from "../../context/LibraryReclassifyContext";
+import {
+  BUILTIN_SORTS,
+  buildComparator,
+  loadActiveSortSelection,
+  loadCustomSortPresets,
+  resolveSortLevels,
+  saveActiveSortSelection,
+  saveCustomSortPresets,
+  type SortLevel,
+  type SortPreset,
+  type SortSelection,
+} from "../../utils/librarySort";
 import {
   fetchLibraryVolumes,
   updateLibraryVolume,
@@ -61,7 +74,14 @@ export default function LibraryCatalogPage() {
   const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "ALL");
   const [conditionFilter] = useState(searchParams.get("condition") || "ALL");
   const [shelfFilter] = useState(searchParams.get("shelf") || "");
-  const [sortOption, setSortOption] = useState<"DATE_DESC" | "TITLE_ASC" | "TITLE_DESC" | "AUTHOR_ASC" | "DEWEY_ASC" | "VALUE_DESC" | "VALUE_ASC">("DATE_DESC");
+
+  // Sorting -- built-in quick presets, or a user-built multi-level custom
+  // sort (optionally saved as a named, reusable preset). The active choice
+  // persists to localStorage so it stays applied next time this page loads,
+  // which is the point: "automated" sorting shouldn't need reconfiguring.
+  const [customSortPresets, setCustomSortPresets] = useState<SortPreset[]>(() => loadCustomSortPresets());
+  const [activeSortSelection, setActiveSortSelection] = useState<SortSelection>(() => loadActiveSortSelection());
+  const [sortBuilderSeed, setSortBuilderSeed] = useState<{ levels: SortLevel[]; presetId?: string; presetName?: string } | null>(null);
 
   // Data
   const [volumes, setVolumes] = useState<LibraryVolume[]>([]);
@@ -224,33 +244,64 @@ export default function LibraryCatalogPage() {
     void loadVolumes();
   };
 
+  const activeSortLevels = useMemo(
+    () => resolveSortLevels(activeSortSelection, customSortPresets),
+    [activeSortSelection, customSortPresets]
+  );
+
   const sortedVolumes = useMemo(() => {
-    return [...volumes].sort((a, b) => {
-      switch (sortOption) {
-        case "TITLE_ASC":
-          return (a.title || "").localeCompare(b.title || "");
-        case "TITLE_DESC":
-          return (b.title || "").localeCompare(a.title || "");
-        case "AUTHOR_ASC":
-          return (a.author || "").localeCompare(b.author || "");
-        case "DEWEY_ASC":
-          return (a.deweyDecimal || "999").localeCompare(b.deweyDecimal || "999", undefined, { numeric: true });
-        case "VALUE_DESC": {
-          const valA = a.rareMarketValue || a.replacementValue || 0;
-          const valB = b.rareMarketValue || b.replacementValue || 0;
-          return valB - valA;
-        }
-        case "VALUE_ASC": {
-          const valA = a.rareMarketValue || a.replacementValue || 0;
-          const valB = b.rareMarketValue || b.replacementValue || 0;
-          return valA - valB;
-        }
-        case "DATE_DESC":
-        default:
-          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-      }
-    });
-  }, [volumes, sortOption]);
+    return [...volumes].sort(buildComparator(activeSortLevels));
+  }, [volumes, activeSortLevels]);
+
+  const handleSortSelectChange = (value: string) => {
+    if (value === "__OPEN_BUILDER__") {
+      setSortBuilderSeed({ levels: activeSortLevels });
+      return;
+    }
+    const next: SortSelection = value.startsWith("preset:")
+      ? { kind: "preset", id: value.slice("preset:".length) }
+      : { kind: "builtin", key: value.startsWith("builtin:") ? value.slice("builtin:".length) : value };
+    setActiveSortSelection(next);
+    saveActiveSortSelection(next);
+  };
+
+  const handleApplyCustomSort = (levels: SortLevel[]) => {
+    const next: SortSelection = { kind: "custom", levels };
+    setActiveSortSelection(next);
+    saveActiveSortSelection(next);
+    setSortBuilderSeed(null);
+  };
+
+  const handleSaveSortPreset = (name: string, levels: SortLevel[], presetIdToUpdate?: string) => {
+    let nextPresets: SortPreset[];
+    let activePresetId: string;
+    if (presetIdToUpdate) {
+      nextPresets = customSortPresets.map((p) => (p.id === presetIdToUpdate ? { ...p, name, levels } : p));
+      activePresetId = presetIdToUpdate;
+    } else {
+      const preset: SortPreset = { id: crypto.randomUUID(), name, levels };
+      nextPresets = [...customSortPresets, preset];
+      activePresetId = preset.id;
+    }
+    setCustomSortPresets(nextPresets);
+    saveCustomSortPresets(nextPresets);
+    const next: SortSelection = { kind: "preset", id: activePresetId };
+    setActiveSortSelection(next);
+    saveActiveSortSelection(next);
+    setSortBuilderSeed(null);
+  };
+
+  const handleDeleteSortPreset = (id: string) => {
+    const nextPresets = customSortPresets.filter((p) => p.id !== id);
+    setCustomSortPresets(nextPresets);
+    saveCustomSortPresets(nextPresets);
+    if (activeSortSelection.kind === "preset" && activeSortSelection.id === id) {
+      const fallback: SortSelection = { kind: "builtin", key: "DATE_DESC" };
+      setActiveSortSelection(fallback);
+      saveActiveSortSelection(fallback);
+    }
+    setSortBuilderSeed((seed) => (seed?.presetId === id ? { levels: seed.levels } : seed));
+  };
 
   // Surface the background re-classify job's result here if this page is
   // still open when it finishes (it may well finish while the user has
@@ -611,18 +662,33 @@ export default function LibraryCatalogPage() {
           {/* Sort Selector */}
           <div className="relative">
             <select
-              value={sortOption}
-              onChange={(e) => setSortOption(e.target.value as any)}
-              className="bg-[#e8eef5] dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-2xl px-3 py-1.5 shadow-2xs focus:outline-none cursor-pointer"
+              value={
+                activeSortSelection.kind === "builtin"
+                  ? `builtin:${activeSortSelection.key}`
+                  : activeSortSelection.kind === "preset"
+                  ? `preset:${activeSortSelection.id}`
+                  : "custom"
+              }
+              onChange={(e) => handleSortSelectChange(e.target.value)}
+              className="bg-[#e8eef5] dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-2xl px-3 py-1.5 shadow-2xs focus:outline-none cursor-pointer max-w-[9.5rem] sm:max-w-none"
               title="Sort collection"
             >
-              <option value="DATE_DESC">📅 Recently Added</option>
-              <option value="TITLE_ASC">🔤 Title (A → Z)</option>
-              <option value="TITLE_DESC">🔤 Title (Z → A)</option>
-              <option value="AUTHOR_ASC">👤 Author (A → Z)</option>
-              <option value="DEWEY_ASC">🏷️ Dewey Call #</option>
-              <option value="VALUE_DESC">💰 Value (High → Low)</option>
-              <option value="VALUE_ASC">💰 Value (Low → High)</option>
+              {Object.entries(BUILTIN_SORTS).map(([key, cfg]) => (
+                <option key={key} value={`builtin:${key}`}>
+                  {cfg.label}
+                </option>
+              ))}
+              {customSortPresets.length > 0 && (
+                <optgroup label="My Custom Sorts">
+                  {customSortPresets.map((preset) => (
+                    <option key={preset.id} value={`preset:${preset.id}`}>
+                      ⭐ {preset.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {activeSortSelection.kind === "custom" && <option value="custom">🛠️ Custom (unsaved)</option>}
+              <option value="__OPEN_BUILDER__">⚙️ Build Custom Sort…</option>
             </select>
           </div>
 
@@ -1033,6 +1099,21 @@ export default function LibraryCatalogPage() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Custom Sort Builder Modal */}
+      {sortBuilderSeed && (
+        <CustomSortBuilder
+          initialLevels={sortBuilderSeed.levels}
+          initialPresetId={sortBuilderSeed.presetId}
+          initialPresetName={sortBuilderSeed.presetName}
+          presets={customSortPresets}
+          onApply={handleApplyCustomSort}
+          onSave={handleSaveSortPreset}
+          onDeletePreset={handleDeleteSortPreset}
+          onEditPreset={(preset) => setSortBuilderSeed({ levels: preset.levels, presetId: preset.id, presetName: preset.name })}
+          onClose={() => setSortBuilderSeed(null)}
+        />
       )}
 
       {/* Print Spine Labels Modal */}

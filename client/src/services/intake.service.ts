@@ -62,6 +62,12 @@ export type BookSearchResult = {
   coverUrl: string | null;
 };
 
+export type CoverCandidate = {
+  source: "Google Books" | "Open Library" | "ThriftBooks" | "AbeBooks" | "ISBNdb" | "LibraryThing";
+  url: string;
+  quality: "high" | "medium" | "standard";
+};
+
 const rawApiBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 const API_BASE = rawApiBase.replace(/\/$/, "").replace(/\/api$/, "");
 const PROVIDER_TIMEOUT_MS = 20000;
@@ -283,6 +289,52 @@ function getStationName(): string {
     return "Unknown station";
   }
   return window.localStorage.getItem("colophon-station-name") ?? "Unassigned station";
+}
+
+export async function fetchCoverCandidates(params: { isbn: string; title?: string; author?: string }): Promise<CoverCandidate[]> {
+  const query = new URLSearchParams();
+  if (params.isbn) query.set("isbn", params.isbn);
+  if (params.title) query.set("title", params.title);
+  if (params.author) query.set("author", params.author);
+
+  const response = await fetchWithTimeout(`${API_BASE}/api/inventory/covers/lookup?${query.toString()}`);
+  if (!response.ok) return [];
+  const data = (await response.json()) as { candidates?: CoverCandidate[] };
+  return Array.isArray(data.candidates) ? data.candidates : [];
+}
+
+export async function updateItemCover(isbn: string, coverUrl: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/inventory/active/${encodeURIComponent(isbn)}/cover`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ coverUrl }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to update cover image.");
+  }
+}
+
+export async function enrichItemMetadata(
+  isbn: string,
+  force = false,
+): Promise<{ success: boolean; item: Record<string, unknown>; enrichment: Record<string, unknown> }> {
+  const response = await fetch(`${API_BASE}/api/inventory/active/${encodeURIComponent(isbn)}/enrich-metadata`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to fetch more information for this title.");
+  }
+  return response.json();
+}
+
+export async function refreshMissingInventoryCovers(): Promise<{ totalChecked: number; updatedCount: number }> {
+  const response = await fetch(`${API_BASE}/api/inventory/active/refresh-missing-covers`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error("Failed to refresh covers.");
+  }
+  return response.json();
 }
 
 export function getIntakeContainer(price: number | null): IntakeContainer {

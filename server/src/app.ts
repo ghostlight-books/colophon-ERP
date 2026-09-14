@@ -13,7 +13,7 @@ import { lookupBookByIsbn, pullOpenLibraryMetadata, autoCorrectIsbn } from "./se
 import { createSquareCheckoutLink, isSquareConfigured } from "./services/squarePayment.service.js";
 import { executeDropshipSettlement } from "./services/networkSettlement.service.js";
 import { getStoreUspsAccountStatus, saveStoreUspsAccount } from "./services/storeShipping.service.js";
-import { checkStoreConnection, fetchStoreOrders, listEcommerceIntegrations, saveEcommerceIntegration, syncInventoryItemByIsbn, syncStoreInventory, syncStoreInventoryCatalog, syncProductBundleToShopify, type EcommercePlatform } from "./services/ecommerce.service.js";
+import { checkStoreConnection, fetchStoreOrders, getShopifySalesSummary, listEcommerceIntegrations, saveEcommerceIntegration, syncInventoryItemByIsbn, syncStoreInventory, syncStoreInventoryCatalog, syncProductBundleToShopify, type EcommercePlatform } from "./services/ecommerce.service.js";
 import { completeShopifyInstall, createShopifyInstallUrl } from "./services/shopifyOAuth.service.js";
 import { createEbayAuthUrl, exchangeEbayCode, saveDirectEbayToken, getValidEbayAccessToken } from "./services/ebay/ebayAuth.service.js";
 import { publishBookToEbay, withdrawOffer } from "./services/ebay/ebayInventory.service.js";
@@ -1613,6 +1613,7 @@ export function createApp(): express.Express {
       const pricedInventory = activeInventory.filter((item) => item.listPrice !== null);
       const inventoryValue = pricedInventory.reduce((sum, item) => sum + (item.listPrice ?? 0) * item.quantityOnHand, 0);
       const lowStock = activeInventory.filter((item) => item.quantityOnHand <= 1).length;
+      const shopify = await getShopifySalesSummary();
       res.json({
         activeTitles: activeInventory.length,
         unitsOnHand: activeInventory.reduce((sum, item) => sum + item.quantityOnHand, 0),
@@ -1620,6 +1621,7 @@ export function createApp(): express.Express {
         inventoryValue,
         lowStock,
         recentTitles: activeInventory.slice(0, 4).map((item) => ({ title: item.title ?? "Untitled", sku: item.sku })),
+        shopify,
       });
     } catch (error) {
       next(error);
@@ -1788,6 +1790,109 @@ export function createApp(): express.Express {
       res.json(item);
     } catch (error) {
       next(error);
+    }
+  });
+
+  // Multi-Source Cover Lookup & Candidates Picker for Bookstore inventory --
+  // mirrors /api/library/covers/lookup, duplicated (rather than reused
+  // directly) because Bookstore intake is intentionally unauthenticated and
+  // the Library routes sit behind authMiddleware.
+  app.get("/api/inventory/covers/lookup", async (req, res) => {
+    try {
+      const isbn = typeof req.query?.isbn === "string" ? req.query.isbn : "";
+      const title = typeof req.query?.title === "string" ? req.query.title : undefined;
+      const author = typeof req.query?.author === "string" ? req.query.author : undefined;
+      if (!isbn && !title) {
+        res.status(400).json({ error: "ISBN or title is required to lookup covers." });
+        return;
+      }
+      const candidates = await fetchAllWorkingCoverCandidates({ isbn, title, author });
+      res.json({ candidates });
+    } catch (error) {
+      console.error("Inventory cover lookup error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to lookup cover images." });
+    }
+  });
+
+  app.post("/api/inventory/active/:isbn/cover", async (req, res, next) => {
+    try {
+      const cleanIsbn = req.params.isbn.replace(/[^0-9X]/gi, "").toUpperCase();
+      const { coverUrl } = req.body || {};
+      const updated = await prisma.isbnLookupCache.update({
+        where: { isbn: cleanIsbn },
+        data: { coverUrl: coverUrl || null },
+      });
+      res.json(updated);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Enrich a single Bookstore inventory item with full online metadata
+  // (Description, Publisher, Page Count, Binding, Cover, Tags) -- mirrors
+  // /api/library/volumes/:id/enrich-metadata's blank-fill-by-default,
+  // force-overwrite-when-asked behavior.
+  app.post("/api/inventory/active/:isbn/enrich-metadata", async (req, res) => {
+    try {
+      const cleanIsbn = req.params.isbn.replace(/[^0-9X]/gi, "").toUpperCase();
+      const item = await prisma.isbnLookupCache.findUnique({ where: { isbn: cleanIsbn } });
+      if (!item) {
+        res.status(404).json({ error: "Inventory item not found." });
+        return;
+      }
+
+      const enrichment = await enrichLibraryClassification(cleanIsbn);
+      const updateData: Record<string, any> = {};
+
+      if (!item.author && enrichment.author) updateData.author = enrichment.author;
+      if (!item.description && enrichment.description) updateData.description = enrichment.description;
+      if (!item.publisher && enrichment.publisher) updateData.publisher = enrichment.publisher;
+      if (!item.pageCount && enrichment.pageCount) updateData.pageCount = enrichment.pageCount;
+      if (!item.bindingFormat && enrichment.bindingFormat) updateData.bindingFormat = enrichment.bindingFormat;
+      if (!item.coverUrl && enrichment.coverUrl) updateData.coverUrl = enrichment.coverUrl;
+      if (!item.catalogTags && enrichment.subjects.length > 0) updateData.catalogTags = enrichment.subjects.join(", ");
+
+      if (req.body?.force) {
+        if (enrichment.author) updateData.author = enrichment.author;
+        if (enrichment.description) updateData.description = enrichment.description;
+        if (enrichment.publisher) updateData.publisher = enrichment.publisher;
+        if (enrichment.pageCount) updateData.pageCount = enrichment.pageCount;
+        if (enrichment.bindingFormat) updateData.bindingFormat = enrichment.bindingFormat;
+        if (enrichment.coverUrl) updateData.coverUrl = enrichment.coverUrl;
+        if (enrichment.subjects.length > 0) updateData.catalogTags = enrichment.subjects.join(", ");
+      }
+
+      const updated = await prisma.isbnLookupCache.update({ where: { isbn: cleanIsbn }, data: updateData });
+      res.json({ success: true, item: updated, enrichment });
+    } catch (error) {
+      console.error("Enrich inventory metadata error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to enrich item metadata." });
+    }
+  });
+
+  // Batch refresh missing covers across active Bookstore inventory
+  app.post("/api/inventory/active/refresh-missing-covers", async (_req, res) => {
+    try {
+      const itemsWithoutCover = await prisma.isbnLookupCache.findMany({
+        where: { quantityOnHand: { gt: 0 }, OR: [{ coverUrl: null }, { coverUrl: "" }] },
+        take: 50,
+      });
+
+      let updatedCount = 0;
+      for (const item of itemsWithoutCover) {
+        try {
+          const newCover = await resolveBestCoverUrl({ isbn: item.isbn, title: item.title ?? undefined, author: item.author ?? undefined });
+          if (newCover) {
+            await prisma.isbnLookupCache.update({ where: { id: item.id }, data: { coverUrl: newCover } });
+            updatedCount++;
+          }
+        } catch {}
+      }
+
+      res.json({ success: true, totalChecked: itemsWithoutCover.length, updatedCount });
+    } catch (error) {
+      console.error("Refresh missing inventory covers error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to refresh covers." });
     }
   });
 

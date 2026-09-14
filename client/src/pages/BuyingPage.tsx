@@ -43,6 +43,8 @@ export default function BuyingPage(): JSX.Element {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const barcodeRef = useRef<HTMLInputElement>(null);
+  const scannerBufferRef = useRef("");
+  const scannerTimerRef = useRef<number | null>(null);
 
   // Camera state
   const [cameraActive, setCameraActive] = useState(false);
@@ -95,11 +97,62 @@ export default function BuyingPage(): JSX.Element {
     window.localStorage.setItem("colophon-buying-batch", JSON.stringify(batchItems));
   }, [batchItems]);
 
-  // Focus barcode input on mount and mode switch
+  // Focus barcode input on mount, mode switch, and again the instant a lookup
+  // finishes -- this must be its own effect (not a call inside the lookup's
+  // try/finally) because the input is disabled while lookupBusy is true, and
+  // calling .focus() before React commits the re-render that clears
+  // `disabled` is a silent no-op in every browser.
   useEffect(() => {
-    if (intakeMode === "scanner") {
+    if (intakeMode === "scanner" && !lookupBusy) {
       barcodeRef.current?.focus();
     }
+  }, [intakeMode, lookupBusy]);
+
+  // Hands-free scanning, matching the Bookstore Intake scanner station: a
+  // USB barcode scanner types digits fast and terminates with Enter no
+  // matter what element currently has focus (e.g. after clicking "Add to
+  // Batch" or a condition button). Listen globally -- skipping real text
+  // inputs so manual typing still works normally -- so the next scan is
+  // captured even if focus drifted away from the barcode field.
+  useEffect(() => {
+    if (intakeMode !== "scanner") return undefined;
+
+    const handleScannerKey = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null;
+      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT") {
+        return;
+      }
+
+      if (event.key === "Enter") {
+        const value = scannerBufferRef.current;
+        scannerBufferRef.current = "";
+        if (value.length === 10 || value.length === 13) {
+          setBarcodeInput(value);
+          void handleLookupIsbn(value);
+        }
+        return;
+      }
+
+      if (/^[0-9Xx]$/.test(event.key)) {
+        event.preventDefault();
+        scannerBufferRef.current = `${scannerBufferRef.current}${event.key}`.slice(-13);
+        if (scannerTimerRef.current !== null) {
+          window.clearTimeout(scannerTimerRef.current);
+        }
+        scannerTimerRef.current = window.setTimeout(() => {
+          scannerBufferRef.current = "";
+        }, 300);
+      }
+    };
+
+    window.addEventListener("keydown", handleScannerKey);
+    return () => {
+      window.removeEventListener("keydown", handleScannerKey);
+      if (scannerTimerRef.current !== null) {
+        window.clearTimeout(scannerTimerRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intakeMode]);
 
   // Calculate live offer based on customSellPrice or default
@@ -152,7 +205,6 @@ export default function BuyingPage(): JSX.Element {
       setErrorMessage(err instanceof Error ? err.message : "Failed to evaluate book.");
     } finally {
       setLookupBusy(false);
-      barcodeRef.current?.focus();
     }
   };
 

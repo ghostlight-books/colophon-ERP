@@ -460,6 +460,127 @@ export async function fetchStoreOrders(storeId: string, platform: EcommercePlatf
   return adapter.fetchRecentOrders();
 }
 
+type ShopifyOrderLineItem = { title?: string; quantity?: number; sku?: string };
+type ShopifyOrder = {
+  id?: number;
+  created_at?: string;
+  total_price?: string;
+  cancelled_at?: string | null;
+  fulfillment_status?: string | null;
+  customer?: { id?: number; email?: string } | null;
+  email?: string;
+  line_items?: ShopifyOrderLineItem[];
+};
+
+export type ShopifySalesSummary = {
+  connected: boolean;
+  totalRevenue: number;
+  totalOrders: number;
+  totalCustomers: number;
+  avgTicket: number;
+  salesToday: number;
+  salesThisMonth: number;
+  salesTotal: number;
+  fulfillmentRate: number;
+  topProducts: Array<{ title: string; unitsSold: number }>;
+  dailySeries: Array<{ date: string; orders: number; revenue: number }>;
+};
+
+const EMPTY_SHOPIFY_SUMMARY: ShopifySalesSummary = {
+  connected: false,
+  totalRevenue: 0,
+  totalOrders: 0,
+  totalCustomers: 0,
+  avgTicket: 0,
+  salesToday: 0,
+  salesThisMonth: 0,
+  salesTotal: 0,
+  fulfillmentRate: 0,
+  topProducts: [],
+  dailySeries: [],
+};
+
+const DAILY_SERIES_LENGTH = 10;
+const SHOPIFY_SUMMARY_CACHE_MS = 60_000; // Avoid re-hitting Shopify's REST API on every 10s dashboard poll.
+let shopifySummaryCache: { computedAt: number; summary: ShopifySalesSummary } | null = null;
+
+function dayKey(dateInput: string | Date): string {
+  const d = new Date(dateInput);
+  return d.toISOString().slice(0, 10);
+}
+
+export async function getShopifySalesSummary(storeId = "ghostlight-demo"): Promise<ShopifySalesSummary> {
+  if (shopifySummaryCache && Date.now() - shopifySummaryCache.computedAt < SHOPIFY_SUMMARY_CACHE_MS) {
+    return shopifySummaryCache.summary;
+  }
+
+  let summary: ShopifySalesSummary;
+  try {
+    const rawOrders = (await fetchStoreOrders(storeId, "shopify")) as ShopifyOrder[];
+    const orders = rawOrders.filter((order) => !order.cancelled_at);
+
+    const totalRevenue = Number(orders.reduce((sum, order) => sum + (parseFloat(order.total_price ?? "0") || 0), 0).toFixed(2));
+    const totalOrders = orders.length;
+    const customerIds = new Set(orders.map((order) => order.customer?.id ?? order.customer?.email ?? order.email).filter(Boolean));
+    const avgTicket = totalOrders > 0 ? Number((totalRevenue / totalOrders).toFixed(2)) : 0;
+    const fulfilledCount = orders.filter((order) => order.fulfillment_status === "fulfilled").length;
+    const fulfillmentRate = totalOrders > 0 ? Math.round((fulfilledCount / totalOrders) * 100) : 0;
+
+    const todayKey = dayKey(new Date());
+    const monthKey = todayKey.slice(0, 7);
+    const salesToday = orders.filter((order) => order.created_at && dayKey(order.created_at) === todayKey).length;
+    const salesThisMonth = orders.filter((order) => order.created_at && dayKey(order.created_at).startsWith(monthKey)).length;
+
+    const productUnits = new Map<string, number>();
+    for (const order of orders) {
+      for (const item of order.line_items ?? []) {
+        if (!item.title) continue;
+        productUnits.set(item.title, (productUnits.get(item.title) ?? 0) + (item.quantity ?? 1));
+      }
+    }
+    const topProducts = Array.from(productUnits.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([title, unitsSold]) => ({ title, unitsSold }));
+
+    const dailyBuckets = new Map<string, { orders: number; revenue: number }>();
+    for (let i = DAILY_SERIES_LENGTH - 1; i >= 0; i -= 1) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      dailyBuckets.set(dayKey(d), { orders: 0, revenue: 0 });
+    }
+    for (const order of orders) {
+      if (!order.created_at) continue;
+      const key = dayKey(order.created_at);
+      const bucket = dailyBuckets.get(key);
+      if (bucket) {
+        bucket.orders += 1;
+        bucket.revenue += parseFloat(order.total_price ?? "0") || 0;
+      }
+    }
+    const dailySeries = Array.from(dailyBuckets.entries()).map(([date, v]) => ({ date, orders: v.orders, revenue: Number(v.revenue.toFixed(2)) }));
+
+    summary = {
+      connected: true,
+      totalRevenue,
+      totalOrders,
+      totalCustomers: customerIds.size,
+      avgTicket,
+      salesToday,
+      salesThisMonth,
+      salesTotal: totalOrders,
+      fulfillmentRate,
+      topProducts,
+      dailySeries,
+    };
+  } catch {
+    summary = EMPTY_SHOPIFY_SUMMARY;
+  }
+
+  shopifySummaryCache = { computedAt: Date.now(), summary };
+  return summary;
+}
+
 export async function syncStoreInventoryCatalog(storeId: string, platform: EcommercePlatform, onProgress?: (progress: InventorySyncProgress) => void): Promise<{ success: boolean; message: string; synced: number; skipped: number }> {
   const items = await prisma.isbnLookupCache.findMany({ where: { quantityOnHand: { gt: 0 } }, select: { sku: true, isbn: true, title: true, author: true, description: true, coverUrl: true, seoTitle: true, seoDescription: true, seoKeywords: true, catalogTags: true, category: true, subcategory: true, mediaType: true, listPrice: true, quantityOnHand: true, weight: true } });
   let synced = 0;

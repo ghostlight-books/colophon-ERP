@@ -4,7 +4,21 @@ import { Link } from "react-router-dom";
 import SurfaceCard from "../components/ui/SurfaceCard";
 import SyncStatusIndicator from "../components/common/SyncStatusIndicator";
 import CameraBarcodeScanner from "../components/common/CameraBarcodeScanner";
-import { getIntakeContainer, lookupBookByIsbn, receiveInventory, searchBooks, type BookCondition, type BookLookup, type BookSearchResult, type IntakeContainer } from "../services/intake.service";
+import CoverPickerModal from "../components/common/CoverPickerModal";
+import {
+  enrichItemMetadata,
+  fetchCoverCandidates,
+  getIntakeContainer,
+  lookupBookByIsbn,
+  receiveInventory,
+  refreshMissingInventoryCovers,
+  searchBooks,
+  updateItemCover,
+  type BookCondition,
+  type BookLookup,
+  type BookSearchResult,
+  type IntakeContainer,
+} from "../services/intake.service";
 
 type ScanHistoryItem = {
   id: string;
@@ -115,6 +129,12 @@ function IntakePage(): JSX.Element {
   const [historyQuery, setHistoryQuery] = useState("");
   const [historySortField, setHistorySortField] = useState<"time" | "title" | "condition" | "container" | "value" | "status">("time");
   const [historySortDir, setHistorySortDir] = useState<"asc" | "desc">("desc");
+
+  // Find Cover / Get More Info -- same multi-source enrichment the Library
+  // side has, applied per scanned item here instead of via a detail modal.
+  const [coverPickerIsbn, setCoverPickerIsbn] = useState<string | null>(null);
+  const [enrichingIsbn, setEnrichingIsbn] = useState<string | null>(null);
+  const [isRefreshingMissingCovers, setIsRefreshingMissingCovers] = useState(false);
 
   const handleHistoryHeaderSort = (field: "time" | "title" | "condition" | "container" | "value" | "status"): void => {
     if (historySortField === field) {
@@ -456,6 +476,65 @@ function IntakePage(): JSX.Element {
     };
   }, [cameraActive]);
 
+  function normalizedIsbn(value: string): string {
+    return value.replace(/[^0-9X]/gi, "").toUpperCase();
+  }
+
+  const handleSelectCoverForScannedItem = async (isbn: string, url: string): Promise<void> => {
+    await updateItemCover(isbn, url);
+    setScannedBooks((current) =>
+      current.map((book) => (normalizedIsbn(book.isbn) === normalizedIsbn(isbn) ? { ...book, coverUrl: url } : book))
+    );
+    setCoverPickerIsbn(null);
+    setMessage("Updated cover image.");
+  };
+
+  const handleEnrichScannedItem = async (isbn: string): Promise<void> => {
+    setEnrichingIsbn(isbn);
+    try {
+      const result = await enrichItemMetadata(isbn, true);
+      const item = result.item as Partial<BookLookup>;
+      setScannedBooks((current) =>
+        current.map((book) => {
+          if (normalizedIsbn(book.isbn) !== normalizedIsbn(isbn)) return book;
+          return {
+            ...book,
+            author: item.author ?? book.author,
+            description: item.description ?? book.description,
+            publisher: item.publisher ?? book.publisher,
+            pageCount: item.pageCount ?? book.pageCount,
+            bindingFormat: item.bindingFormat ?? book.bindingFormat,
+            coverUrl: item.coverUrl ?? book.coverUrl,
+            catalogTags: item.catalogTags ?? book.catalogTags,
+          };
+        })
+      );
+      setMessage("Fetched more information for this title.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not fetch more info for this title.");
+    } finally {
+      setEnrichingIsbn(null);
+    }
+  };
+
+  const handleRefreshMissingCoversClick = async (): Promise<void> => {
+    setIsRefreshingMissingCovers(true);
+    try {
+      const res = await refreshMissingInventoryCovers();
+      setMessage(
+        res.updatedCount > 0
+          ? `Found and attached covers for ${res.updatedCount} inventory items!`
+          : "All active inventory already has covers."
+      );
+    } catch {
+      setMessage("Failed to refresh covers.");
+    } finally {
+      setIsRefreshingMissingCovers(false);
+    }
+  };
+
+  const coverPickerBook = coverPickerIsbn ? scannedBooks.find((book) => normalizedIsbn(book.isbn) === normalizedIsbn(coverPickerIsbn)) : null;
+
 
   return (
     <section className="grid gap-4">
@@ -465,6 +544,15 @@ function IntakePage(): JSX.Element {
           <button type="button" onClick={() => setActiveView("history")} className={["rounded-full px-4 py-2.5", activeView === "history" ? "bg-white text-slate-700 shadow-[0_5px_14px_rgba(76,86,103,0.12)]" : "hover:bg-white/70"].join(" ")}>Intake History</button>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleRefreshMissingCoversClick()}
+            disabled={isRefreshingMissingCovers}
+            title="Scan multi-source registries (Google, OpenLibrary, ThriftBooks, AbeBooks) for missing inventory covers"
+            className="px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-sm flex items-center gap-1.5 transition disabled:opacity-50"
+          >
+            {isRefreshingMissingCovers ? "Searching Covers…" : "Find Missing Covers"}
+          </button>
           <Link
             to="/intake/quick-scan"
             className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 transition"
@@ -841,6 +929,23 @@ function IntakePage(): JSX.Element {
                       <p className="mt-1">SKU: {book.label.sku}</p>
                       <p>Barcode: {book.label.barcode}</p>
                     </div>
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCoverPickerIsbn(book.isbn)}
+                        className="flex-1 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                      >
+                        🖼️ Find Cover
+                      </button>
+                      <button
+                        type="button"
+                        disabled={enrichingIsbn === book.isbn}
+                        onClick={() => void handleEnrichScannedItem(book.isbn)}
+                        className="flex-1 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer disabled:opacity-50"
+                      >
+                        {enrichingIsbn === book.isbn ? "⏳ Fetching…" : "⚡ Get More Info"}
+                      </button>
+                    </div>
                   </div>
                   <span
                     className={[
@@ -866,6 +971,17 @@ function IntakePage(): JSX.Element {
           )}
         </SurfaceCard>
 
+      {coverPickerBook && (
+        <CoverPickerModal
+          title={coverPickerBook.title ?? "Scanned book"}
+          isbn={coverPickerBook.isbn}
+          author={coverPickerBook.author}
+          currentCoverUrl={coverPickerBook.coverUrl}
+          fetchCandidates={fetchCoverCandidates}
+          onSelect={(url) => handleSelectCoverForScannedItem(coverPickerBook.isbn, url)}
+          onClose={() => setCoverPickerIsbn(null)}
+        />
+      )}
       </>
       ) : null}
 
