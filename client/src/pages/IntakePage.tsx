@@ -5,6 +5,9 @@ import SurfaceCard from "../components/ui/SurfaceCard";
 import SyncStatusIndicator from "../components/common/SyncStatusIndicator";
 import CameraBarcodeScanner from "../components/common/CameraBarcodeScanner";
 import CoverPickerModal from "../components/common/CoverPickerModal";
+import LabelTemplateBuilder from "../components/common/LabelTemplateBuilder";
+import LabelPrintModal from "../components/common/LabelPrintModal";
+import { loadLabelTemplate, saveLabelTemplate, type LabelData, type LabelTemplate } from "../utils/labelTemplates";
 import {
   enrichItemMetadata,
   fetchCoverCandidates,
@@ -135,6 +138,13 @@ function IntakePage(): JSX.Element {
   const [coverPickerIsbn, setCoverPickerIsbn] = useState<string | null>(null);
   const [enrichingIsbn, setEnrichingIsbn] = useState<string | null>(null);
   const [isRefreshingMissingCovers, setIsRefreshingMissingCovers] = useState(false);
+
+  // Dymo label printing -- per-shop size + field selection, saved locally
+  // since label stock is a physical-printer setup choice, not shared data.
+  const [labelTemplate, setLabelTemplate] = useState<LabelTemplate>(() => loadLabelTemplate());
+  const [isLabelBuilderOpen, setIsLabelBuilderOpen] = useState(false);
+  const [printingIsbn, setPrintingIsbn] = useState<string | null>(null);
+  const [isBatchPrintOpen, setIsBatchPrintOpen] = useState(false);
 
   const handleHistoryHeaderSort = (field: "time" | "title" | "condition" | "container" | "value" | "status"): void => {
     if (historySortField === field) {
@@ -535,6 +545,28 @@ function IntakePage(): JSX.Element {
 
   const coverPickerBook = coverPickerIsbn ? scannedBooks.find((book) => normalizedIsbn(book.isbn) === normalizedIsbn(coverPickerIsbn)) : null;
 
+  const toLabelData = (book: ScannedBook): LabelData => ({
+    title: book.title,
+    author: book.author,
+    publisher: book.publisher,
+    price: book.listPrice,
+    category: book.category,
+    subcategory: book.subcategory,
+    sku: book.label.sku,
+    condition: book.condition,
+    isbn: book.isbn,
+  });
+
+  const printingBook = printingIsbn ? scannedBooks.find((book) => normalizedIsbn(book.isbn) === normalizedIsbn(printingIsbn)) : null;
+  const printingLabelData: LabelData | null = printingBook ? toLabelData(printingBook) : null;
+  const batchLabelData: LabelData[] = scannedBooks.map(toLabelData);
+
+  const handleSaveLabelTemplate = (template: LabelTemplate): void => {
+    setLabelTemplate(template);
+    saveLabelTemplate(template);
+    setIsLabelBuilderOpen(false);
+  };
+
 
   return (
     <section className="grid gap-4">
@@ -552,6 +584,23 @@ function IntakePage(): JSX.Element {
             className="px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-sm flex items-center gap-1.5 transition disabled:opacity-50"
           >
             {isRefreshingMissingCovers ? "Searching Covers…" : "Find Missing Covers"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsLabelBuilderOpen(true)}
+            title="Set your Dymo label size and exactly what prints on it"
+            className="px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-sm flex items-center gap-1.5 transition"
+          >
+            ⚙️ Label Settings
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsBatchPrintOpen(true)}
+            disabled={scannedBooks.length === 0}
+            title="Print a label for every book in the running scan list, one after another"
+            className="px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-sm flex items-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            🖨️ Print Batch{scannedBooks.length > 0 ? ` (${scannedBooks.length})` : ""}
           </button>
           <Link
             to="/intake/quick-scan"
@@ -929,21 +978,28 @@ function IntakePage(): JSX.Element {
                       <p className="mt-1">SKU: {book.label.sku}</p>
                       <p>Barcode: {book.label.barcode}</p>
                     </div>
-                    <div className="mt-2.5 flex items-center gap-2">
+                    <div className="mt-2.5 grid grid-cols-3 gap-2">
                       <button
                         type="button"
                         onClick={() => setCoverPickerIsbn(book.isbn)}
-                        className="flex-1 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                        className="px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
                       >
-                        🖼️ Find Cover
+                        🖼️ Cover
                       </button>
                       <button
                         type="button"
                         disabled={enrichingIsbn === book.isbn}
                         onClick={() => void handleEnrichScannedItem(book.isbn)}
-                        className="flex-1 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer disabled:opacity-50"
+                        className="px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer disabled:opacity-50"
                       >
-                        {enrichingIsbn === book.isbn ? "⏳ Fetching…" : "⚡ Get More Info"}
+                        {enrichingIsbn === book.isbn ? "⏳ …" : "⚡ More Info"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPrintingIsbn(book.isbn)}
+                        className="px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                      >
+                        🖨️ Label
                       </button>
                     </div>
                   </div>
@@ -981,6 +1037,22 @@ function IntakePage(): JSX.Element {
           onSelect={(url) => handleSelectCoverForScannedItem(coverPickerBook.isbn, url)}
           onClose={() => setCoverPickerIsbn(null)}
         />
+      )}
+
+      {isLabelBuilderOpen && (
+        <LabelTemplateBuilder
+          initialTemplate={labelTemplate}
+          onSave={handleSaveLabelTemplate}
+          onClose={() => setIsLabelBuilderOpen(false)}
+        />
+      )}
+
+      {printingLabelData && (
+        <LabelPrintModal items={[printingLabelData]} template={labelTemplate} onClose={() => setPrintingIsbn(null)} />
+      )}
+
+      {isBatchPrintOpen && batchLabelData.length > 0 && (
+        <LabelPrintModal items={batchLabelData} template={labelTemplate} onClose={() => setIsBatchPrintOpen(false)} />
       )}
       </>
       ) : null}
