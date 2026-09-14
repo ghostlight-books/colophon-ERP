@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import SurfaceCard from "../components/ui/SurfaceCard";
 import StatusPill from "../components/ui/StatusPill";
+import { refreshMissingInventoryCovers } from "../services/intake.service";
 
 type InventoryRecord = {
   id: string;
@@ -186,6 +187,7 @@ function InventoryPage(): JSX.Element {
   const [selectedIsbns, setSelectedIsbns] = useState<Set<string>>(new Set());
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [isRefreshingCovers, setIsRefreshingCovers] = useState(false);
 
   // Bulk Form Fields
   const [bulkCategory, setBulkCategory] = useState("Print Books");
@@ -545,6 +547,26 @@ function InventoryPage(): JSX.Element {
     }
   };
 
+  // Find Missing Covers -- same multi-source registry lookup the Library
+  // catalog has, run across the whole active inventory rather than a
+  // selection, matching how it works on the Intake scan page too.
+  const handleFindMissingCovers = async (): Promise<void> => {
+    setIsRefreshingCovers(true);
+    try {
+      const res = await refreshMissingInventoryCovers();
+      setMessage(
+        res.updatedCount > 0
+          ? `Found and attached covers for ${res.updatedCount} of ${res.totalChecked} items missing one.`
+          : "All active inventory already has covers."
+      );
+      await loadInventory();
+    } catch {
+      setMessage("Failed to find missing covers.");
+    } finally {
+      setIsRefreshingCovers(false);
+    }
+  };
+
   // Navigate to Bundle Studio with Selected Items
   const handleCreateBundleFromSelected = (): void => {
     if (selectedIsbns.size < 2) return;
@@ -668,6 +690,15 @@ function InventoryPage(): JSX.Element {
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Inventory records</h3>
             <p className="mt-1 text-xs text-slate-500">{shareableItems} item(s) available for Open Network sharing. {connectedPartnerStores} connected partner store(s).</p>
           </div>
+          <button
+            type="button"
+            onClick={() => void handleFindMissingCovers()}
+            disabled={isRefreshingCovers}
+            title="Scan multi-source registries (Google, OpenLibrary, ThriftBooks, AbeBooks) for missing inventory covers"
+            className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            {isRefreshingCovers ? "Searching Covers…" : "Find Missing Covers"}
+          </button>
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
