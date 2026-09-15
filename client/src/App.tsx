@@ -22,6 +22,7 @@ import ProductPage from "./pages/ProductPage";
 import ShopifyPage from "./pages/ShopifyPage";
 import EbayPage from "./pages/EbayPage";
 import BuyingPage from "./pages/BuyingPage";
+import CustomersPage from "./pages/CustomersPage";
 import BundlesPage from "./pages/BundlesPage";
 import LoginPage from "./pages/LoginPage";
 import LibraryDashboardPage from "./pages/library/LibraryDashboardPage";
@@ -151,6 +152,17 @@ function AuthorsIcon(): JSX.Element {
   );
 }
 
+function CustomersIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+      <circle cx="9" cy="8" r="2.8" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M3.5 19c0.8-2.8 3-4.5 5.5-4.5s4.7 1.7 5.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="17" cy="8.5" r="2.1" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M15.5 14.7c2-0.3 4 1 4.7 3.3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function MarketingIcon(): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
@@ -218,6 +230,7 @@ function App(): JSX.Element {
               <Route path="lists" element={<ListsPage />} />
               <Route path="inventory" element={<ActiveInventoryPage />} />
               <Route path="inventory/product/:isbn" element={<ProductPage />} />
+              <Route path="customers" element={<CustomersPage />} />
               <Route path="bundles" element={<BundlesPage />} />
               <Route path="finance" element={<FinancePage />} />
               <Route path="shopify" element={<ShopifyPage />} />
@@ -359,6 +372,13 @@ function ShellRouteLayout(): JSX.Element {
         to: "/operations",
         icon: <OperationsIcon />,
         module: "DASHBOARD",
+      },
+      {
+        key: "customers",
+        label: "Customers",
+        to: "/customers",
+        icon: <CustomersIcon />,
+        module: "INVENTORY",
       },
       {
         key: "marketing",

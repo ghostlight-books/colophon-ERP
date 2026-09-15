@@ -846,4 +846,72 @@ model LibraryAuthorAlias {
   @@index([canonicalName])
 }
 
+model Customer {
+  id                 String    @id @default(uuid())
+  name               String
+  email              String?
+  phone              String?
+  address            String?
+  storeCreditBalance Float     @default(0)
+  marketingOptIn     Boolean   @default(false)
+  tags               String?
+  notes              String?
+  storeId            String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  creditTransactions CustomerCreditTransaction[]
+  tradeIns           TradeInTransaction[]
+
+  @@index([email])
+  @@index([phone])
+  @@index([storeId])
+}
+
+model CustomerCreditTransaction {
+  id           String   @id @default(uuid())
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  amount       Float
+  balanceAfter Float
+  reason       String
+  referenceId  String?
+  createdAt    DateTime @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+model TradeInTransaction {
+  id            String    @id @default(uuid())
+  batchId       String    @unique
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  paymentMethod String
+  totalPaid     Float
+  itemCount     Int
+  storeId       String?
+  createdAt     DateTime  @default(now())
+
+  items         TradeInTransactionItem[]
+
+  @@index([customerId, createdAt])
+  @@index([storeId, createdAt])
+}
+
+model TradeInTransactionItem {
+  id         String             @id @default(uuid())
+  tradeInId  String
+  tradeIn    TradeInTransaction @relation(fields: [tradeInId], references: [id], onDelete: Cascade)
+  isbn       String
+  title      String?
+  author     String?
+  condition  String
+  sellPrice  Float
+  buyOffer   Float
+  createdAt  DateTime           @default(now())
+
+  @@index([tradeInId])
+  @@index([isbn])
+}
+
 

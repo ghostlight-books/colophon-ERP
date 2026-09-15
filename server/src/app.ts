@@ -25,6 +25,14 @@ import { autoSelectShippingRate, quoteAllShippingRates } from "./services/shippi
 import { resolveBookDimensions } from "./services/isbn/dimensions.service.js";
 import { validateBuyingSearchParams, searchBuyingEditions, evaluateBuyingBook, processBuyingBatch } from "./services/buying.service.js";
 import {
+  adjustCustomerCredit,
+  createCustomer,
+  deleteCustomer,
+  getCustomer,
+  listCustomers,
+  updateCustomer,
+} from "./services/customer.service.js";
+import {
   calculateSuggestedBundlePrice,
   searchAvailableItemsForBundling,
   createProductBundle,
@@ -136,14 +144,6 @@ type PosCartItem = {
 };
 
 type PosTenderType = "cash" | "card" | "cashapp" | "po" | "storecredit";
-
-type CustomerCreditAccount = {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  storeCreditBalance: number;
-};
 
 type PosStore = {
   checkNumber: number;
@@ -312,13 +312,6 @@ const posStore: PosStore = {
     { id: "p-8", title: "The Body Keeps the Score", option: "Used - Good", qty: 1, unitPrice: 12 },
   ],
 };
-
-const customerCreditStore: CustomerCreditAccount[] = [
-  { id: "cust-100", name: "Harper Quinn", email: "harper@example.com", phone: "(615) 555-0130", storeCreditBalance: 64.5 },
-  { id: "cust-101", name: "Eli Thomas", email: "eli@example.com", phone: "(615) 555-0184", storeCreditBalance: 21.25 },
-  { id: "cust-102", name: "Mara Stein", email: "mara@example.com", phone: "(615) 555-0152", storeCreditBalance: 142.0 },
-  { id: "cust-103", name: "Jordan Lee", email: "jordan@example.com", phone: "(615) 555-0101", storeCreditBalance: 8.75 },
-];
 
 const marketingStore: MarketingStore = {
   connections: [
@@ -3111,25 +3104,85 @@ export function createApp(): express.Express {
     res.json(buildPosRegisterPayload(posStore));
   });
 
-  app.get("/api/customers/store-credit", (req, res) => {
-    const queryRaw = req.query.query;
-    const query = typeof queryRaw === "string" ? queryRaw.trim().toLowerCase() : "";
+  // Customer Database: marketing contacts, store credit, trade-in history.
+  // NOTE: /store-credit and /:id/credit-adjustment must stay registered
+  // before /api/customers/:id below, or Express would match "store-credit"
+  // and "credit-adjustment" as an :id instead.
+  app.get("/api/customers", async (req, res, next) => {
+    try {
+      const query = typeof req.query.query === "string" ? req.query.query.trim() : undefined;
+      const tag = typeof req.query.tag === "string" ? req.query.tag.trim() : undefined;
+      const marketingOptIn = req.query.marketingOptIn === "true" ? true : req.query.marketingOptIn === "false" ? false : undefined;
+      const customers = await listCustomers({ query, tag, marketingOptIn });
+      res.json({ customers });
+    } catch (error) {
+      next(error);
+    }
+  });
 
-    const results = customerCreditStore
-      .filter((account) => {
-        if (!query) {
-          return true;
-        }
+  app.post("/api/customers", async (req, res, next) => {
+    try {
+      const customer = await createCustomer(req.body);
+      res.status(201).json(customer);
+    } catch (error) {
+      next(error);
+    }
+  });
 
-        return account.name.toLowerCase().includes(query)
-          || account.email.toLowerCase().includes(query)
-          || account.phone.toLowerCase().includes(query);
-      })
-      .slice(0, 12);
+  app.get("/api/customers/store-credit", async (req, res, next) => {
+    try {
+      const queryRaw = req.query.query;
+      const query = typeof queryRaw === "string" ? queryRaw.trim() : undefined;
+      const results = (await listCustomers({ query })).slice(0, 12);
+      res.json({ customers: results });
+    } catch (error) {
+      next(error);
+    }
+  });
 
-    res.json({
-      customers: results,
-    });
+  app.post("/api/customers/:id/credit-adjustment", async (req, res, next) => {
+    try {
+      const { amount, reason } = req.body as { amount?: number; reason?: string };
+      if (typeof amount !== "number" || amount === 0 || !reason?.trim()) {
+        res.status(400).json({ error: "A non-zero amount and a reason are required." });
+        return;
+      }
+      const result = await adjustCustomerCredit(req.params.id, amount, reason.trim());
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to adjust store credit." });
+    }
+  });
+
+  app.get("/api/customers/:id", async (req, res, next) => {
+    try {
+      const customer = await getCustomer(req.params.id);
+      if (!customer) {
+        res.status(404).json({ error: "Customer not found." });
+        return;
+      }
+      res.json(customer);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch("/api/customers/:id", async (req, res, next) => {
+    try {
+      const customer = await updateCustomer(req.params.id, req.body);
+      res.json(customer);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/customers/:id", async (req, res, next) => {
+    try {
+      const result = await deleteCustomer(req.params.id);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post("/api/pos/cart/items", (req, res) => {
@@ -3285,18 +3338,12 @@ export function createApp(): express.Express {
         return;
       }
 
-      const account = customerCreditStore.find((customer) => customer.id === customerId);
-      if (!account) {
-        res.status(404).json({ error: "Customer credit account not found" });
+      try {
+        await adjustCustomerCredit(customerId, -Number(totals.total.toFixed(2)), "POS Redemption");
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : "Store credit redemption failed." });
         return;
       }
-
-      if (account.storeCreditBalance < totals.total) {
-        res.status(400).json({ error: `${account.name} has insufficient store credit` });
-        return;
-      }
-
-      account.storeCreditBalance = Math.max(0, Number((account.storeCreditBalance - totals.total).toFixed(2)));
     }
 
     posStore.cart = [];

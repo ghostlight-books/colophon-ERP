@@ -4,6 +4,7 @@ import { lookupBookByIsbn, resolveSmartBookPrice, autoCorrectIsbn, parseIsbn, lo
 import { lookupThriftbooksDetails } from "./thriftbooksScraper.service.js";
 import { lookupAbeBooksPrice } from "./abebooksScraper.service.js";
 import { syncInventoryItemByIsbn } from "./ecommerce.service.js";
+import { adjustCustomerCredit, findOrCreateCustomerByContact } from "./customer.service.js";
 import type {
   BookBuyingCondition,
   BookBuyingOffer,
@@ -434,6 +435,45 @@ export async function processBuyingBatch(input: {
         reconciled: true,
       },
     }).catch(() => null);
+  }
+
+  // Resolve (or create) the real customer this trade-in belongs to -- stays
+  // anonymous/"Walk-in" if no contact info was given, same as before.
+  const customer = await findOrCreateCustomerByContact({
+    name: input.customerName,
+    email: input.customerEmail,
+    phone: input.customerPhone,
+  });
+
+  // Persist real, itemized trade-in history -- previously this only ever
+  // showed up as a single text label on a FinanceTransaction, with no way
+  // to look up what was actually traded in or by whom.
+  const tradeIn = await prisma.tradeInTransaction.create({
+    data: {
+      batchId,
+      customerId: customer?.id ?? null,
+      paymentMethod: input.paymentMethod,
+      totalPaid: Number(totalPaid.toFixed(2)),
+      itemCount: input.items.length,
+      storeId,
+      items: {
+        create: input.items.map((item) => ({
+          isbn: autoCorrectIsbn(item.isbn.replace(/[^0-9X]/gi, "").toUpperCase()),
+          title: item.title ?? null,
+          author: item.author ?? null,
+          condition: item.condition,
+          sellPrice: item.sellPrice,
+          buyOffer: item.buyOffer,
+        })),
+      },
+    },
+  }).catch((err) => {
+    console.warn("TradeInTransaction creation warning:", err);
+    return null;
+  });
+
+  if (input.paymentMethod === "storecredit" && customer) {
+    await adjustCustomerCredit(customer.id, Number(totalPaid.toFixed(2)), "Trade-In", tradeIn?.id);
   }
 
   return {
