@@ -36,35 +36,10 @@ export interface LibrarySpaceSummary {
   shelvesCount: number;
 }
 
+// Every store needs at least one library space to file volumes/shelves into --
+// this seeds a default one on first access rather than requiring an explicit setup step.
 export async function ensureLibrarySpacesExist(storeId: string): Promise<void> {
   try {
-    // 1. Create table if not exists in SQLite
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "LibrarySpace" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "name" TEXT NOT NULL,
-        "slug" TEXT,
-        "description" TEXT,
-        "location" TEXT,
-        "icon" TEXT NOT NULL DEFAULT '🏛️',
-        "color" TEXT NOT NULL DEFAULT '#6366f1',
-        "isDefault" BOOLEAN NOT NULL DEFAULT 0,
-        "storeId" TEXT DEFAULT 'ghostlight-demo',
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // 2. Ensure columns exist on LibraryVolume & LibraryShelfLocation
-    await prisma.$executeRawUnsafe(`
-      ALTER TABLE "LibraryVolume" ADD COLUMN "librarySpaceId" TEXT;
-    `).catch(() => null);
-
-    await prisma.$executeRawUnsafe(`
-      ALTER TABLE "LibraryShelfLocation" ADD COLUMN "librarySpaceId" TEXT;
-    `).catch(() => null);
-
-    // 3. Ensure this store has at least one default library space
     const count = await prisma.librarySpace.count({ where: { storeId } });
     if (count === 0) {
       const defaultSpace = await prisma.librarySpace.create({

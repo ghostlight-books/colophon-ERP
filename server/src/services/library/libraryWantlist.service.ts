@@ -1,5 +1,4 @@
 import { prisma } from "../../config/database.js";
-import { ensureLibraryTablesExist } from "./libraryVolume.service.js";
 
 export interface CreateWantlistItemInput {
   title: string;
@@ -114,8 +113,6 @@ export async function notifyWantlistMatchesForVolume(volume: {
 }
 
 export async function listWantlistItems(storeId: string, librarySpaceId?: string) {
-  await ensureLibraryTablesExist();
-
   const where: any = { storeId, status: { not: "ARCHIVED" } };
   if (librarySpaceId && librarySpaceId !== "ALL") {
     where.librarySpaceId = librarySpaceId;
@@ -135,8 +132,6 @@ export async function listWantlistItems(storeId: string, librarySpaceId?: string
 }
 
 export async function createWantlistItem(input: CreateWantlistItemInput) {
-  await ensureLibraryTablesExist();
-
   if (!input.title || !input.title.trim()) {
     throw new Error("A title is required to add a wantlist item.");
   }
@@ -158,8 +153,6 @@ export async function createWantlistItem(input: CreateWantlistItemInput) {
 }
 
 export async function updateWantlistItem(id: string, storeId: string, input: UpdateWantlistItemInput) {
-  await ensureLibraryTablesExist();
-
   const existing = await prisma.libraryWantlistItem.findFirst({ where: { id, storeId } });
   if (!existing) {
     return null;
@@ -181,7 +174,6 @@ export async function updateWantlistItem(id: string, storeId: string, input: Upd
 }
 
 export async function deleteWantlistItem(id: string, storeId: string) {
-  await ensureLibraryTablesExist();
   const { count } = await prisma.libraryWantlistItem.deleteMany({ where: { id, storeId } });
   return { success: count > 0 };
 }

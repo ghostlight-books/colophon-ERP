@@ -1,4 +1,4 @@
-import { test, describe, beforeEach, after } from "node:test";
+import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   listExchangeMarketplace,
@@ -12,7 +12,6 @@ import {
 import {
   createLibraryVolume,
   deleteLibraryVolume,
-  ensureLibraryTablesExist,
 } from "../libraryVolume.service.js";
 import { prisma } from "../../../config/database.js";
 
@@ -22,10 +21,6 @@ const OFFERER_STORE_ID = "test-store-exchange-offerer";
 describe("Library Exchange & Offers Engine", () => {
   const createdVolumeIds: string[] = [];
   const createdOfferIds: string[] = [];
-
-  beforeEach(async () => {
-    await ensureLibraryTablesExist();
-  });
 
   after(async () => {
     // Delete created offers

@@ -1,5 +1,4 @@
 import { prisma } from "../../config/database.js";
-import { ensureLibraryTablesExist } from "./libraryVolume.service.js";
 
 export interface CreateNoteInput {
   volumeId: string;
@@ -40,7 +39,6 @@ function buildCitation(
 }
 
 export async function listNotesForVolume(volumeId: string, storeId: string) {
-  await ensureLibraryTablesExist();
   return prisma.libraryNote.findMany({
     where: { volumeId, volume: { storeId } },
     orderBy: { createdAt: "desc" },
@@ -48,8 +46,6 @@ export async function listNotesForVolume(volumeId: string, storeId: string) {
 }
 
 export async function listAllNotes(storeId: string, query?: string) {
-  await ensureLibraryTablesExist();
-
   const where: any = { volume: { storeId } };
   if (query && query.trim()) {
     const q = query.trim();
@@ -73,8 +69,6 @@ export async function listAllNotes(storeId: string, query?: string) {
 }
 
 export async function createNote(input: CreateNoteInput, storeId: string) {
-  await ensureLibraryTablesExist();
-
   if (!input.quoteText?.trim() && !input.personalNote?.trim()) {
     throw new Error("Add a quote or a note before saving.");
   }
@@ -99,8 +93,6 @@ export async function createNote(input: CreateNoteInput, storeId: string) {
 }
 
 export async function updateNote(id: string, storeId: string, input: UpdateNoteInput) {
-  await ensureLibraryTablesExist();
-
   const existing = await prisma.libraryNote.findFirst({
     where: { id, volume: { storeId } },
     include: { volume: { select: { title: true, author: true, publisher: true, publishYear: true } } },
@@ -123,7 +115,6 @@ export async function updateNote(id: string, storeId: string, input: UpdateNoteI
 }
 
 export async function deleteNote(id: string, storeId: string) {
-  await ensureLibraryTablesExist();
   const { count } = await prisma.libraryNote.deleteMany({ where: { id, volume: { storeId } } });
   return { success: count > 0 };
 }

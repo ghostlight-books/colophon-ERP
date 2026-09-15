@@ -1,5 +1,4 @@
 import { prisma } from "../../config/database.js";
-import { ensureLibraryTablesExist } from "./libraryVolume.service.js";
 
 /**
  * Collapses spacing/punctuation variants of already-period-separated
@@ -56,8 +55,6 @@ export interface AuthorSummary {
 }
 
 export async function listAuthors(storeId: string): Promise<AuthorSummary[]> {
-  await ensureLibraryTablesExist();
-
   const [volumes, aliasMap] = await Promise.all([
     prisma.libraryVolume.findMany({ where: { storeId }, select: { author: true, coverUrl: true } }),
     getAliasMap(),
@@ -97,8 +94,6 @@ export interface AuthorDetail {
 }
 
 export async function getAuthorDetail(canonicalName: string, storeId: string): Promise<AuthorDetail> {
-  await ensureLibraryTablesExist();
-
   const [volumes, aliasMap] = await Promise.all([
     prisma.libraryVolume.findMany({
       where: { storeId },
@@ -159,12 +154,10 @@ export async function getAuthorDetail(canonicalName: string, storeId: string): P
 }
 
 export async function listAuthorAliases() {
-  await ensureLibraryTablesExist();
   return prisma.libraryAuthorAlias.findMany({ orderBy: { canonicalName: "asc" } });
 }
 
 export async function createAuthorAlias(alias: string, canonicalName: string) {
-  await ensureLibraryTablesExist();
   const normalizedAlias = normalizeAuthorName(alias);
   if (!normalizedAlias || !canonicalName.trim()) {
     throw new Error("Both an alias name and a canonical name are required.");
@@ -180,7 +173,6 @@ export async function createAuthorAlias(alias: string, canonicalName: string) {
 }
 
 export async function deleteAuthorAlias(id: string) {
-  await ensureLibraryTablesExist();
   await prisma.libraryAuthorAlias.delete({ where: { id } });
   return { success: true };
 }
@@ -194,8 +186,6 @@ export async function deleteAuthorAlias(id: string) {
  * replacement for manual merges.
  */
 export async function seedAliasesFromOpenLibrary(canonicalName: string): Promise<{ added: number }> {
-  await ensureLibraryTablesExist();
-
   try {
     const searchRes = await fetch(`https://openlibrary.org/search/authors.json?q=${encodeURIComponent(canonicalName)}`, {
       headers: { "User-Agent": "Colophon-Library/1.0 (personal collection app)" },

@@ -5,7 +5,6 @@ import {
   resolveLocSubject,
   DEWEY_DIVISIONS,
 } from "./libraryClassification.service.js";
-import { ensureLibrarySpacesExist } from "./librarySpace.service.js";
 import { notifyWantlistMatchesForVolume } from "./libraryWantlist.service.js";
 import { checkAndNotifyNewBadges } from "./libraryAchievements.service.js";
 
@@ -65,213 +64,7 @@ export interface LibraryFilterOptions {
   offset?: number;
 }
 
-// Auto-create SQLite / PostgreSQL tables if not present
-export async function ensureLibraryTablesExist(): Promise<void> {
-  try {
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "LibraryShelfLocation" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "roomName" TEXT NOT NULL,
-        "bookcaseName" TEXT NOT NULL,
-        "shelfName" TEXT NOT NULL,
-        "fullLocationLabel" TEXT NOT NULL,
-        "description" TEXT,
-        "capacity" INTEGER DEFAULT 30,
-        "storeId" TEXT,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "LibraryVolume" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "isbn" TEXT NOT NULL,
-        "title" TEXT NOT NULL,
-        "author" TEXT,
-        "publisher" TEXT,
-        "publishYear" TEXT,
-        "description" TEXT,
-        "coverUrl" TEXT,
-        "deweyDecimal" TEXT,
-        "deweyCategory" TEXT,
-        "locClassification" TEXT,
-        "lccn" TEXT,
-        "oclcNumber" TEXT,
-        "subjects" TEXT,
-        "pageCount" INTEGER,
-        "bindingFormat" TEXT,
-        "language" TEXT DEFAULT 'English',
-        "roomName" TEXT,
-        "bookcaseName" TEXT,
-        "shelfName" TEXT,
-        "shelfLocationId" TEXT,
-        "replacementValue" REAL NOT NULL DEFAULT 0.0,
-        "acquisitionPrice" REAL,
-        "acquisitionDate" DATETIME,
-        "readingStatus" TEXT NOT NULL DEFAULT 'UNREAD',
-        "rating" INTEGER,
-        "personalNotes" TEXT,
-        "exLibrisTags" TEXT,
-        "listingStatus" TEXT NOT NULL DEFAULT 'COLLECTION_ONLY',
-        "askingPrice" REAL,
-        "minimumOffer" REAL,
-        "tradePreferences" TEXT,
-        "isLoaned" BOOLEAN NOT NULL DEFAULT false,
-        "borrowerName" TEXT,
-        "borrowerContact" TEXT,
-        "loanDate" DATETIME,
-        "dueDate" DATETIME,
-        "returnDate" DATETIME,
-        "storeId" TEXT,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "LibraryOffer" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "volumeId" TEXT NOT NULL,
-        "offerType" TEXT NOT NULL DEFAULT 'CASH',
-        "offererType" TEXT NOT NULL DEFAULT 'COLLECTOR',
-        "offererId" TEXT,
-        "offererName" TEXT NOT NULL,
-        "offererEmail" TEXT NOT NULL,
-        "offererStoreName" TEXT,
-        "cashOfferAmount" REAL,
-        "offeredTradeItemsJson" TEXT,
-        "notes" TEXT,
-        "status" TEXT NOT NULL DEFAULT 'PENDING',
-        "counterAmount" REAL,
-        "counterNotes" TEXT,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "LibraryNotification" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "title" TEXT NOT NULL,
-        "detail" TEXT NOT NULL,
-        "type" TEXT NOT NULL DEFAULT 'CATALOG',
-        "read" BOOLEAN NOT NULL DEFAULT false,
-        "actionUrl" TEXT,
-        "storeId" TEXT,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    await prisma.$executeRawUnsafe(`
-      CREATE INDEX IF NOT EXISTS "LibraryNotification_storeId_createdAt_idx" ON "LibraryNotification"("storeId", "createdAt");
-    `);
-
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "LibraryNote" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "volumeId" TEXT NOT NULL,
-        "quoteText" TEXT,
-        "personalNote" TEXT,
-        "pageNumber" TEXT,
-        "citationText" TEXT,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "LibraryOfferMessage" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "offerId" TEXT NOT NULL,
-        "senderRole" TEXT NOT NULL,
-        "senderName" TEXT NOT NULL,
-        "body" TEXT NOT NULL,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    await prisma.$executeRawUnsafe(`
-      CREATE INDEX IF NOT EXISTS "LibraryOfferMessage_offerId_createdAt_idx" ON "LibraryOfferMessage"("offerId", "createdAt");
-    `);
-
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "LibraryAuthorAlias" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "alias" TEXT NOT NULL,
-        "canonicalName" TEXT NOT NULL,
-        "source" TEXT NOT NULL DEFAULT 'MANUAL',
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    await prisma.$executeRawUnsafe(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "LibraryAuthorAlias_alias_key" ON "LibraryAuthorAlias"("alias");
-    `);
-    await prisma.$executeRawUnsafe(`
-      CREATE INDEX IF NOT EXISTS "LibraryAuthorAlias_canonicalName_idx" ON "LibraryAuthorAlias"("canonicalName");
-    `);
-
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "LibraryBadgeAward" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "badgeId" TEXT NOT NULL,
-        "storeId" TEXT,
-        "awardedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    // Badges used to be a single global award (bare unique on badgeId); now per-store.
-    await prisma.$executeRawUnsafe(`DROP INDEX IF EXISTS "LibraryBadgeAward_badgeId_key";`).catch(() => null);
-    await prisma.$executeRawUnsafe(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "LibraryBadgeAward_storeId_badgeId_key" ON "LibraryBadgeAward"("storeId", "badgeId");
-    `);
-
-    // Shelf names used to be unique app-wide; now unique per store.
-    await prisma.$executeRawUnsafe(`DROP INDEX IF EXISTS "LibraryShelfLocation_roomName_bookcaseName_shelfName_key";`).catch(() => null);
-    await prisma.$executeRawUnsafe(`
-      CREATE UNIQUE INDEX IF NOT EXISTS "LibraryShelfLocation_storeId_roomName_bookcaseName_shelfName_key" ON "LibraryShelfLocation"("storeId", "roomName", "bookcaseName", "shelfName");
-    `).catch(() => null);
-
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "LibraryWantlistItem" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "title" TEXT NOT NULL,
-        "author" TEXT,
-        "isbn" TEXT,
-        "notes" TEXT,
-        "maxPrice" REAL,
-        "librarySpaceId" TEXT,
-        "status" TEXT NOT NULL DEFAULT 'ACTIVE',
-        "storeId" TEXT,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Dynamically ensure new columns exist in LibraryVolume
-    const migrations = [
-      `ALTER TABLE "LibraryVolume" ADD COLUMN "isSigned" BOOLEAN NOT NULL DEFAULT 0;`,
-      `ALTER TABLE "LibraryVolume" ADD COLUMN "isFirstEdition" BOOLEAN NOT NULL DEFAULT 0;`,
-      `ALTER TABLE "LibraryVolume" ADD COLUMN "isFirstPrinting" BOOLEAN NOT NULL DEFAULT 0;`,
-      `ALTER TABLE "LibraryVolume" ADD COLUMN "rareMarketValue" REAL;`,
-      `ALTER TABLE "LibraryVolume" ADD COLUMN "valuationNotes" TEXT;`,
-      `ALTER TABLE "LibraryVolume" ADD COLUMN "listingStatus" TEXT NOT NULL DEFAULT 'COLLECTION_ONLY';`,
-      `ALTER TABLE "LibraryVolume" ADD COLUMN "askingPrice" REAL;`,
-      `ALTER TABLE "LibraryVolume" ADD COLUMN "minimumOffer" REAL;`,
-      `ALTER TABLE "LibraryVolume" ADD COLUMN "tradePreferences" TEXT;`,
-      `ALTER TABLE "LibraryVolume" ADD COLUMN "condition" TEXT NOT NULL DEFAULT 'VERY_GOOD';`,
-      `ALTER TABLE "LibraryNotification" ADD COLUMN "storeId" TEXT;`,
-      `ALTER TABLE "LibraryBadgeAward" ADD COLUMN "storeId" TEXT;`,
-    ];
-
-    for (const sql of migrations) {
-      await prisma.$executeRawUnsafe(sql).catch(() => null);
-    }
-  } catch (err) {
-    console.warn("Library tables ensure warning:", err);
-  }
-}
-
 export async function createLibraryVolume(input: CreateLibraryVolumeInput) {
-  await ensureLibraryTablesExist();
-
   // If Dewey / LOC or metadata is missing, auto-enrich via our classification engine
   let enrichment = null;
   if (!input.title || !input.deweyDecimal || !input.locClassification || !input.coverUrl) {
@@ -385,7 +178,6 @@ export async function scanAndIntakeVolume(
   shelfLocationId?: string | null,
   customData?: Partial<CreateLibraryVolumeInput>
 ) {
-  await ensureLibraryTablesExist();
   const enrichment = await enrichLibraryClassification(isbn);
 
   return createLibraryVolume({
@@ -423,8 +215,6 @@ export async function scanAndIntakeVolume(
 }
 
 export async function listLibraryVolumes(filters: LibraryFilterOptions) {
-  await ensureLibraryTablesExist();
-
   const where: Record<string, any> = { storeId: filters.storeId };
 
   if (filters.query) {
@@ -488,7 +278,6 @@ export async function listLibraryVolumes(filters: LibraryFilterOptions) {
 }
 
 export async function getLibraryVolume(id: string, storeId: string) {
-  await ensureLibraryTablesExist();
   return prisma.libraryVolume.findFirst({
     where: { id, storeId },
     include: { shelfLocation: true },
@@ -496,8 +285,6 @@ export async function getLibraryVolume(id: string, storeId: string) {
 }
 
 export async function updateLibraryVolume(id: string, storeId: string, data: Partial<CreateLibraryVolumeInput>) {
-  await ensureLibraryTablesExist();
-
   const existing = await prisma.libraryVolume.findFirst({ where: { id, storeId } });
   if (!existing) return null;
 
@@ -566,16 +353,12 @@ export async function updateLibraryVolume(id: string, storeId: string, data: Par
 }
 
 export async function deleteLibraryVolume(id: string, storeId: string) {
-  await ensureLibraryTablesExist();
   const existing = await prisma.libraryVolume.findFirst({ where: { id, storeId } });
   if (!existing) return null;
-  await prisma.$executeRawUnsafe(`DELETE FROM "LibraryOffer" WHERE "volumeId" = ?`, id).catch(() => null);
-  await prisma.$executeRawUnsafe(`DELETE FROM "LibraryLoan" WHERE "volumeId" = ?`, id).catch(() => null);
   return prisma.libraryVolume.delete({ where: { id } });
 }
 
 export async function bulkDeleteLibraryVolumes(ids: string[], storeId: string) {
-  await ensureLibraryTablesExist();
   if (!Array.isArray(ids) || ids.length === 0) {
     return { count: 0 };
   }
@@ -584,10 +367,6 @@ export async function bulkDeleteLibraryVolumes(ids: string[], storeId: string) {
   ).map((v) => v.id);
   if (ownedIds.length === 0) {
     return { count: 0 };
-  }
-  for (const id of ownedIds) {
-    await prisma.$executeRawUnsafe(`DELETE FROM "LibraryOffer" WHERE "volumeId" = ?`, id).catch(() => null);
-    await prisma.$executeRawUnsafe(`DELETE FROM "LibraryLoan" WHERE "volumeId" = ?`, id).catch(() => null);
   }
   return prisma.libraryVolume.deleteMany({
     where: {
@@ -598,8 +377,6 @@ export async function bulkDeleteLibraryVolumes(ids: string[], storeId: string) {
 
 // Shelves Management
 export async function listShelfLocations(storeId: string) {
-  await ensureLibraryTablesExist();
-
   const locations = await prisma.libraryShelfLocation.findMany({
     where: { storeId },
     include: {
@@ -637,7 +414,6 @@ export async function createShelfLocation(input: {
   capacity?: number;
   storeId: string;
 }) {
-  await ensureLibraryTablesExist();
   const room = input.roomName.trim();
   const bookcase = input.bookcaseName.trim();
   const shelf = input.shelfName.trim();
@@ -669,7 +445,6 @@ export async function createShelfLocation(input: {
 }
 
 export async function deleteShelfLocation(id: string, storeId: string) {
-  await ensureLibraryTablesExist();
   const existing = await prisma.libraryShelfLocation.findFirst({ where: { id, storeId } });
   if (!existing) return null;
   // Unlink volumes first
@@ -688,7 +463,6 @@ export async function loanVolume(
   borrowerContact?: string | null,
   dueDate?: Date | string | null
 ) {
-  await ensureLibraryTablesExist();
   const existing = await prisma.libraryVolume.findFirst({ where: { id: volumeId, storeId } });
   if (!existing) return null;
   return prisma.libraryVolume.update({
@@ -705,7 +479,6 @@ export async function loanVolume(
 }
 
 export async function returnVolume(volumeId: string, storeId: string) {
-  await ensureLibraryTablesExist();
   const existing = await prisma.libraryVolume.findFirst({ where: { id: volumeId, storeId } });
   if (!existing) return null;
   return prisma.libraryVolume.update({
@@ -723,8 +496,6 @@ export async function returnVolume(volumeId: string, storeId: string) {
 
 // Library Dashboard Summary
 export async function getLibraryDashboardSummary(storeId: string) {
-  await ensureLibraryTablesExist();
-
   const [volumes, shelves] = await Promise.all([
     prisma.libraryVolume.findMany({
       where: { storeId },
@@ -808,8 +579,6 @@ export async function getLibraryDashboardSummary(storeId: string) {
 
 // Insurance & Estate Appraisal Report
 export async function generateValuationReport(storeId: string) {
-  await ensureLibraryTablesExist();
-
   const volumes = await prisma.libraryVolume.findMany({
     where: { storeId },
     include: { shelfLocation: true },

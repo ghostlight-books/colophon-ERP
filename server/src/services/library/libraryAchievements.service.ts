@@ -1,5 +1,4 @@
 import { prisma } from "../../config/database.js";
-import { ensureLibraryTablesExist } from "./libraryVolume.service.js";
 
 export interface LibraryAchievementStats {
   totalVolumes: number;
@@ -18,8 +17,6 @@ export interface LibraryAchievementStats {
 // widget) rather than overloading it -- these are two different concerns
 // that happen to read from the same tables.
 export async function getLibraryAchievementStats(storeId: string): Promise<LibraryAchievementStats> {
-  await ensureLibraryTablesExist();
-
   const [totalVolumes, classifiedDeweyCount, allVolumes, completedTradesCount, fulfilledWantlistCount] =
     await Promise.all([
       prisma.libraryVolume.count({ where: { storeId } }),

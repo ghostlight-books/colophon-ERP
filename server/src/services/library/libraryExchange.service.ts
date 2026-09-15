@@ -1,5 +1,4 @@
 import { prisma } from "../../config/database.js";
-import { ensureLibraryTablesExist } from "./libraryVolume.service.js";
 
 export interface CreateOfferInput {
   volumeId: string;
@@ -31,8 +30,6 @@ export interface ExchangeMarketplaceFilters {
 
 // 1. Browse Public/Community Library Marketplace (titles open for trade or offers)
 export async function listExchangeMarketplace(filters: ExchangeMarketplaceFilters = {}) {
-  await ensureLibraryTablesExist();
-
   const whereClause: any = {
     listingStatus: {
       in: filters.status ? [filters.status] : ["ALLOW_OFFERS", "OPEN_FOR_TRADE", "FOR_SALE"],
@@ -74,8 +71,6 @@ export async function listExchangeMarketplace(filters: ExchangeMarketplaceFilter
 
 // 2. Submit a Cash or Trade Offer on a Library Volume
 export async function submitLibraryOffer(input: CreateOfferInput, offererStoreId: string) {
-  await ensureLibraryTablesExist();
-
   const volume = await prisma.libraryVolume.findUnique({
     where: { id: input.volumeId },
   });
@@ -125,13 +120,6 @@ export async function submitLibraryOffer(input: CreateOfferInput, offererStoreId
 
 // 3. List all incoming offers for the current user's library
 export async function listIncomingLibraryOffers(storeId: string) {
-  await ensureLibraryTablesExist();
-
-  // Clean up any orphaned offers from deleted volumes
-  await prisma.$executeRawUnsafe(
-    `DELETE FROM "LibraryOffer" WHERE "volumeId" NOT IN (SELECT "id" FROM "LibraryVolume")`
-  ).catch(() => null);
-
   const offers = await prisma.libraryOffer.findMany({
     where: { volume: { storeId } },
     orderBy: { createdAt: "desc" },
@@ -160,8 +148,6 @@ export async function listIncomingLibraryOffers(storeId: string) {
 
 // 4. Respond to an Offer (Accept, Counter, Decline, Complete)
 export async function respondToLibraryOffer(input: RespondOfferInput, storeId: string) {
-  await ensureLibraryTablesExist();
-
   const offer = await prisma.libraryOffer.findUnique({
     where: { id: input.offerId },
     include: { volume: true },
@@ -237,7 +223,6 @@ async function assertOfferParticipant(offerId: string, storeId: string) {
 }
 
 export async function listOfferMessages(offerId: string, storeId: string) {
-  await ensureLibraryTablesExist();
   const offer = await assertOfferParticipant(offerId, storeId);
   if (!offer) return null;
   return prisma.libraryOfferMessage.findMany({
@@ -247,8 +232,6 @@ export async function listOfferMessages(offerId: string, storeId: string) {
 }
 
 export async function sendOfferMessage(input: SendOfferMessageInput, storeId: string) {
-  await ensureLibraryTablesExist();
-
   const offer = await assertOfferParticipant(input.offerId, storeId);
   if (!offer) {
     throw new Error(`Offer with ID ${input.offerId} not found.`);
@@ -283,8 +266,6 @@ export async function sendOfferMessage(input: SendOfferMessageInput, storeId: st
 
 // 5. Get Notifications for Library
 export async function getLibraryNotifications(storeId: string, limit = 20) {
-  await ensureLibraryTablesExist();
-
   const notifications = await prisma.libraryNotification.findMany({
     where: { storeId },
     orderBy: { createdAt: "desc" },
@@ -295,7 +276,6 @@ export async function getLibraryNotifications(storeId: string, limit = 20) {
 }
 
 export async function markLibraryNotificationRead(id: string, storeId: string) {
-  await ensureLibraryTablesExist();
   const { count } = await prisma.libraryNotification.updateMany({
     where: { id, storeId },
     data: { read: true },
@@ -304,7 +284,6 @@ export async function markLibraryNotificationRead(id: string, storeId: string) {
 }
 
 export async function markAllLibraryNotificationsRead(storeId: string) {
-  await ensureLibraryTablesExist();
   return prisma.libraryNotification.updateMany({
     where: { read: false, storeId },
     data: { read: true },
@@ -313,8 +292,6 @@ export async function markAllLibraryNotificationsRead(storeId: string) {
 
 // 6. Comprehensive Collection Health & Insights (distinct from Store Health)
 export async function getLibraryCollectionHealth(storeId: string) {
-  await ensureLibraryTablesExist();
-
   const [totalVolumes, classifiedDewey, classifiedLoc, loanedVolumes, openOffers, unreadNotes, allVolumes] =
     await Promise.all([
       prisma.libraryVolume.count({ where: { storeId } }),
